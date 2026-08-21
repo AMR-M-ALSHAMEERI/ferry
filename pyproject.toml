@@ -1,0 +1,63 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ferry-cli"
+version = "0.1.0"
+description = "Back up and migrate your local AI assistant conversation history across Claude Code, OpenAI Codex, GitHub Copilot Chat, and Google Antigravity IDE."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [{ name = "Ferry contributors" }]
+
+dependencies = [
+    "typer>=0.12",
+    "questionary>=2.0",
+    "pydantic>=2",
+    "rich>=13",
+    "httpx>=0.27",
+    "pyperclip>=1.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov",
+    "ruff",
+    "mypy",
+    "pre-commit",
+]
+
+[project.scripts]
+ferry = "ferry.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ferry"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["spikes", ".private"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = ["ferry.core.*", "ferry.ucs.*"]
+strict = true
+
+[[tool.mypy.overrides]]
+module = ["ferry.adapters.*"]
+disallow_untyped_defs = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers"
+
+[tool.coverage.run]
+source = ["src/ferry"]

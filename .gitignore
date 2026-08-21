@@ -1,0 +1,66 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Testing / tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# ===== Ferry-specific: DATA SAFETY =====
+# Never commit real conversation data or bundles
+*.zip
+*.tar.gz
+*.pb
+*.jsonl
+*.vscdb
+*.vscdb-wal
+*.vscdb-shm
+*.vscdb.backup
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.db-wal
+*.db-shm
+*.pbtxt
+rollout-*.jsonl
+
+# Spike/throwaway probe code — ENTIRE folder is local-only (human decision 2026-08-21).
+# These scripts read real conversation directories; they are never committed.
+spikes/
+
+# Local config that may contain API keys
+.ferry/
+config.json
+.env
+
+# Planning / progress / spike-report docs — local-only by human decision (2026-08-21).
+# PLAN.md, PROGRESS.md, SPIKE-FINDINGS.md and anything else about HOW the project is
+# being built stay out of git. Only the project's own source ships.
+.private/
+PLAN.md
+PROGRESS.md
+SPIKE-FINDINGS.md
+
+# Explicitly allow curated, audited test fixtures
+!tests/fixtures/**/*.jsonl
+!tests/fixtures/**/*.pb
