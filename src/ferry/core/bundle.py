@@ -1,0 +1,282 @@
+"""Bundle creation, reading, packing and validation, per PLAN.md §3.3.
+
+A bundle is a directory while it is being built, and a zip once packed:
+
+    ferry-bundle-<timestamp>.zip
+    manifest.json
+    conversations/<uuid>.json
+    attachments/<conversation-uuid>/<attachment-uuid>.<ext>
+    source_raw/<uuid>.bin
+
+Writes use the atomic tmp+rename pattern required by PLAN.md §6.3 so an
+interrupted or disk-full write cannot leave a half-written file in place.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import shutil
+import zipfile
+from pathlib import Path
+from uuid import UUID
+
+from pydantic import ValidationError
+
+from ferry.core.manifest import Manifest
+from ferry.ucs import Attachment, Conversation
+
+MANIFEST_NAME = "manifest.json"
+CONVERSATIONS_DIR = "conversations"
+ATTACHMENTS_DIR = "attachments"
+SOURCE_RAW_DIR = "source_raw"
+
+
+class BundleError(Exception):
+    """Raised when a bundle cannot be created, read, or written."""
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _atomic_write_bytes(dest: Path, data: bytes) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(dest.name + ".tmp")
+    with tmp.open("wb") as fh:
+        fh.write(data)
+        fh.flush()
+        os.fsync(fh.fileno())
+    tmp.replace(dest)
+
+
+class Bundle:
+    """A Ferry bundle backed by a directory on disk."""
+
+    def __init__(self, root: Path, manifest: Manifest) -> None:
+        self.root = root
+        self.manifest = manifest
+
+    # ---------- construction ----------
+
+    @classmethod
+    def create(cls, root: Path, manifest: Manifest, *, force: bool = False) -> Bundle:
+        """Create a new bundle directory. Refuses to clobber an existing one without force."""
+        if root.exists() and any(root.iterdir()):
+            if not force:
+                raise BundleError(
+                    f"{root} already exists and is not empty (pass force=True to reuse)"
+                )
+        root.mkdir(parents=True, exist_ok=True)
+        (root / CONVERSATIONS_DIR).mkdir(exist_ok=True)
+        bundle = cls(root, manifest)
+        bundle._write_manifest()
+        return bundle
+
+    @classmethod
+    def open(cls, root: Path) -> Bundle:
+        """Open an existing bundle directory."""
+        manifest_path = root / MANIFEST_NAME
+        if not manifest_path.is_file():
+            raise BundleError(f"no {MANIFEST_NAME} in {root} — not a bundle")
+        try:
+            manifest = Manifest.model_validate_json(manifest_path.read_bytes())
+        except ValidationError as exc:
+            raise BundleError(f"{MANIFEST_NAME} is not a valid manifest: {exc}") from exc
+        return cls(root, manifest)
+
+    # ---------- writing ----------
+
+    def _write_manifest(self) -> None:
+        _atomic_write_bytes(
+            self.root / MANIFEST_NAME,
+            self.manifest.model_dump_json(indent=2).encode("utf-8"),
+        )
+
+    def conversation_path(self, conversation_id: UUID) -> Path:
+        return self.root / CONVERSATIONS_DIR / f"{conversation_id}.json"
+
+    def has_conversation(self, conversation_id: UUID) -> bool:
+        """Used by adapters to skip already-written files when resuming an export."""
+        return self.conversation_path(conversation_id).is_file()
+
+    def add_conversation(self, conversation: Conversation) -> Path:
+        dest = self.conversation_path(conversation.id)
+        _atomic_write_bytes(dest, conversation.model_dump_json(indent=2).encode("utf-8"))
+        if conversation.source_tool not in self.manifest.tools_included:
+            self.manifest.tools_included.append(conversation.source_tool)
+        self.manifest.conversation_count = len(self.list_conversations())
+        self._write_manifest()
+        return dest
+
+    def add_attachment(self, conversation_id: UUID, source: Path, attachment: Attachment) -> Path:
+        """Copy an attachment into the bundle and verify it landed intact.
+
+        The caller supplies the Attachment record (it belongs to the Conversation);
+        this writes the bytes to the bundle_path that record points at.
+        """
+        if not source.is_file():
+            raise BundleError(f"attachment source does not exist: {source}")
+        expected_dir = f"{ATTACHMENTS_DIR}/{conversation_id}/"
+        if not attachment.bundle_path.startswith(expected_dir):
+            raise BundleError(
+                f"attachment bundle_path {attachment.bundle_path!r} "
+                f"does not sit under {expected_dir!r}"
+            )
+        dest = self._resolve_inside(attachment.bundle_path)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dest.with_name(dest.name + ".tmp")
+        shutil.copyfile(source, tmp)
+        tmp.replace(dest)
+        actual = sha256_file(dest)
+        if actual != attachment.sha256:
+            raise BundleError(
+                f"attachment {attachment.id} checksum mismatch after copy: "
+                f"record says {attachment.sha256}, bytes hash to {actual}"
+            )
+        return dest
+
+    # ---------- reading ----------
+
+    def list_conversations(self) -> list[UUID]:
+        conv_dir = self.root / CONVERSATIONS_DIR
+        if not conv_dir.is_dir():
+            return []
+        ids: list[UUID] = []
+        for path in sorted(conv_dir.glob("*.json")):
+            try:
+                ids.append(UUID(path.stem))
+            except ValueError:
+                continue
+        return ids
+
+    def load_conversation(self, conversation_id: UUID) -> Conversation:
+        path = self.conversation_path(conversation_id)
+        if not path.is_file():
+            raise BundleError(f"conversation {conversation_id} not in bundle")
+        try:
+            return Conversation.model_validate_json(path.read_bytes())
+        except ValidationError as exc:
+            raise BundleError(f"conversation {conversation_id} is not valid UCS: {exc}") from exc
+
+    # ---------- validation ----------
+
+    def validate(self) -> list[str]:
+        """Check the bundle end to end. Returns a list of problems; empty means valid.
+
+        Returns problems rather than raising so the CLI can show every fault at once
+        instead of one per run.
+        """
+        problems: list[str] = []
+
+        manifest_path = self.root / MANIFEST_NAME
+        if not manifest_path.is_file():
+            return [f"missing {MANIFEST_NAME}"]
+
+        conversation_ids = self.list_conversations()
+        if self.manifest.conversation_count != len(conversation_ids):
+            problems.append(
+                f"manifest says {self.manifest.conversation_count} conversations, "
+                f"found {len(conversation_ids)}"
+            )
+
+        for path in sorted((self.root / CONVERSATIONS_DIR).glob("*.json")):
+            try:
+                UUID(path.stem)
+            except ValueError:
+                problems.append(f"{path.name}: filename is not a UUID")
+                continue
+
+        for conversation_id in conversation_ids:
+            try:
+                conversation = self.load_conversation(conversation_id)
+            except BundleError as exc:
+                problems.append(str(exc))
+                continue
+
+            if conversation.id != conversation_id:
+                problems.append(
+                    f"{conversation_id}.json contains id {conversation.id} — "
+                    "filename and id disagree"
+                )
+            if conversation.source_tool not in self.manifest.tools_included:
+                problems.append(
+                    f"{conversation_id}: source_tool {conversation.source_tool!r} "
+                    "not listed in manifest.tools_included"
+                )
+            problems.extend(self._validate_attachments(conversation))
+
+        return problems
+
+    def _validate_attachments(self, conversation: Conversation) -> list[str]:
+        problems: list[str] = []
+        for attachment in conversation.attachments:
+            try:
+                path = self._resolve_inside(attachment.bundle_path)
+            except BundleError as exc:
+                problems.append(f"{conversation.id}: {exc}")
+                continue
+            if not path.is_file():
+                problems.append(
+                    f"{conversation.id}: attachment {attachment.id} "
+                    f"missing at {attachment.bundle_path}"
+                )
+                continue
+            actual = sha256_file(path)
+            if actual != attachment.sha256:
+                problems.append(
+                    f"{conversation.id}: attachment {attachment.id} checksum mismatch "
+                    f"(recorded {attachment.sha256}, actual {actual})"
+                )
+        return problems
+
+    def _resolve_inside(self, relative: str) -> Path:
+        """Resolve a bundle-relative path, refusing anything that escapes the bundle root."""
+        root = self.root.resolve()
+        candidate = (root / relative).resolve()
+        if candidate != root and root not in candidate.parents:
+            raise BundleError(f"path {relative!r} escapes the bundle root")
+        return candidate
+
+    # ---------- packing ----------
+
+    def pack(self, dest: Path, *, force: bool = False) -> Path:
+        """Zip the bundle directory. Refuses to overwrite without force (PLAN.md §6.1)."""
+        if dest.exists() and not force:
+            raise BundleError(f"{dest} already exists (pass force=True to overwrite)")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dest.with_name(dest.name + ".tmp")
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
+            for path in sorted(self.root.rglob("*")):
+                if path.is_file() and not path.name.endswith(".tmp"):
+                    zf.write(path, path.relative_to(self.root).as_posix())
+        tmp.replace(dest)
+        return dest
+
+    @classmethod
+    def unpack(cls, archive: Path, dest_root: Path) -> Bundle:
+        """Extract a packed bundle and open it.
+
+        Rejects absolute paths and traversal entries rather than trusting the archive.
+        """
+        if not zipfile.is_zipfile(archive):
+            raise BundleError(f"{archive} is not a zip file")
+        dest_root.mkdir(parents=True, exist_ok=True)
+        resolved_root = dest_root.resolve()
+        with zipfile.ZipFile(archive) as zf:
+            for name in zf.namelist():
+                target = (resolved_root / name).resolve()
+                if resolved_root not in target.parents and target != resolved_root:
+                    raise BundleError(f"refusing to extract {name!r}: escapes destination")
+            zf.extractall(resolved_root)
+        return cls.open(dest_root)
+
+
+def json_roundtrip_equal(a: Conversation, b: Conversation) -> bool:
+    """True when two conversations serialise identically. Used by round-trip tests."""
+    return bool(json.loads(a.model_dump_json()) == json.loads(b.model_dump_json()))

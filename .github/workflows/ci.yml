@@ -38,3 +38,8 @@ jobs:
 
       - name: Test (pytest)
         run: pytest -v
+
+      # PLAN.md §6.8.1: core/ and ucs/ have a hard 90% floor. Enforced separately
+      # from the adapters (80% floor) because coverage thresholds are global per run.
+      - name: Coverage floor — core + ucs (90%)
+        run: pytest --cov=ferry.core --cov=ferry.ucs --cov-fail-under=90 -q

@@ -10,7 +10,16 @@ repos:
     rev: v1.11.2
     hooks:
       - id: mypy
-        additional_dependencies: [pydantic>=2]
+        # mypy runs in its own isolated env, so every runtime dep whose types we
+        # rely on must be listed here or it reports false import-not-found errors.
+        # Keep in sync with [project.dependencies] in pyproject.toml.
+        additional_dependencies:
+          - pydantic>=2
+          - typer>=0.12
+          - questionary>=2.0
+          - rich>=13
+          - httpx>=0.27
+          - pyperclip>=1.9
         args: [src/ferry]
         pass_filenames: false
 

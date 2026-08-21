@@ -1,4 +1,4 @@
-.PHONY: install lint format typecheck test check clean
+.PHONY: install lint format typecheck test check clean verify-m1
 
 install:
 	pip install -e ".[dev]"
@@ -14,10 +14,13 @@ typecheck:
 	mypy src/
 
 test:
-	pytest -v
+	pytest -v --basetemp=.pytest-tmp
 
 check: lint typecheck test
 
+verify-m1:
+	python scripts/selfcheck/verify_m1.py
+
 clean:
-	rm -rf .pytest_cache .mypy_cache .ruff_cache htmlcov .coverage dist build
+	rm -rf .pytest_cache .mypy_cache .ruff_cache .pytest-tmp htmlcov .coverage dist build
 	find . -type d -name __pycache__ -exec rm -rf {} +

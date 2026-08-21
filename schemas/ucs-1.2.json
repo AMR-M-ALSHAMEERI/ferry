@@ -1,0 +1,428 @@
+{
+  "$defs": {
+    "Attachment": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "filename": {
+          "title": "Filename",
+          "type": "string"
+        },
+        "mime_type": {
+          "title": "Mime Type",
+          "type": "string"
+        },
+        "bundle_path": {
+          "title": "Bundle Path",
+          "type": "string"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "filename",
+        "mime_type",
+        "bundle_path",
+        "sha256"
+      ],
+      "title": "Attachment",
+      "type": "object"
+    },
+    "Message": {
+      "additionalProperties": false,
+      "properties": {
+        "role": {
+          "enum": [
+            "user",
+            "assistant",
+            "system",
+            "tool"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "content": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "text": "#/$defs/TextBlock",
+                "thinking": "#/$defs/ThinkingBlock",
+                "tool_result": "#/$defs/ToolResultBlock",
+                "tool_use": "#/$defs/ToolUseBlock"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/TextBlock"
+              },
+              {
+                "$ref": "#/$defs/ThinkingBlock"
+              },
+              {
+                "$ref": "#/$defs/ToolUseBlock"
+              },
+              {
+                "$ref": "#/$defs/ToolResultBlock"
+              }
+            ]
+          },
+          "title": "Content",
+          "type": "array"
+        },
+        "timestamp": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timestamp"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        }
+      },
+      "required": [
+        "role",
+        "content"
+      ],
+      "title": "Message",
+      "type": "object"
+    },
+    "Provenance": {
+      "additionalProperties": false,
+      "description": "Populated by the IMPORTING adapter when target tool != source_tool.\n\nAbsent means the conversation has only ever lived in its source_tool.\nSee PLAN.md \u00a73.2 \"never present a foreign conversation as native\".",
+      "properties": {
+        "original_tool": {
+          "enum": [
+            "claude-code",
+            "codex",
+            "copilot",
+            "antigravity"
+          ],
+          "title": "Original Tool",
+          "type": "string"
+        },
+        "imported_into": {
+          "enum": [
+            "claude-code",
+            "codex",
+            "copilot",
+            "antigravity"
+          ],
+          "title": "Imported Into",
+          "type": "string"
+        },
+        "imported_at": {
+          "format": "date-time",
+          "title": "Imported At",
+          "type": "string"
+        },
+        "ferry_version": {
+          "title": "Ferry Version",
+          "type": "string"
+        },
+        "lossy": {
+          "title": "Lossy",
+          "type": "boolean"
+        },
+        "conversion_notes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Conversion Notes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "original_tool",
+        "imported_into",
+        "imported_at",
+        "ferry_version",
+        "lossy"
+      ],
+      "title": "Provenance",
+      "type": "object"
+    },
+    "TextBlock": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "text",
+          "default": "text",
+          "title": "Type",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "TextBlock",
+      "type": "object"
+    },
+    "ThinkingBlock": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "thinking",
+          "default": "thinking",
+          "title": "Type",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "signature": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Signature"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "ThinkingBlock",
+      "type": "object"
+    },
+    "ToolResultBlock": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "tool_result",
+          "default": "tool_result",
+          "title": "Type",
+          "type": "string"
+        },
+        "tool_use_id": {
+          "title": "Tool Use Id",
+          "type": "string"
+        },
+        "output": {
+          "title": "Output"
+        }
+      },
+      "required": [
+        "tool_use_id",
+        "output"
+      ],
+      "title": "ToolResultBlock",
+      "type": "object"
+    },
+    "ToolUseBlock": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "tool_use",
+          "default": "tool_use",
+          "title": "Type",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "input": {
+          "additionalProperties": true,
+          "title": "Input",
+          "type": "object"
+        }
+      },
+      "required": [
+        "name",
+        "input"
+      ],
+      "title": "ToolUseBlock",
+      "type": "object"
+    },
+    "Workspace": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "original_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Original Path"
+        },
+        "path_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path Hash"
+        }
+      },
+      "title": "Workspace",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "ucs_version": {
+      "const": "1.2",
+      "default": "1.2",
+      "title": "Ucs Version",
+      "type": "string"
+    },
+    "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+    },
+    "source_tool": {
+      "enum": [
+        "claude-code",
+        "codex",
+        "copilot",
+        "antigravity"
+      ],
+      "title": "Source Tool",
+      "type": "string"
+    },
+    "source_tool_version": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Source Tool Version"
+    },
+    "source_id": {
+      "default": "",
+      "title": "Source Id",
+      "type": "string"
+    },
+    "title": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Title"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "updated_at": {
+      "format": "date-time",
+      "title": "Updated At",
+      "type": "string"
+    },
+    "workspace": {
+      "$ref": "#/$defs/Workspace"
+    },
+    "messages": {
+      "items": {
+        "$ref": "#/$defs/Message"
+      },
+      "title": "Messages",
+      "type": "array"
+    },
+    "attachments": {
+      "items": {
+        "$ref": "#/$defs/Attachment"
+      },
+      "title": "Attachments",
+      "type": "array"
+    },
+    "provenance": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Provenance"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "source_raw": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Source Raw"
+    }
+  },
+  "required": [
+    "id",
+    "source_tool",
+    "created_at",
+    "updated_at",
+    "workspace"
+  ],
+  "title": "Ferry Universal Conversation Schema v1.2",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

@@ -13,6 +13,7 @@ env/
 
 # Testing / tooling caches
 .pytest_cache/
+.pytest-tmp/
 .mypy_cache/
 .ruff_cache/
 .coverage
@@ -60,6 +61,10 @@ config.json
 PLAN.md
 PROGRESS.md
 SPIKE-FINDINGS.md
+
+# Acceptance checklists — local-only by human decision (2026-08-21). Same reasoning
+# as above: it's the human's own working notes while developing, not shipped docs.
+docs/ACCEPTANCE.md
 
 # Explicitly allow curated, audited test fixtures
 !tests/fixtures/**/*.jsonl
