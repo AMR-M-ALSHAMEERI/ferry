@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid5
 
-from ferry.adapters.claude_code.paths import sidecar_dir
+from ferry.adapters.claude_code.paths import basename, sidecar_dir
 from ferry.ucs import (
     Attachment,
     ContentBlock,
@@ -320,7 +320,7 @@ def read_session(path: Path) -> SessionRead:
         created_at=min(timestamps),
         updated_at=max(timestamps),
         workspace=Workspace(
-            name=Path(cwd).name if cwd else None,
+            name=basename(cwd) if cwd else None,
             original_path=cwd,
             path_hash=path.parent.name,
         ),

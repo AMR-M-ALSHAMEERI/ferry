@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid5
 
+from ferry.adapters.claude_code.paths import basename
 from ferry.ucs import Conversation, Message
 
 __all__ = [
@@ -111,7 +112,7 @@ def remap_record(record: dict[str, Any], remap: Remap) -> dict[str, Any]:
         # path being spelled the way we expect it to be.
         if remap.new_sidecar_root:
             moved = dict(result)
-            name = Path(str(result["persistedOutputPath"])).name
+            name = basename(str(result["persistedOutputPath"]))
             moved["persistedOutputPath"] = str(Path(remap.new_sidecar_root) / name)
             out["toolUseResult"] = moved
             remap.rewrites += 1

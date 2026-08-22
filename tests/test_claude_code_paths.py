@@ -21,6 +21,7 @@ import pytest
 
 from ferry.adapters.claude_code.paths import (
     MAX_PROJECT_DIR_NAME,
+    basename,
     config_root,
     mangle,
     project_dir,
@@ -181,3 +182,44 @@ def test_sidecars_sit_under_a_directory_named_for_the_session(tmp_path: Path) ->
     session = tmp_path / "11111111-1111-4111-8111-111111111111.jsonl"
     expected = tmp_path / "11111111-1111-4111-8111-111111111111" / "tool-results"
     assert sidecar_dir(session) == expected
+
+
+# --------------------------------------------------------------------------
+# basename
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("recorded", "expected"),
+    [
+        (windows("C:", "Users", "sample", "Projects", "widget"), "widget"),
+        ("/home/bob/widget", "widget"),
+        (windows("C:", "Users", "sample", "widget") + BACKSLASH, "widget"),
+        ("/home/bob/widget/", "widget"),
+        # Mixed spellings appear in the same real transcript.
+        ("C:/Users/sample" + BACKSLASH + "widget", "widget"),
+        ("plain", "plain"),
+        # Nothing but separators has no last segment; returning "" would turn a
+        # workspace name into an empty string rather than an honest oddity.
+        ("/", "/"),
+        (BACKSLASH, BACKSLASH),
+        ("", ""),
+    ],
+)
+def test_basename_reads_paths_recorded_by_any_operating_system(
+    recorded: str, expected: str
+) -> None:
+    """Regression: CI red on every Linux and macOS leg, green on Windows.
+
+    ``Path(...).name`` splits with the *host's* separators, so a Windows path
+    read on Linux has none and the whole string comes back as the "last
+    segment". It put `C:\\Users\\sample\\Projects\\widget` in a workspace name
+    and pasted an entire Windows path into a sidecar pointer.
+
+    Both cases are the normal way Ferry is used — the paths in a bundle were
+    written by the source machine and are read by the target one. This test is
+    parametrised across both spellings precisely so it can fail on either host;
+    the version it replaces used a Windows path only, which is why a Windows
+    developer could not see the bug.
+    """
+    assert basename(recorded) == expected
