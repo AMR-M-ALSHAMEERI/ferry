@@ -3,7 +3,7 @@
 This is the highest-stakes function in the adapter and the one that was blocked
 longest: two rules fit the sampled data equally well, and picking the wrong one
 misfiles every conversation without raising anything. It was settled twice over
-(PROGRESS.md §4.1) — read out of the shipped Claude Code binary, then confirmed
+(`docs/FORMATS.md`) — read out of the shipped Claude Code binary, then confirmed
 by creating a directory full of punctuation and watching what the tool named it.
 
 The expectations below are written out by hand, not produced by calling

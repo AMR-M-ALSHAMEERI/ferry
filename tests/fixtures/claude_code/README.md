@@ -17,6 +17,6 @@ reader can get wrong. What makes them safe to commit is that the content is not.
 | `empty.jsonl` | Metadata records only, no messages. A session that must be skipped, not exported as empty |
 
 Record and block field names were taken from the census recorded in
-PROGRESS.md §4.1 — notably `thinking` carries its text under `thinking` (not
+`docs/FORMATS.md` — notably `thinking` carries its text under `thinking` (not
 `text`), `tool_result` carries its payload under `content` (not `output`), and
 `tool_use` has an `id` that UCS has nowhere to put.

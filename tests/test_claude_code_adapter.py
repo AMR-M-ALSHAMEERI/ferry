@@ -619,7 +619,7 @@ def test_rebuilding_reproduces_every_block_type_in_claude_codes_own_spelling(
 ) -> None:
     """The rebuilt file has to be readable by Claude Code, not merely by Ferry.
 
-    Every field name here is asserted against the census in PROGRESS.md §4.1 --
+    Every field name here is asserted against the census in ``docs/FORMATS.md`` --
     ``thinking`` under ``thinking``, the tool payload under ``content`` -- since
     writing UCS's own spelling back out would produce a file the tool loads
     without the blocks it cannot recognise.

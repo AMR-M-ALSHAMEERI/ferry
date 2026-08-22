@@ -5,7 +5,7 @@ exactly right: it is derived from the working directory by a lossy substitution,
 so getting it wrong misfiles every conversation without ever raising an error.
 
 The rule below is not a guess. It was read out of the shipped Claude Code
-binary (2.1.237) and then confirmed empirically -- see PROGRESS.md section 4.1.
+binary (2.1.237) and then confirmed empirically -- see ``docs/FORMATS.md``.
 Both sources agree:
 
     dirName(cwd) = cwd.replace(/[^a-zA-Z0-9]/g, "-")            when short enough
