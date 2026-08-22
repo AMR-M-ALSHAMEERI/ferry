@@ -174,9 +174,17 @@ def _crossing(*, inbound: bool, ascii_only: bool) -> tuple[str, ...]:
     """A hull crossing the cell, wake trailing behind it.
 
     The hull genuinely travels — it enters one side, crosses, and leaves the
-    other — because a ferry that holds station is not making a crossing. The
-    wake trails at :data:`WAKE_PERIOD` spacing behind wherever the hull has got
-    to, so it lengthens as the crossing proceeds.
+    other — because a ferry that holds station is not making a crossing.
+
+    The wake is a **decaying trail**, not the periodic pattern
+    :func:`wake_row` draws under the wordmark, and the difference is physical
+    rather than decorative: the wordmark's hull is stationary with water
+    flowing past it, so its crests repeat forever, while this hull is moving
+    and leaves disturbance that settles. Spacing the trail by
+    :data:`WAKE_PERIOD` made the second crest appear from nowhere on the last
+    frame, at a distance that had no relationship to the frames before it. A
+    fresh crest directly astern and a fading one behind that holds the same
+    shape on every frame of the crossing.
 
     Alignment is preserved by the *resting* frame rather than by pinning the
     hull: only the selected row animates, so every other marker is sitting in
@@ -186,17 +194,15 @@ def _crossing(*, inbound: bool, ascii_only: bool) -> tuple[str, ...]:
         inbound: Mirror it — hull facing left, arriving from the right.
         ascii_only: Use ASCII glyphs.
     """
-    mark, gap = ("~", " ") if ascii_only else ("≈", " ")
+    fresh, faded, gap = ("~", ".", " ") if ascii_only else ("≈", "·", " ")
     hull = ("<" if ascii_only else "◂") if inbound else (">" if ascii_only else "▸")
 
     frames = []
     for position in range(ICON_CELL):
-        # Wake crests sit one period apart behind the hull; `distance` counts
-        # columns astern, so the same period that draws the wordmark's water
-        # draws this one.
-        cells = [
-            mark if (position - column) % WAKE_PERIOD == 1 else gap for column in range(position)
-        ]
+        cells = []
+        for column in range(position):
+            astern = position - column
+            cells.append(fresh if astern == 1 else faded if astern == 2 else gap)
         row = "".join(cells) + hull + gap * (ICON_CELL - position - 1)
         frames.append(row[::-1] if inbound else row)
     return tuple(frames)
@@ -241,14 +247,15 @@ MENU_MOTION: Final[dict[str, Motion]] = {
         rest=" ▃▃▃ ",
         ascii_rest=" === ",
     ),
-    # A shade ramp — light, medium, dark — which is what a palette looks like
-    # when you only have one hue. It holds still while the colour rotates
-    # through the theme, the one icon whose animation *is* its meaning.
+    # A single solid mark. It was a three-cell shade ramp, which sat directly
+    # under Compact's three-cell block bar and read as one object split over
+    # two rows. Neighbours in a menu have to differ in *shape*, not only in
+    # texture. Its animation is the colour rotating, so a lone chip is enough.
     "theme": Motion(
-        frames=(" ░▒▓ ",),
-        ascii_frames=(" .:# ",),
-        rest=" ░▒▓ ",
-        ascii_rest=" .:# ",
+        frames=("  ◆  ",),
+        ascii_frames=("  *  ",),
+        rest="  ◆  ",
+        ascii_rest="  *  ",
         styles=("primary", "accent", "success", "warning"),
     ),
     # The IEC power symbol, breathing dim to red the way a standby light does.

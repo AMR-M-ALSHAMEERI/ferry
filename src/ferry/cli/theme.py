@@ -142,7 +142,6 @@ TEXT_ONLY_GLYPHS: Final = frozenset(
     "╷╰╯"  # the ferry mark: funnel and hull
     "┏┓┗┛┣┳━╸╹╻"  # the wordmark's block letterforms
     "▸◂⏻"  # menu icons: the hulls and the power symbol
-    "░▒▓"  # menu icons: the theme shade ramp
     "▄▃▂▁"  # menu icons: the settling cargo
     "—"  # prose punctuation
 )

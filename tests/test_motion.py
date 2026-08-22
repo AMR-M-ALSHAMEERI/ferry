@@ -457,7 +457,7 @@ def test_which_menu_glyphs_are_ambiguous_width_is_visible() -> None:
         for ch in "".join(motion.frames) + motion.rest:
             if not ch.isascii() and unicodedata.east_asian_width(ch) == "A":
                 ambiguous.add(ch)
-    assert ambiguous == set("≈·▒▓▄▃▂▁"), sorted(f"U+{ord(c):04X}" for c in ambiguous)
+    assert ambiguous == set("≈·◆▄▃▂▁"), sorted(f"U+{ord(c):04X}" for c in ambiguous)
 
 
 def test_every_menu_icon_matches_the_declared_cell_width() -> None:
@@ -542,11 +542,25 @@ def test_the_wake_trails_behind_the_hull_never_ahead_of_it() -> None:
             assert ahead.strip() == "", f"{name}: wake ahead of the bow in {frame!r}"
 
 
-def test_the_crossing_lengthens_the_wake() -> None:
-    """Later in the crossing there is more water behind you."""
-    counts = [f.count("\u2248") for f in MENU_MOTION["export"].frames]
-    assert counts[0] == 0
-    assert max(counts) > 1
+def test_the_trail_keeps_its_shape_all_the_way_across() -> None:
+    """The wake used to be spaced by WAKE_PERIOD, which made a second crest
+    appear from nowhere on the final frame, at a distance unrelated to any
+    frame before it. A decaying trail looks the same at every position."""
+    shapes = {
+        frame[frame.index("\u25b8") - 2 : frame.index("\u25b8")]
+        for frame in MENU_MOTION["export"].frames
+        if frame.index("\u25b8") >= 2
+    }
+    assert shapes == {"\u00b7\u2248"}, shapes
+
+
+def test_the_trail_fades_with_distance() -> None:
+    """Fresh crest directly astern, a fainter one behind it, then nothing."""
+    frame = MENU_MOTION["export"].frames[-1]
+    index = frame.index("\u25b8")
+    assert frame[index - 1] == "\u2248"
+    assert frame[index - 2] == "\u00b7"
+    assert frame[: index - 2].strip() == ""
 
 
 def test_every_resting_icon_sits_in_the_middle_column() -> None:
@@ -557,6 +571,12 @@ def test_every_resting_icon_sits_in_the_middle_column() -> None:
         assert motion.ascii_rest[middle] != " ", f"{name}: {motion.ascii_rest!r}"
 
 
-def test_the_theme_swatch_is_a_shade_ramp() -> None:
-    """Light to dark reads as a palette even in a single hue."""
-    assert MENU_MOTION["theme"].rest.strip() == "\u2591\u2592\u2593"
+def test_the_theme_swatch_differs_in_shape_from_its_neighbour() -> None:
+    """Theme sits directly under Compact. A three-cell shade ramp above a
+    three-cell block bar read as one object split across two rows, so the two
+    have to differ in shape and not merely in texture."""
+    theme = MENU_MOTION["theme"].rest.strip()
+    compact = MENU_MOTION["compact"].rest.strip()
+    assert len(theme) == 1, theme
+    assert len(compact) > 1, compact
+    assert not set(theme) & set(compact)
