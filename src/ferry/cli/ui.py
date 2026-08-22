@@ -170,7 +170,7 @@ class UI:
         """
         icons = self.theme.icons
         table = Table.grid(padding=(0, 2))
-        table.add_column(width=len(icons.error))
+        table.add_column(width=max(len(icons.success), len(icons.absent)))
         table.add_column()
         table.add_column()
         for row in rows:
@@ -179,7 +179,10 @@ class UI:
                 name = self._style("ferry.text", row.display_name)
                 detail = self._style("ferry.accent", row.detail)
             else:
-                mark = self._style("ferry.dim", icons.error)
+                # `absent`, not `error` — a tool you simply do not have
+                # installed is information, not a failure, and an error cross
+                # against four rows reads as though something went wrong.
+                mark = self._style("ferry.dim", icons.absent)
                 name = self._style("ferry.dim", row.display_name)
                 detail = self._style("ferry.dim", row.detail)
             table.add_row(mark, name, detail)

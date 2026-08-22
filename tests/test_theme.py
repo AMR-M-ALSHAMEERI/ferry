@@ -14,6 +14,7 @@ from ferry.cli.theme import (
     DEFAULT_THEME,
     HARBOR,
     MONO,
+    TEXT_ONLY_GLYPHS,
     THEMES,
     UNICODE_ICONS,
     Capability,
@@ -74,14 +75,31 @@ def test_mono_icons_are_pure_ascii() -> None:
         assert glyph.isascii(), f"{field.name}={glyph!r} is not ASCII"
 
 
-def test_unicode_icons_carry_no_emoji_presentation() -> None:
-    """Emoji were explicitly ruled out (ledger #62). Every glyph must sit in the
-    BMP below the emoji blocks and carry no variation selector."""
+def test_every_unicode_icon_is_on_the_allow_list() -> None:
+    """Emoji were ruled out (ledger #62), but "is this an emoji?" cannot be
+    computed — the emoji-capable characters are scattered through the BMP.
+
+    Regression: the original check was `ord(ch) < 0x1F000`, which passed four
+    glyphs that carry the Unicode Emoji property and rendered as colour emoji
+    in the user's terminal — U+2714, U+2716, U+25FC and U+25FB.
+    """
     for field in dataclasses.fields(IconSet):
-        glyph = getattr(THEMES["harbor"].icons, field.name)
+        glyph = getattr(UNICODE_ICONS, field.name)
         for ch in glyph:
-            assert ord(ch) < 0x1F000, f"{field.name} uses {ch!r} from an emoji block"
-            assert ch not in "️︎", f"{field.name} carries a variation selector"
+            assert ch in TEXT_ONLY_GLYPHS, f"{field.name} uses {ch!r} (U+{ord(ch):04X})"
+
+
+@pytest.mark.parametrize("codepoint", [0x2714, 0x2716, 0x25FC, 0x25FB, 0x25B6, 0x25AA])
+def test_known_emoji_capable_glyphs_are_not_allowed(codepoint: int) -> None:
+    """The specific characters that shipped by mistake stay banned."""
+    assert chr(codepoint) not in TEXT_ONLY_GLYPHS
+
+
+def test_the_probe_covers_exactly_the_allow_list() -> None:
+    """One source of truth: anything printable must be probe-tested."""
+    from ferry.cli.theme import _UNICODE_PROBE
+
+    assert set(_UNICODE_PROBE) == set(TEXT_ONLY_GLYPHS)
 
 
 def test_tty_with_colour_detected() -> None:

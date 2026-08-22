@@ -121,6 +121,35 @@ class SelectorModel:
             self.set_filter("")
 
 
+_ANSI_NAMES: dict[str, str] = {
+    "black": "fg:ansiblack",
+    "red": "fg:ansired",
+    "green": "fg:ansigreen",
+    "yellow": "fg:ansiyellow",
+    "blue": "fg:ansiblue",
+    "magenta": "fg:ansimagenta",
+    "cyan": "fg:ansicyan",
+    "white": "fg:ansiwhite",
+    "bright_black": "fg:ansibrightblack",
+    "bright_red": "fg:ansibrightred",
+    "bright_green": "fg:ansibrightgreen",
+    "bright_yellow": "fg:ansibrightyellow",
+    "bright_blue": "fg:ansibrightblue",
+    "bright_magenta": "fg:ansibrightmagenta",
+    "bright_cyan": "fg:ansibrightcyan",
+    "bright_white": "fg:ansiwhite",
+    "default": "",
+}
+"""rich colour names mapped to prompt_toolkit's.
+
+The two libraries spell the bright colours differently — rich says
+``bright_black``, prompt_toolkit says ``ansibrightblack``. Naively prefixing
+``ansi`` produced ``ansibright_black``, which prompt_toolkit rejects with
+``ValueError: Wrong color format``. That crashed the classic theme the moment
+it was selected, since classic is the only theme using ANSI names.
+"""
+
+
 def _style_for(theme: Theme, token: str) -> str:
     """Map a theme colour token to a prompt_toolkit style string.
 
@@ -143,7 +172,7 @@ def _style_for(theme: Theme, token: str) -> str:
         return ""
     if value.startswith("#"):
         return f"fg:{value}"
-    return f"fg:ansi{value}" if value != "default" else ""
+    return _ANSI_NAMES.get(value, "")
 
 
 def _render(

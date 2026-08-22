@@ -27,12 +27,11 @@ from enum import Enum
 from typing import Final
 
 __all__ = [
-    "BRAND_MARK",
-    "BRAND_WAKE",
     "DEFAULT_THEME",
     "THEMES",
     "Capability",
     "IconSet",
+    "TEXT_ONLY_GLYPHS",
     "Theme",
     "detect_capability",
     "resolve_theme",
@@ -74,6 +73,10 @@ class IconSet:
     unselected: str
     checked: str
     unchecked: str
+    absent: str
+    """Marker for a tool that simply is not installed. Deliberately not the
+    error glyph — "you don't have Codex" is information, not a failure."""
+
     progress_fill: str
     progress_track: str
     ellipsis: str
@@ -83,20 +86,27 @@ class IconSet:
 
 
 UNICODE_ICONS: Final = IconSet(
-    success="✔",
-    error="✖",
+    success="✓",
+    error="✗",
     warning="▲",
     info="›",
     cursor="❯",
     selected="◉",
     unselected="○",
-    checked="◼",
-    unchecked="◻",
+    checked="◆",
+    unchecked="◇",
+    absent="·",
     progress_fill="━",
     progress_track="─",
     ellipsis="…",
 )
-"""Geometric BMP Unicode. No emoji presentation, no font dependency."""
+"""Geometric BMP Unicode, every glyph checked against :data:`TEXT_ONLY_GLYPHS`.
+
+Note ``✓`` (U+2713) and ``✗`` (U+2717) rather than the heavier ``✔`` (U+2714)
+and ``✖`` (U+2716): the heavy pair carry the Unicode Emoji property and many
+terminal fonts render them as colour emoji. Same reason ``◆``/``◇`` replaced
+``◼``/``◻``.
+"""
 
 ASCII_ICONS: Final = IconSet(
     success="[ok]",
@@ -108,28 +118,36 @@ ASCII_ICONS: Final = IconSet(
     unselected="( )",
     checked="[x]",
     unchecked="[ ]",
+    absent="-",
     progress_fill="=",
     progress_track="-",
     ellipsis="...",
 )
 """Pure ASCII, for log files and terminals that mangle Unicode."""
 
-BRAND_MARK: Final = "⟢"
-"""The wordmark's leading mark. Defined here rather than in ``brand`` so the
-probe below covers it — a console can carry every status icon and still lack
-this glyph."""
-
-BRAND_WAKE: Final = "≈"
-"""The wordmark's wake character."""
-
-_UNICODE_PROBE: Final = (
-    "".join(getattr(UNICODE_ICONS, f.name) for f in dataclasses.fields(IconSet))
-    + BRAND_MARK
-    + BRAND_WAKE
+TEXT_ONLY_GLYPHS: Final = frozenset(
+    "✓✗▲›❯◉○◆◇·━─…≈"  # status, cursor, progress, wake
+    "▏▕▸"  # the wordmark's crossing mark
+    "┏┓┗┛┣┳━╸╹╻"  # the wordmark's block letterforms
 )
-"""Every Unicode glyph Ferry can emit, for testing whether a stream can encode
-them. Anything new added to the interface must be added here too, or it will
-crash on a legacy console instead of degrading."""
+"""Every non-ASCII character Ferry is allowed to print.
+
+An allow-list rather than a deny-list, because "is this an emoji?" is not
+something Python can answer: `unicodedata` has no emoji property, and the
+emoji-capable characters are scattered through the BMP rather than sitting in
+one range. Four glyphs shipped in the first M2 build before this existed —
+``✔`` U+2714, ``✖`` U+2716, ``◼`` U+25FC and ``◻`` U+25FB all carry the Unicode
+Emoji property and rendered as colour emoji in the user's terminal.
+
+Adding a glyph to the interface means adding it here, and the test suite fails
+if anything reaches the screen that is not on this list.
+"""
+
+_UNICODE_PROBE: Final = "".join(sorted(TEXT_ONLY_GLYPHS))
+"""Every glyph Ferry can emit, as one string, for probing a stream's encoding.
+
+Derived from :data:`TEXT_ONLY_GLYPHS` so there is one list to maintain rather
+than two that can drift apart."""
 
 
 def supports_unicode(stream: object | None = None) -> bool:

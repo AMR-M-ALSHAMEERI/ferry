@@ -148,14 +148,19 @@ def check_wordmark_renders_in_both_glyph_modes() -> Result:
         ui = UI(theme, capability=Capability.COLOR)
         ui.console = Console(file=buf, no_color=True, width=70)
         ui.banner(animate=False)
-        lines = [line for line in buf.getvalue().splitlines() if line.strip()]
-        if len(lines) != 3:
-            return Result(False, f"{label}: expected 3 lines, got {len(lines)}")
-        if "F E R R Y" not in lines[0]:
-            return Result(False, f"{label}: name missing from first line")
-        if label == "ascii" and not buf.getvalue().isascii():
-            return Result(False, "ascii wordmark emitted a non-ASCII character")
-    return Result(True, "3 lines, unicode and ascii forms")
+        text = buf.getvalue()
+        lines = [line for line in text.splitlines() if line.strip()]
+        # three rows of mark + letterforms, then the tagline
+        if len(lines) != 4:
+            return Result(False, f"{label}: expected 4 lines, got {len(lines)}")
+        if "carry your conversations" not in lines[-1]:
+            return Result(False, f"{label}: tagline missing")
+        if label == "ascii":
+            if not text.isascii():
+                return Result(False, "ascii wordmark emitted a non-ASCII character")
+            if "F E R R Y" not in text:
+                return Result(False, "ascii wordmark lost the name")
+    return Result(True, "4 lines, unicode and ascii forms")
 
 
 def check_theme_choice_persists() -> Result:

@@ -14,7 +14,14 @@ import pytest
 
 from ferry.cli.brand import TAGLINE, build_wordmark
 from ferry.cli.prompts import SelectorItem, SelectorModel, _style_for
-from ferry.cli.theme import ASCII_ICONS, HARBOR, MONO, THEMES, UNICODE_ICONS
+from ferry.cli.theme import (
+    ASCII_ICONS,
+    HARBOR,
+    MONO,
+    TEXT_ONLY_GLYPHS,
+    THEMES,
+    UNICODE_ICONS,
+)
 from ferry.cli.themepicker import THEME_ORDER, theme_preview
 from ferry.config import load_config, read_setting, save_config, write_setting
 
@@ -115,34 +122,54 @@ def test_stop_filtering_can_keep_the_filter() -> None:
 # ---------- wordmark ----------
 
 
-def test_wordmark_uses_unicode_when_the_theme_can() -> None:
+def test_wordmark_uses_block_letters_when_the_theme_can() -> None:
     wm = build_wordmark(HARBOR)
-    assert wm.mark == "⟢"
-    assert wm.wake_char == "≈"
+    assert wm.ascii_only is False
+    assert len(wm.letter_rows) == 3
+    assert len(wm.mark_rows) == 3
     assert wm.tagline == TAGLINE
+
+
+def test_block_rows_are_all_the_same_width() -> None:
+    """Ragged rows would make the letterforms lean during the reveal."""
+    wm = build_wordmark(HARBOR)
+    assert len({len(row) for row in wm.letter_rows}) == 1
 
 
 def test_wordmark_falls_back_to_ascii_with_ascii_icons() -> None:
     """A cp1252 console gets a wordmark it can actually print."""
-    theme = dataclasses.replace(HARBOR, icons=ASCII_ICONS)
-    wm = build_wordmark(theme)
-    assert wm.mark == ">"
-    assert wm.wake_char == "~"
-    assert (wm.mark + wm.wake_char + wm.name + wm.tagline).isascii()
+    wm = build_wordmark(dataclasses.replace(HARBOR, icons=ASCII_ICONS))
+    assert wm.ascii_only is True
+    joined = "".join(wm.mark_rows) + "".join(wm.letter_rows) + wm.tagline
+    assert joined.isascii()
 
 
-def test_wake_splits_into_drawn_and_remaining() -> None:
+def test_ascii_wordmark_width_comes_from_the_widest_row() -> None:
+    """Regression: width was read from row 0, which is empty in the ASCII form,
+    so reveal() truncated everything to nothing and the name vanished."""
+    wm = build_wordmark(dataclasses.replace(HARBOR, icons=ASCII_ICONS))
+    assert wm.width == len("F E R R Y")
+    assert "F E R R Y" in "".join(wm.reveal(wm.width))
+
+
+def test_reveal_truncates_every_row_equally() -> None:
     wm = build_wordmark(HARBOR)
-    drawn, rest = wm.wake(10)
-    assert len(drawn) == 10
-    assert len(drawn) + len(rest) == wm.width
+    rows = wm.reveal(6)
+    assert {len(row) for row in rows} == {6}
 
 
-@pytest.mark.parametrize("filled", [-5, 0, 999])
-def test_wake_clamps_out_of_range_positions(filled: int) -> None:
+@pytest.mark.parametrize("columns", [-5, 0, 999])
+def test_reveal_clamps_out_of_range_positions(columns: int) -> None:
     wm = build_wordmark(HARBOR)
-    drawn, rest = wm.wake(filled)
-    assert len(drawn) + len(rest) == wm.width
+    rows = wm.reveal(columns)
+    assert all(len(row) <= wm.width for row in rows)
+
+
+def test_every_wordmark_glyph_is_on_the_allow_list() -> None:
+    wm = build_wordmark(HARBOR)
+    for ch in "".join(wm.mark_rows) + "".join(wm.letter_rows):
+        if not ch.isascii():
+            assert ch in TEXT_ONLY_GLYPHS, f"{ch!r} (U+{ord(ch):04X}) is not allowed"
 
 
 # ---------- theme preview ----------
@@ -163,7 +190,23 @@ def test_ascii_themes_produce_ascii_previews() -> None:
 def test_unicode_themes_use_the_unicode_glyphs() -> None:
     text = "".join(fragment[1] for fragment in theme_preview(HARBOR))
     assert UNICODE_ICONS.success in text
-    assert "≈" in text
+    assert UNICODE_ICONS.cursor in text
+
+
+def test_previews_only_use_allowed_glyphs() -> None:
+    """A preview glyph outside the allow-list would slip past the probe."""
+    for name in THEME_ORDER:
+        text = "".join(fragment[1] for fragment in theme_preview(THEMES[name]))
+        for ch in text:
+            if not ch.isascii():
+                assert ch in TEXT_ONLY_GLYPHS, f"{name}: {ch!r} (U+{ord(ch):04X})"
+
+
+def test_absent_marker_used_for_missing_tools_not_the_error_glyph() -> None:
+    """ "Not installed" is information, not a failure."""
+    text = "".join(fragment[1] for fragment in theme_preview(HARBOR))
+    assert f"{UNICODE_ICONS.absent} OpenAI Codex" in text
+    assert f"{UNICODE_ICONS.error} OpenAI Codex" not in text
 
 
 def test_mono_preview_carries_no_styling() -> None:
@@ -262,3 +305,34 @@ def test_corrupt_saved_theme_does_not_break_resolution(tmp_path, monkeypatch) ->
     path.write_text('{"theme": 42}', encoding="utf-8")
     monkeypatch.setattr("ferry.config.CONFIG_PATH", path)
     assert resolve_theme(None, capability=Capability.COLOR, env={}) is H
+
+
+# ---------- style strings must be valid prompt_toolkit ----------
+
+
+def test_every_theme_produces_parseable_prompt_toolkit_styles() -> None:
+    """Regression: classic's `bright_black` became `ansibright_black`, which
+    prompt_toolkit rejects with ValueError. Selecting the theme crashed."""
+    from prompt_toolkit.styles.style import parse_color
+
+    from ferry.cli.theme import THEMES as ALL
+
+    for theme in ALL.values():
+        for token in ("primary", "accent", "success", "error", "warning", "dim", "text"):
+            style = _style_for(theme, token)
+            if not style:
+                continue
+            colour = style.split(":", 1)[1]
+            parse_color(colour)  # raises ValueError if the name is wrong
+
+
+def test_classic_dim_maps_to_the_prompt_toolkit_spelling() -> None:
+    from ferry.cli.theme import CLASSIC
+
+    assert _style_for(CLASSIC, "dim") == "fg:ansibrightblack"
+
+
+def test_unknown_colour_name_yields_no_style_rather_than_a_bad_one() -> None:
+    """Better to lose a colour than to emit a style that crashes the picker."""
+    theme = dataclasses.replace(HARBOR, primary="chartreuse")
+    assert _style_for(theme, "primary") == ""

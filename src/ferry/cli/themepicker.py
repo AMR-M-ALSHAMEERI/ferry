@@ -1,8 +1,7 @@
 """The theme picker — arrow between themes and see each one render live.
 
-Chosen 2026-08-21 (PROGRESS.md ledger, M2 second design pass): the preview
-re-renders in the highlighted theme on every cursor move, so the user judges a
-theme by looking at it rather than by reading its name.
+The preview re-renders in the highlighted theme on every cursor move, so a
+theme is judged by looking at it rather than by reading its name.
 
 The sample deliberately shows the pieces a theme actually affects: the
 wordmark, a detected and an undetected tool, a progress bar, and a menu row.
@@ -29,7 +28,7 @@ _DESCRIPTIONS = {
 }
 
 
-def theme_preview(theme: Theme, *, width: int = 30) -> Fragments:
+def theme_preview(theme: Theme, *, width: int = 26) -> Fragments:
     """Render a sample of what this theme looks like.
 
     Args:
@@ -48,27 +47,29 @@ def theme_preview(theme: Theme, *, width: int = 30) -> Fragments:
 
     wm = build_wordmark(theme)
     filled = int(width * 0.62)
+    rule = icons.progress_track * 4
 
-    out: Fragments = [
-        (dim, "  " + icons.progress_track * 4 + " preview " + icons.progress_track * 4 + "\n\n"),
-        (accent, f"  {wm.mark}  "),
-        (primary, wm.name),
-        (dim, f"   {wm.version}\n"),
-        (primary, "  " + wm.wake_char * filled),
-        (dim, wm.wake_char * (width - filled) + "\n"),
-        (dim, f"  {wm.tagline}\n\n"),
-        (success, f"  {icons.success} "),
-        (text, "Claude Code"),
-        (accent, "   12 conversations\n"),
-        (dim, f"  {icons.error} OpenAI Codex   not found\n\n"),
-        (primary, "  " + icons.progress_fill * filled),
-        (dim, icons.progress_track * (width - filled)),
-        (accent, "  62%\n"),
-        (primary, f"  {icons.cursor} "),
-        (primary, "Export conversations\n"),
-        ("", "    "),
-        (text, "Import a bundle\n"),
-    ]
+    out: Fragments = [(dim, f"  {rule} preview {rule}\n\n")]
+
+    for index, mark_row in enumerate(wm.mark_rows):
+        out.append((accent, f"  {mark_row}  "))
+        out.append((primary, wm.letter_rows[index]))
+        if index == 0:
+            out.append((dim, f"   {wm.version}"))
+        out.append(("", "\n"))
+
+    out.append((dim, f"  {wm.tagline}\n\n"))
+    out.append((success, f"  {icons.success} "))
+    out.append((text, "Claude Code"))
+    out.append((accent, "   12 conversations\n"))
+    out.append((dim, f"  {icons.absent} OpenAI Codex   not found\n\n"))
+    out.append((primary, "  " + icons.progress_fill * filled))
+    out.append((dim, icons.progress_track * (width - filled)))
+    out.append((accent, "  62%\n"))
+    out.append((primary, f"  {icons.cursor} "))
+    out.append((primary, "Export conversations\n"))
+    out.append(("", "    "))
+    out.append((text, "Import a bundle\n"))
     return out
 
 
