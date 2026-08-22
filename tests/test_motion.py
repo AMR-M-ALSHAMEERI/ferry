@@ -413,3 +413,18 @@ def test_cp437_console_falls_back_because_of_the_em_dash() -> None:
     assert "·".encode("cp437")
     with pytest.raises(UnicodeEncodeError):
         "—".encode("cp437")
+
+
+def test_menu_icons_animate_more_slowly_than_the_spinner() -> None:
+    """A spinner should look busy; a menu icon under the cursor should not fidget."""
+    from ferry.cli.motion import MENU_FRAME_SECONDS
+
+    assert MENU_FRAME_SECONDS > FRAME_SECONDS
+
+
+def test_the_slowest_menu_icon_still_completes_a_cycle_promptly() -> None:
+    """Slow is good; a loop nobody sees the end of is not."""
+    from ferry.cli.motion import MENU_FRAME_SECONDS
+
+    longest = max(len(m.frames) * MENU_FRAME_SECONDS for m in MENU_MOTION.values())
+    assert longest <= 2.0, f"slowest icon takes {longest:.2f}s per cycle"

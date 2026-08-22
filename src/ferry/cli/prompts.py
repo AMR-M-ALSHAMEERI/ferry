@@ -24,7 +24,7 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import HSplit, Layout, Window
 from prompt_toolkit.layout.controls import FormattedTextControl
 
-from ferry.cli.motion import FRAME_SECONDS, Motion
+from ferry.cli.motion import MENU_FRAME_SECONDS, Motion
 from ferry.cli.theme import ASCII_ICONS, Theme
 
 __all__ = ["Fragment", "Fragments", "SelectorItem", "SelectorModel", "run_confirm", "run_select"]
@@ -280,7 +280,7 @@ def run_select(
         """Frames elapsed since the picker opened."""
         if not animated:
             return 0
-        return int((time.monotonic() - started) / FRAME_SECONDS)
+        return int((time.monotonic() - started) / MENU_FRAME_SECONDS)
 
     kb = KeyBindings()
 
@@ -343,7 +343,7 @@ def run_select(
         # prompt_toolkit redraws itself on this interval, which is all the
         # animation needs — no background task, no thread poking invalidate().
         # Left unset when nothing moves, so a static picker costs no repaints.
-        refresh_interval=FRAME_SECONDS if animated else 0.0,
+        refresh_interval=MENU_FRAME_SECONDS if animated else 0.0,
     )
     return app.run()
 

@@ -23,6 +23,7 @@ from typing import Final
 
 __all__ = [
     "FRAME_SECONDS",
+    "MENU_FRAME_SECONDS",
     "MENU_MOTION",
     "Motion",
     "WAKE_PERIOD",
@@ -32,11 +33,20 @@ __all__ = [
 ]
 
 FRAME_SECONDS: Final = 0.12
-"""Seconds per animation tick — about 8fps.
+"""Seconds per tick for the spinner and progress column — about 8fps.
 
 Deliberately slow. A repaint loop inside a full-screen prompt_toolkit
 application costs a full redraw each tick, and over SSH or a slow terminal a
 fast one strobes. Eight frames a second reads as motion without flickering.
+"""
+
+MENU_FRAME_SECONDS: Final = 0.2
+"""Seconds per tick for the menu icons — 5fps, slower than the spinner.
+
+The two rates are deliberately different. A spinner is saying "work is
+happening" and wants to look busy; a menu icon sits under the cursor for as
+long as someone is reading the six labels beside it, and at spinner speed it
+fidgets. Slower reads as deliberate.
 """
 
 WAKE_PERIOD: Final = 3
