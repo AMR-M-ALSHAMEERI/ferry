@@ -83,7 +83,7 @@ class Bundle:
         """Open an existing bundle directory."""
         manifest_path = root / MANIFEST_NAME
         if not manifest_path.is_file():
-            raise BundleError(f"no {MANIFEST_NAME} in {root} — not a bundle")
+            raise BundleError(f"no {MANIFEST_NAME} in {root} - not a bundle")
         try:
             manifest = Manifest.model_validate_json(manifest_path.read_bytes())
         except ValidationError as exc:
@@ -201,7 +201,7 @@ class Bundle:
 
             if conversation.id != conversation_id:
                 problems.append(
-                    f"{conversation_id}.json contains id {conversation.id} — "
+                    f"{conversation_id}.json contains id {conversation.id} - "
                     "filename and id disagree"
                 )
             if conversation.source_tool not in self.manifest.tools_included:

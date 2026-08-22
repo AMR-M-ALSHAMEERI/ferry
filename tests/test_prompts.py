@@ -126,7 +126,7 @@ def test_wordmark_uses_block_letters_when_the_theme_can() -> None:
     wm = build_wordmark(HARBOR)
     assert wm.ascii_only is False
     assert len(wm.letter_rows) == 3
-    assert len(wm.mark_rows) == 3
+    assert len(wm.mark_rows()) == 3
     assert wm.tagline == TAGLINE
 
 
@@ -140,7 +140,7 @@ def test_wordmark_falls_back_to_ascii_with_ascii_icons() -> None:
     """A cp1252 console gets a wordmark it can actually print."""
     wm = build_wordmark(dataclasses.replace(HARBOR, icons=ASCII_ICONS))
     assert wm.ascii_only is True
-    joined = "".join(wm.mark_rows) + "".join(wm.letter_rows) + wm.tagline
+    joined = "".join(wm.mark_rows()) + "".join(wm.letter_rows) + wm.tagline
     assert joined.isascii()
 
 
@@ -167,7 +167,7 @@ def test_reveal_clamps_out_of_range_positions(columns: int) -> None:
 
 def test_every_wordmark_glyph_is_on_the_allow_list() -> None:
     wm = build_wordmark(HARBOR)
-    for ch in "".join(wm.mark_rows) + "".join(wm.letter_rows):
+    for ch in "".join(wm.mark_rows()) + "".join(wm.letter_rows):
         if not ch.isascii():
             assert ch in TEXT_ONLY_GLYPHS, f"{ch!r} (U+{ord(ch):04X}) is not allowed"
 
@@ -336,3 +336,91 @@ def test_unknown_colour_name_yields_no_style_rather_than_a_bad_one() -> None:
     """Better to lose a colour than to emit a style that crashes the picker."""
     theme = dataclasses.replace(HARBOR, primary="chartreuse")
     assert _style_for(theme, "primary") == ""
+
+
+# ---------- animated menu icons ----------
+
+
+def _text_of(fragments) -> str:
+    return "".join(f[1] for f in fragments)
+
+
+def _menu_model():
+    from ferry.cli.motion import MENU_MOTION
+
+    items = [
+        SelectorItem("export", "Export", motion=MENU_MOTION["export"]),
+        SelectorItem("quit", "Quit", motion=MENU_MOTION["quit"]),
+    ]
+    return SelectorModel(items), items
+
+
+def test_the_selected_row_animates_and_the_others_do_not() -> None:
+    from ferry.cli.prompts import _render
+
+    model, items = _menu_model()
+    export = items[0].motion
+    assert export is not None
+    seen = {
+        _text_of(_render(model, HARBOR, "", None, False, tick)).split("\n")[0] for tick in range(4)
+    }
+    assert len(seen) > 1, "the selected row should change between ticks"
+
+
+def test_an_unselected_row_holds_its_resting_frame() -> None:
+    from ferry.cli.prompts import _render
+
+    model, items = _menu_model()
+    quit_motion = items[1].motion
+    assert quit_motion is not None
+    for tick in range(6):
+        rows = _text_of(_render(model, HARBOR, "", None, False, tick)).split("\n")
+        assert quit_motion.rest in rows[1]
+
+
+def test_the_icon_replaces_the_cursor_glyph() -> None:
+    """Showing an animated marker *and* a chevron reads as clutter."""
+    from ferry.cli.prompts import _render
+
+    model, _ = _menu_model()
+    text = _text_of(_render(model, HARBOR, "", None, False, 0))
+    assert UNICODE_ICONS.cursor not in text
+
+
+def test_lists_without_motion_still_get_the_cursor_glyph() -> None:
+    from ferry.cli.prompts import _render
+
+    text = _text_of(_render(SelectorModel(ITEMS), HARBOR, "", None, False, 0))
+    assert UNICODE_ICONS.cursor in text
+
+
+def test_menu_rows_stay_aligned_across_every_tick() -> None:
+    """A width change anywhere in the icon would make the labels jitter."""
+    from ferry.cli.prompts import _render
+
+    model, _ = _menu_model()
+    for tick in range(12):
+        for row in _text_of(_render(model, HARBOR, "", None, False, tick)).split("\n"):
+            if "Export" in row:
+                assert row.index("Export") == 5, repr(row)
+            if "Quit" in row:
+                assert row.index("Quit") == 5, repr(row)
+
+
+def test_ascii_consoles_get_ascii_icons() -> None:
+    from ferry.cli.prompts import _render
+
+    model, _ = _menu_model()
+    theme = dataclasses.replace(HARBOR, icons=ASCII_ICONS)
+    for tick in range(6):
+        assert _text_of(_render(model, theme, "", None, False, tick)).isascii()
+
+
+def test_menu_icon_glyphs_are_all_on_the_allow_list() -> None:
+    from ferry.cli.prompts import _render
+
+    model, _ = _menu_model()
+    for tick in range(12):
+        for ch in _text_of(_render(model, HARBOR, "", None, False, tick)):
+            if not ch.isascii():
+                assert ch in TEXT_ONLY_GLYPHS, f"U+{ord(ch):04X}"

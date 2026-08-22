@@ -13,7 +13,8 @@ available.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator, Sequence
+import time
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 
@@ -24,14 +25,24 @@ from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
     Progress,
-    SpinnerColumn,
+    ProgressColumn,
+    Task,
     TextColumn,
     TimeElapsedColumn,
 )
 from rich.table import Table
+from rich.text import Text
 from rich.theme import Theme as RichTheme
 
-from ferry.cli.theme import DEFAULT_THEME, Capability, Theme, detect_capability, resolve_theme
+from ferry.cli.motion import FRAME_SECONDS, Motion, moored_frame, spinner_frames
+from ferry.cli.theme import (
+    ASCII_ICONS,
+    DEFAULT_THEME,
+    Capability,
+    Theme,
+    detect_capability,
+    resolve_theme,
+)
 
 __all__ = ["UI", "NonInteractiveError"]
 
@@ -47,6 +58,52 @@ class NonInteractiveError(RuntimeError):
         self.action = action
         self.hint = hint
         super().__init__(f"{action} needs an interactive terminal. {hint}")
+
+
+class _WakeColumn(ProgressColumn):
+    """The progress-bar spinner: the same ferry, sailing while work happens.
+
+    ``rich``'s own ``SpinnerColumn`` can only take a spinner registered in its
+    global table, so the hull is drawn here instead. On completion the wake
+    settles and the hull turns the success colour — the bar finishing and the
+    ferry arriving are the same event.
+    """
+
+    max_refresh = FRAME_SECONDS
+
+    def __init__(self, *, ascii_only: bool) -> None:
+        self.frames = spinner_frames(width=3, ascii_only=ascii_only)
+        self.moored = moored_frame(3, ascii_only=ascii_only)
+        super().__init__()
+
+    def render(self, task: Task) -> Text:
+        if task.finished:
+            return Text(self.moored, style="ferry.success")
+        tick = int(time.monotonic() / FRAME_SECONDS)
+        return Text(self.frames[tick % len(self.frames)], style="ferry.primary")
+
+
+class _SailingSpinner:
+    """A ``rich`` renderable that draws the ferry sailing, based on the clock.
+
+    Written as a time-driven renderable rather than a frame list handed to
+    ``rich``'s spinner registry: ``Live`` re-renders on its own schedule, so
+    reading the clock here means no background thread and no mutation of
+    ``rich``'s module-level ``SPINNERS`` dictionary.
+    """
+
+    def __init__(self, label: str, *, ascii_only: bool) -> None:
+        self.label = label
+        self.frames = spinner_frames(ascii_only=ascii_only)
+        self._started = time.monotonic()
+
+    def __rich_console__(self, console: object, options: object) -> Iterator[Text]:
+        tick = int((time.monotonic() - self._started) / FRAME_SECONDS)
+        out = Text("  ")
+        out.append(self.frames[tick % len(self.frames)], style="ferry.primary")
+        out.append("  ")
+        out.append(self.label, style="ferry.dim")
+        yield out
 
 
 @dataclass
@@ -199,7 +256,10 @@ class UI:
             self.console.print(f"  {label}")
             yield
             return
-        with self.console.status(f"[ferry.dim]{label}[/ferry.dim]", spinner="dots"):
+        from rich.live import Live
+
+        spinner = _SailingSpinner(label, ascii_only=self.theme.icons is ASCII_ICONS)
+        with Live(spinner, console=self.console, refresh_per_second=12, transient=True):
             yield
 
     @contextmanager
@@ -226,7 +286,7 @@ class UI:
 
         icons = self.theme.icons
         with Progress(
-            SpinnerColumn(style="ferry.primary"),
+            _WakeColumn(ascii_only=icons is ASCII_ICONS),
             TextColumn("[ferry.text]{task.description}"),
             BarColumn(
                 bar_width=24,
@@ -245,7 +305,6 @@ class UI:
                 def advance(self, n: int = 1) -> None:
                     prog.advance(task, n)
 
-            _ = icons
             yield _Live()
 
     # ---------- prompts ----------
@@ -262,6 +321,7 @@ class UI:
         *,
         hint: str = "",
         allow_filter: bool = True,
+        motions: Mapping[str, Motion] | None = None,
     ) -> str | None:
         """Ask the user to pick one option.
 
@@ -269,6 +329,11 @@ class UI:
             question: The prompt text.
             choices: ``(value, label)`` pairs, in display order.
             hint: Flag-based equivalent, shown if there is no terminal.
+            allow_filter: Whether ``/`` opens the filter.
+            motions: Optional animated icon per choice value. Passed in
+                explicitly rather than looked up by value, so a list whose
+                values happen to collide with action names cannot pick up
+                icons it never asked for.
 
         Returns:
             The chosen value, or ``None`` if the user cancelled.
@@ -276,9 +341,10 @@ class UI:
         self._require_interactive(question, hint)
         from ferry.cli.prompts import SelectorItem, run_select
 
+        marks = motions or {}
         return run_select(
             question,
-            [SelectorItem(value, label) for value, label in choices],
+            [SelectorItem(value, label, motion=marks.get(value)) for value, label in choices],
             theme=self.theme,
             allow_filter=allow_filter,
         )

@@ -51,7 +51,7 @@ def theme_preview(theme: Theme, *, width: int = 26) -> Fragments:
 
     out: Fragments = [(dim, f"  {rule} preview {rule}\n\n")]
 
-    for index, mark_row in enumerate(wm.mark_rows):
+    for index, mark_row in enumerate(wm.mark_rows()):
         out.append((accent, f"  {mark_row}  "))
         out.append((primary, wm.letter_rows[index]))
         if index == 0:

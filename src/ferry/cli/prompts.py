@@ -13,6 +13,7 @@ unit tested, so nothing that matters is allowed to live inside one.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
@@ -23,7 +24,8 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import HSplit, Layout, Window
 from prompt_toolkit.layout.controls import FormattedTextControl
 
-from ferry.cli.theme import Theme
+from ferry.cli.motion import FRAME_SECONDS, Motion
+from ferry.cli.theme import ASCII_ICONS, Theme
 
 __all__ = ["Fragment", "Fragments", "SelectorItem", "SelectorModel", "run_confirm", "run_select"]
 
@@ -41,11 +43,21 @@ handler, and list is invariant.
 
 @dataclass(frozen=True)
 class SelectorItem:
-    """One choosable row."""
+    """One choosable row.
+
+    Args:
+        value: What :func:`run_select` returns when this row is chosen.
+        label: Text shown to the user, and what the ``/`` filter matches.
+        hint: Optional dim text after the label.
+        motion: Optional animated icon. When set it *replaces* the cursor
+            glyph for this list — an animated marker already says where the
+            cursor is, and showing both reads as clutter.
+    """
 
     value: str
     label: str
     hint: str = ""
+    motion: Motion | None = None
 
 
 class SelectorModel:
@@ -181,9 +193,18 @@ def _render(
     title: str,
     preview: Callable[[SelectorItem], Fragments] | None,
     allow_filter: bool,
+    tick: int = 0,
 ) -> Fragments:
-    """Build the frame shown on each redraw."""
+    """Build the frame shown on each redraw.
+
+    Args:
+        tick: Animation tick. Only the row under the cursor animates — six
+            icons moving at once is noise, and animating just the selected one
+            doubles as a second cursor indicator for the same redraw cost.
+    """
     icons = theme.icons
+    ascii_only = icons is ASCII_ICONS
+    sep = icons.separator
     dim = _style_for(theme, "dim")
     text = _style_for(theme, "text")
     primary = _style_for(theme, "primary")
@@ -198,7 +219,12 @@ def _render(
         out += [(dim, f"  no match for {model.filter!r}\n")]
     for index, item in enumerate(visible):
         selected = index == min(model.cursor, len(visible) - 1)
-        if selected:
+        if item.motion is not None:
+            glyph = item.motion.frame(tick, selected=selected, ascii_only=ascii_only)
+            token = item.motion.style(tick, selected=selected)
+            out += [(_style_for(theme, token), f"  {glyph} ")]
+            out += [(primary if selected else (dim if model.filtering else text), item.label)]
+        elif selected:
             out += [(primary, f"  {icons.cursor} "), (primary, item.label)]
         else:
             out += [("", "    "), (dim if model.filtering else text, item.label)]
@@ -214,11 +240,11 @@ def _render(
     out += [("", "\n")]
     if model.filtering:
         out += [(accent, "  / "), (text, model.filter), (primary, "_")]
-        out += [(dim, "    enter apply  ·  esc cancel filter\n")]
+        out += [(dim, f"    enter apply  {sep}  esc cancel filter\n")]
     else:
-        keys = "up/down move  ·  enter select  ·  esc cancel"
+        keys = f"up/down move  {sep}  enter select  {sep}  esc cancel"
         if allow_filter:
-            keys = "up/down move  ·  enter select  ·  / filter  ·  esc cancel"
+            keys = f"up/down move  {sep}  enter select  {sep}  / filter  {sep}  esc cancel"
         out += [(dim, f"  {keys}\n")]
     return out
 
@@ -247,6 +273,15 @@ def run_select(
         The chosen item's value, or ``None`` if the user cancelled.
     """
     model = SelectorModel(items, initial=initial)
+    animated = theme.uses_color and any(item.motion is not None for item in items)
+    started = time.monotonic()
+
+    def tick() -> int:
+        """Frames elapsed since the picker opened."""
+        if not animated:
+            return 0
+        return int((time.monotonic() - started) / FRAME_SECONDS)
+
     kb = KeyBindings()
 
     @kb.add("up")
@@ -296,7 +331,7 @@ def run_select(
                 model.set_filter(model.filter + char)
 
     control = FormattedTextControl(
-        lambda: _render(model, theme, title, preview, allow_filter),
+        lambda: _render(model, theme, title, preview, allow_filter, tick()),
         focusable=True,
         show_cursor=False,
     )
@@ -305,6 +340,10 @@ def run_select(
         key_bindings=kb,
         full_screen=False,
         erase_when_done=True,
+        # prompt_toolkit redraws itself on this interval, which is all the
+        # animation needs — no background task, no thread poking invalidate().
+        # Left unset when nothing moves, so a static picker costs no repaints.
+        refresh_interval=FRAME_SECONDS if animated else 0.0,
     )
     return app.run()
 

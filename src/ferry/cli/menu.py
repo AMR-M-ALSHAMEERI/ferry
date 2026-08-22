@@ -8,6 +8,8 @@ are all real, so later milestones fill in behaviour behind a finished interface.
 from __future__ import annotations
 
 from ferry.adapters.base import Adapter, DetectResult, list_adapters
+from ferry.cli.motion import MENU_MOTION
+from ferry.cli.theme import IconSet
 from ferry.cli.ui import UI, NonInteractiveError, _DetectionRow
 from ferry.config import write_setting
 
@@ -22,7 +24,11 @@ MENU_ITEMS: list[tuple[str, str]] = [
     ("quit", "Quit"),
 ]
 """Top-level actions. Typing `/` filters this list, so the labels double as the
-slash-command vocabulary — `/theme` finds "Change theme"."""
+slash-command vocabulary — `/theme` finds "Change theme".
+
+Each action has an animated icon in :data:`~ferry.cli.motion.MENU_MOTION`,
+keyed by the same value.
+"""
 
 _MILESTONE_FOR_ACTION: dict[str, str] = {
     "export": "M3",
@@ -32,14 +38,14 @@ _MILESTONE_FOR_ACTION: dict[str, str] = {
 }
 
 
-def _describe(result: DetectResult) -> str:
+def _describe(result: DetectResult, icons: IconSet) -> str:
     """One-line summary of what an adapter found, for the scan screen."""
     if not result.installed:
         return result.notes[0] if result.notes else "not found"
     count = result.conversation_count_estimate
     noun = "conversation" if count == 1 else "conversations"
     if result.version:
-        return f"{result.version} · {count} {noun}"
+        return f"{result.version} {icons.separator} {count} {noun}"
     return f"{count} {noun}"
 
 
@@ -67,7 +73,7 @@ def scan(ui: UI, adapters: list[Adapter] | None = None) -> list[tuple[Adapter, D
         _DetectionRow(
             display_name=adapter.display_name,
             installed=result.installed,
-            detail=_describe(result),
+            detail=_describe(result, ui.theme.icons),
         )
         for adapter, result in results
     )
@@ -78,7 +84,7 @@ def scan(ui: UI, adapters: list[Adapter] | None = None) -> list[tuple[Adapter, D
 def _stub(ui: UI, action: str) -> None:
     """Report that an action exists but has not been built yet."""
     milestone = _MILESTONE_FOR_ACTION.get(action, "a later milestone")
-    ui.warn(f"Not implemented yet — arrives at {milestone}.")
+    ui.warn(f"Not implemented yet {ui.theme.icons.dash} arrives at {milestone}.")
     ui.blank()
 
 
@@ -99,7 +105,8 @@ def _change_theme(ui: UI) -> None:
     if write_setting("theme", chosen):
         ui.success(f"Theme set to {chosen}.")
     else:
-        ui.warn(f"Theme set to {chosen} for this session — could not save it.")
+        dash = ui.theme.icons.dash
+        ui.warn(f"Theme set to {chosen} for this session {dash} could not save it.")
     ui.blank()
 
 
@@ -127,6 +134,7 @@ def run_menu(ui: UI) -> int:
                 "What would you like to do?",
                 MENU_ITEMS,
                 hint="Run `ferry --help` to see the non-interactive options.",
+                motions=MENU_MOTION,
             )
         except NonInteractiveError as exc:
             ui.error(str(exc))

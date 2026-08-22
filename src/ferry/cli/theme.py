@@ -79,6 +79,14 @@ class IconSet:
 
     progress_fill: str
     progress_track: str
+    separator: str
+    """Bullet between items on one line. Prose punctuation belongs in the icon
+    set for the same reason the status marks do: it has to degrade with them."""
+
+    dash: str
+    """Em dash. Encodable in ``cp1252`` but *not* in ``cp437``, so a console
+    that forced the ASCII icon set would still have crashed on it."""
+
     ellipsis: str
     """Trailing mark for in-progress labels. ASCII under ``mono`` so piped
     output stays pure ASCII — a Unicode ellipsis is mangled by legacy Windows
@@ -98,6 +106,8 @@ UNICODE_ICONS: Final = IconSet(
     absent="·",
     progress_fill="━",
     progress_track="─",
+    separator="·",
+    dash="—",
     ellipsis="…",
 )
 """Geometric BMP Unicode, every glyph checked against :data:`TEXT_ONLY_GLYPHS`.
@@ -121,14 +131,19 @@ ASCII_ICONS: Final = IconSet(
     absent="-",
     progress_fill="=",
     progress_track="-",
+    separator="-",
+    dash="--",
     ellipsis="...",
 )
 """Pure ASCII, for log files and terminals that mangle Unicode."""
 
 TEXT_ONLY_GLYPHS: Final = frozenset(
     "✓✗▲›❯◉○◆◇·━─…≈"  # status, cursor, progress, wake
-    "▏▕▸"  # the wordmark's crossing mark
+    "╷╰╯"  # the ferry mark: funnel and hull
     "┏┓┗┛┣┳━╸╹╻"  # the wordmark's block letterforms
+    "▸◂◌╵"  # menu icons: outbound, inbound, aperture, moored
+    "▁▂▃▄"  # menu icons: the compact animation
+    "—"  # prose punctuation
 )
 """Every non-ASCII character Ferry is allowed to print.
 
@@ -140,7 +155,9 @@ one range. Four glyphs shipped in the first M2 build before this existed —
 Emoji property and rendered as colour emoji in the user's terminal.
 
 Adding a glyph to the interface means adding it here, and the test suite fails
-if anything reaches the screen that is not on this list.
+if anything reaches the screen that is not on this list. ``test_motion.py``
+additionally re-checks every glyph on this list against the real Unicode Emoji
+property, using ranges extracted from ``emoji-data.txt`` (Unicode 17.0).
 """
 
 _UNICODE_PROBE: Final = "".join(sorted(TEXT_ONLY_GLYPHS))

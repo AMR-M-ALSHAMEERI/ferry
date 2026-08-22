@@ -65,7 +65,7 @@ def main(
         False, "--verbose", "-v", help="Show extra detail about what Ferry is doing."
     ),
 ) -> None:
-    """Ferry — back up and migrate your AI assistant conversation history."""
+    """Ferry - back up and migrate your AI assistant conversation history."""
     if ctx.invoked_subcommand is not None:
         return
 

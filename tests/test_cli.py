@@ -21,8 +21,9 @@ from ferry.adapters.base import (
     list_adapters,
 )
 from ferry.cli import app
+from ferry.cli.brand import TAGLINE, build_wordmark
 from ferry.cli.menu import _describe, scan
-from ferry.cli.theme import HARBOR, MONO, Capability
+from ferry.cli.theme import ASCII_ICONS, HARBOR, MONO, UNICODE_ICONS, Capability
 from ferry.cli.ui import UI, NonInteractiveError
 
 runner = CliRunner()
@@ -104,22 +105,23 @@ def _plain_ui() -> UI:
 
 def test_describe_uses_singular_for_one_conversation() -> None:
     r = DetectResult(installed=True, conversation_count_estimate=1)
-    assert _describe(r) == "1 conversation"
+    assert _describe(r, UNICODE_ICONS) == "1 conversation"
 
 
 def test_describe_uses_plural_otherwise() -> None:
     r = DetectResult(installed=True, conversation_count_estimate=4)
-    assert _describe(r) == "4 conversations"
+    assert _describe(r, UNICODE_ICONS) == "4 conversations"
 
 
 def test_describe_includes_version_when_known() -> None:
     r = DetectResult(installed=True, version="2.1.0", conversation_count_estimate=2)
-    assert _describe(r) == "2.1.0 · 2 conversations"
+    assert _describe(r, UNICODE_ICONS) == "2.1.0 · 2 conversations"
+    assert _describe(r, ASCII_ICONS) == "2.1.0 - 2 conversations"
 
 
 def test_describe_surfaces_the_reason_when_not_installed() -> None:
     r = DetectResult(installed=False, notes=["adapter not yet implemented"])
-    assert _describe(r) == "adapter not yet implemented"
+    assert _describe(r, UNICODE_ICONS) == "adapter not yet implemented"
 
 
 def test_scan_survives_an_adapter_that_raises() -> None:
@@ -254,9 +256,13 @@ class _ScriptedUI(UI):
         super().__init__(MONO, capability=Capability.PLAIN)
         self._answers = list(answers)
         self.asked = 0
+        self.last_motions = None
 
-    def select(self, question, choices, *, hint=""):  # type: ignore[override]
+    def select(  # type: ignore[override]
+        self, question, choices, *, hint="", allow_filter=True, motions=None
+    ):
         self.asked += 1
+        self.last_motions = motions
         return self._answers.pop(0)
 
 
@@ -264,6 +270,17 @@ def _menu_output(ui: UI) -> str:
     buf = io.StringIO()
     ui.console.file = buf
     return buf.getvalue()
+
+
+def test_the_menu_passes_its_animated_icons_through() -> None:
+    """Without this the menu silently renders with no icons at all."""
+    from ferry.cli.menu import MENU_ITEMS, run_menu
+    from ferry.cli.motion import MENU_MOTION
+
+    ui = _ScriptedUI(["quit"])
+    run_menu(ui)
+    assert ui.last_motions is MENU_MOTION
+    assert set(ui.last_motions) == {value for value, _ in MENU_ITEMS}
 
 
 def test_menu_quits_cleanly_and_returns_zero() -> None:
@@ -306,3 +323,126 @@ def test_menu_exits_two_when_prompting_is_impossible() -> None:
     from ferry.cli.menu import run_menu
 
     assert run_menu(_plain_ui()) == 2
+
+
+# ---------- the sailing spinner and progress column ----------
+
+
+class _FakeTask:
+    """Enough of a ``rich`` Task for the wake column to render."""
+
+    def __init__(self, finished: bool) -> None:
+        self.finished = finished
+
+
+def test_wake_column_frames_are_a_constant_width() -> None:
+    """A column that changes width would shove the whole progress bar sideways."""
+    from ferry.cli.ui import _WakeColumn
+
+    column = _WakeColumn(ascii_only=False)
+    widths = {len(f) for f in column.frames} | {len(column.moored)}
+    assert len(widths) == 1
+
+
+def test_wake_column_shows_the_moored_hull_once_finished() -> None:
+    """The bar completing and the ferry arriving are the same event."""
+    from ferry.cli.ui import _WakeColumn
+
+    column = _WakeColumn(ascii_only=False)
+    rendered = column.render(_FakeTask(finished=True))
+    assert rendered.plain == column.moored
+    assert rendered.style == "ferry.success"
+
+
+def test_wake_column_shows_a_moving_hull_while_running() -> None:
+    from ferry.cli.ui import _WakeColumn
+
+    column = _WakeColumn(ascii_only=False)
+    assert column.render(_FakeTask(finished=False)).plain in column.frames
+
+
+def test_ascii_wake_column_stays_ascii() -> None:
+    from ferry.cli.ui import _WakeColumn
+
+    column = _WakeColumn(ascii_only=True)
+    assert "".join(column.frames).isascii()
+    assert column.moored.isascii()
+    assert column.render(_FakeTask(finished=True)).plain.isascii()
+
+
+def test_wake_column_repaints_no_faster_than_the_frame_rate() -> None:
+    from ferry.cli.motion import FRAME_SECONDS
+    from ferry.cli.ui import _WakeColumn
+
+    assert _WakeColumn.max_refresh == FRAME_SECONDS
+
+
+def test_sailing_spinner_renders_the_label_beside_a_frame() -> None:
+    from ferry.cli.ui import _SailingSpinner
+
+    spinner = _SailingSpinner("Scanning", ascii_only=False)
+    text = next(iter(spinner.__rich_console__(None, None))).plain
+    assert "Scanning" in text
+    assert any(frame in text for frame in spinner.frames)
+
+
+def test_ascii_sailing_spinner_stays_ascii() -> None:
+    from ferry.cli.ui import _SailingSpinner
+
+    spinner = _SailingSpinner("Scanning", ascii_only=True)
+    assert next(iter(spinner.__rich_console__(None, None))).plain.isascii()
+
+
+# ---------- the animated banner ----------
+
+
+def _terminal_ui(theme=HARBOR):
+    """A UI whose console believes it is a colour terminal, writing to a buffer."""
+    from rich.console import Console
+
+    ui = UI(theme, capability=Capability.COLOR)
+    buf = io.StringIO()
+    ui.console = Console(
+        file=buf, force_terminal=True, force_interactive=False, width=100, no_color=True
+    )
+    return ui, buf
+
+
+def test_the_animated_banner_ends_with_the_whole_wordmark(monkeypatch) -> None:
+    """Regression: the banner once animated to completion while drawing nothing,
+    because the reveal width was measured from an empty row."""
+    monkeypatch.setattr("time.sleep", lambda _s: None)
+    ui, buf = _terminal_ui()
+    ui.banner(animate=True)
+    output = buf.getvalue()
+    for row in build_wordmark(ui.theme).letter_rows:
+        assert row in output, f"missing letterform row {row!r}"
+    assert TAGLINE in output
+
+
+def test_the_animated_banner_shows_the_wake_in_more_than_one_position(monkeypatch) -> None:
+    """If the wake never moved, the mark would just be a static drawing."""
+    from ferry.cli.brand import MARK_WIDTH
+    from ferry.cli.motion import WAKE_PERIOD, wake_row
+
+    monkeypatch.setattr("time.sleep", lambda _s: None)
+    ui, buf = _terminal_ui()
+    ui.banner(animate=True)
+    output = buf.getvalue()
+    seen = sum(1 for phase in range(WAKE_PERIOD) if wake_row(MARK_WIDTH, phase) in output)
+    assert seen >= 2, "the wake never drifted"
+
+
+def test_the_still_banner_draws_the_whole_wordmark_too() -> None:
+    """Piped output gets no animation, but must not get a half-drawn name."""
+    ui, buf = _terminal_ui()
+    ui.banner(animate=False)
+    output = buf.getvalue()
+    for row in build_wordmark(ui.theme).letter_rows:
+        assert row in output
+
+
+def test_the_mono_banner_is_pure_ascii() -> None:
+    ui, buf = _terminal_ui(MONO)
+    ui.banner(animate=True)
+    assert buf.getvalue().isascii()
