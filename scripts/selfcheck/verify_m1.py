@@ -83,7 +83,7 @@ def main() -> int:
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 
-    print(f"Ferry self-check — M1 (UCS v{UCS_VERSION} + bundle format)")
+    print(f"Ferry self-check - M1 (UCS v{UCS_VERSION} + bundle format)")
     passed = failed = skipped = 0
     for index, (name, ok, detail) in enumerate(results, start=1):
         if ok is None:

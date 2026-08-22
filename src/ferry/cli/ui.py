@@ -229,7 +229,11 @@ class UI:
         table = Table.grid(padding=(0, 2))
         table.add_column(width=max(len(icons.success), len(icons.absent)))
         table.add_column()
-        table.add_column()
+        # `fold` rather than rich's default: a detail line can carry a long
+        # absolute path, and ellipsising it substitutes a Unicode `…` that the
+        # rest of the theme has gone to some trouble to avoid on consoles that
+        # cannot encode it.
+        table.add_column(overflow="fold")
         for row in rows:
             if row.installed:
                 mark = self._style("ferry.success", icons.success)

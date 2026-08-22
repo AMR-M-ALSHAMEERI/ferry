@@ -1,4 +1,4 @@
-"""Layer-2 self-check for M2 — the interactive CLI shell.
+"""Layer-2 self-check for M2 - the interactive CLI shell.
 
 Contract (PLAN.md §6.8.2): numbered PASS/FAIL/SKIP lines, non-zero exit on any
 failure, runs against the real installed package, never prints conversation
@@ -25,11 +25,20 @@ class Result:
 
 
 def _run(args: list[str]) -> subprocess.CompletedProcess[str]:
-    """Invoke the CLI the way a user would — through the module entry point."""
+    """Invoke the CLI the way a user would - through the module entry point.
+
+    The encoding is pinned rather than left to the locale. ``text=True`` alone
+    decodes the pipe as cp1252 on a Windows console, so a developer who has
+    ``PYTHONIOENCODING=utf-8`` exported gets a child writing UTF-8 into a parent
+    reading cp1252, and the self-check dies on a decode error that has nothing
+    to do with what it was checking.
+    """
     return subprocess.run(
         [sys.executable, "-m", "ferry", *args],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=60,
     )
 
@@ -102,13 +111,20 @@ def check_tools_lists_every_adapter() -> Result:
 
 
 def check_stubs_claim_nothing_installed() -> Result:
-    """M2 must not invent conversation counts for adapters that do not exist."""
-    from ferry.adapters.base import list_adapters
+    """No adapter may invent a conversation count for a tool it cannot read.
 
-    lying = [a.name for a in list_adapters() if a.detect().installed]
-    if not lying:
-        return Result(True, "all adapters honestly report not-installed")
-    return Result(False, f"stub claims to be installed: {lying}")
+    Narrowed at M3: the check was "nothing is installed", which stopped being
+    true the moment one adapter became real. The property that actually
+    mattered was always about the stubs.
+    """
+    from ferry.adapters import list_adapters
+    from ferry.adapters.base import NotImplementedAdapter
+
+    stubs = [a for a in list_adapters() if isinstance(a, NotImplementedAdapter)]
+    lying = [a.name for a in stubs if a.detect().installed]
+    if lying:
+        return Result(False, f"stub claims to be installed: {lying}")
+    return Result(True, f"{len(stubs)} stubs honestly report not-installed")
 
 
 def check_icons_downgrade_on_legacy_encoding() -> Result:
@@ -204,7 +220,7 @@ def main() -> int:
         ("Theme choice persists", check_theme_choice_persists),
     ]
 
-    print("Ferry self-check — M2 (interactive CLI shell)")
+    print("Ferry self-check - M2 (interactive CLI shell)")
     passed = failed = skipped = 0
     for i, (label, fn) in enumerate(checks, start=1):
         try:

@@ -50,9 +50,19 @@ def test_get_adapter_raises_on_unknown_name() -> None:
         get_adapter("cursor")
 
 
-def test_stub_adapters_report_not_installed_with_a_reason() -> None:
-    """M2 stubs must be honest — no invented conversation counts."""
-    for adapter in list_adapters():
+def test_the_claude_code_slot_holds_the_real_adapter_now() -> None:
+    """M3 replaced one stub. The registration lives in ``ferry.adapters``."""
+    from ferry.adapters.claude_code import ClaudeCodeAdapter
+
+    assert isinstance(get_adapter("claude-code"), ClaudeCodeAdapter)
+
+
+def test_adapters_still_waiting_report_not_installed_with_a_reason() -> None:
+    """Stubs must be honest — no invented conversation counts."""
+    pending = [a for a in list_adapters() if isinstance(a, NotImplementedAdapter)]
+    assert [a.name for a in pending] == ["codex", "copilot", "antigravity"]
+
+    for adapter in pending:
         result = adapter.detect()
         assert result.installed is False
         assert result.conversation_count_estimate == 0
@@ -189,6 +199,27 @@ def test_tools_output_is_pure_ascii_when_not_a_tty() -> None:
     byte 0x8D on Windows. Redirected output must stay ASCII."""
     result = runner.invoke(app, ["tools"])
     assert result.output.isascii(), [c for c in result.output if not c.isascii()]
+
+
+def test_a_long_detection_note_is_wrapped_not_ellipsised() -> None:
+    """Regression: the real Claude Code adapter put a path in its notes.
+
+    Rich truncates an over-long cell with a Unicode ellipsis, which walked
+    straight past the ASCII guard the whole theme system exists to enforce --
+    on a cp437 console that byte is unprintable. Folding keeps every character
+    the caller supplied and adds none of its own.
+    """
+    from ferry.cli.ui import _DetectionRow
+
+    ui = _plain_ui()
+    buf = io.StringIO()
+    ui.console.file = buf
+    ui.console.width = 40
+
+    ui.detection_table([_DetectionRow("Claude Code", True, "/" + "verylongsegment/" * 12)])
+
+    assert buf.getvalue().isascii(), [c for c in buf.getvalue() if not c.isascii()]
+    assert "verylongsegment" in buf.getvalue()
 
 
 def test_no_escape_codes_reach_piped_output() -> None:

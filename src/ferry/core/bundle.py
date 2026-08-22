@@ -122,6 +122,27 @@ class Bundle:
         """
         if not source.is_file():
             raise BundleError(f"attachment source does not exist: {source}")
+        dest = self._attachment_dest(conversation_id, attachment)
+        tmp = dest.with_name(dest.name + ".tmp")
+        shutil.copyfile(source, tmp)
+        tmp.replace(dest)
+        return self._verify_attachment(dest, attachment)
+
+    def add_attachment_bytes(
+        self, conversation_id: UUID, data: bytes, attachment: Attachment
+    ) -> Path:
+        """Write an attachment that has no source file.
+
+        Some tools store images inline inside the transcript rather than as
+        files on disk -- Claude Code encodes them as base64 in the message. The
+        bytes still belong in the bundle as a real file, so they can be
+        checksummed and inspected like any other attachment.
+        """
+        dest = self._attachment_dest(conversation_id, attachment)
+        _atomic_write_bytes(dest, data)
+        return self._verify_attachment(dest, attachment)
+
+    def _attachment_dest(self, conversation_id: UUID, attachment: Attachment) -> Path:
         expected_dir = f"{ATTACHMENTS_DIR}/{conversation_id}/"
         if not attachment.bundle_path.startswith(expected_dir):
             raise BundleError(
@@ -130,9 +151,9 @@ class Bundle:
             )
         dest = self._resolve_inside(attachment.bundle_path)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        tmp = dest.with_name(dest.name + ".tmp")
-        shutil.copyfile(source, tmp)
-        tmp.replace(dest)
+        return dest
+
+    def _verify_attachment(self, dest: Path, attachment: Attachment) -> Path:
         actual = sha256_file(dest)
         if actual != attachment.sha256:
             raise BundleError(
@@ -140,6 +161,59 @@ class Bundle:
                 f"record says {attachment.sha256}, bytes hash to {actual}"
             )
         return dest
+
+    # ---------- source_raw ----------
+
+    def source_raw_path(self, conversation_id: UUID) -> Path:
+        """Where this conversation's original-format bytes live (PLAN.md 3.3)."""
+        return self.root / SOURCE_RAW_DIR / f"{conversation_id}.bin"
+
+    def has_source_raw(self, conversation_id: UUID) -> bool:
+        return self.source_raw_path(conversation_id).is_file()
+
+    def add_source_raw(self, conversation_id: UUID, source: Path) -> Path:
+        """Copy a conversation's original file in verbatim.
+
+        Opt-in per PLAN.md 3.3 and the reason a same-tool re-import can be
+        byte-perfect: UCS is a lossy common denominator by construction, and
+        this is the copy that does not go through it.
+        """
+        if not source.is_file():
+            raise BundleError(f"source_raw source does not exist: {source}")
+        dest = self.source_raw_path(conversation_id)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dest.with_name(dest.name + ".tmp")
+        shutil.copyfile(source, tmp)
+        tmp.replace(dest)
+        return dest
+
+    def source_raw_sidecar_dir(self, conversation_id: UUID) -> Path:
+        """Companion files the original format kept beside the conversation.
+
+        Claude Code spills large tool outputs to separate ``.txt`` files and
+        leaves an absolute path to them in the transcript. They are neither
+        messages nor user attachments -- they are part of the original format's
+        bytes, so they sit under ``source_raw`` with it.
+        """
+        return self.root / SOURCE_RAW_DIR / str(conversation_id)
+
+    def add_source_raw_sidecar(self, conversation_id: UUID, source: Path, relative: str) -> Path:
+        if not source.is_file():
+            raise BundleError(f"sidecar source does not exist: {source}")
+        dest = self._resolve_inside(
+            f"{SOURCE_RAW_DIR}/{conversation_id}/{relative}".replace("\\", "/")
+        )
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dest.with_name(dest.name + ".tmp")
+        shutil.copyfile(source, tmp)
+        tmp.replace(dest)
+        return dest
+
+    def list_source_raw_sidecars(self, conversation_id: UUID) -> list[Path]:
+        directory = self.source_raw_sidecar_dir(conversation_id)
+        if not directory.is_dir():
+            return []
+        return sorted(p for p in directory.rglob("*") if p.is_file())
 
     # ---------- reading ----------
 

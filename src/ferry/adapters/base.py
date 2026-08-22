@@ -72,12 +72,18 @@ class ImportOptions:
     ``backup`` defaults to on deliberately: Ferry writes into a user's real
     conversation history, and losing that is the worst failure this project has
     (PLAN.md §6.1).
+
+    ``path_remap`` exists because a conversation carries the absolute path of
+    the directory it happened in, and that path is usually wrong on the machine
+    it is being restored to. Rules are ``(old_prefix, new_prefix)`` pairs
+    applied in order, first match wins; an unmatched path is left as it was.
     """
 
     backup: bool = True
     dry_run: bool = False
     on_conflict: Literal["skip", "overwrite", "rename"] = "skip"
     allow_cross_tool: bool = False
+    path_remap: tuple[tuple[str, str], ...] = ()
 
 
 class Adapter(ABC):
@@ -149,7 +155,13 @@ REGISTRY: dict[str, Adapter] = {
     "copilot": NotImplementedAdapter("copilot", "GitHub Copilot Chat", "M5"),
     "antigravity": NotImplementedAdapter("antigravity", "Antigravity", "M6"),
 }
-"""All known adapters, in the order they are implemented and displayed."""
+"""All known adapters, in the order they are implemented and displayed.
+
+Seeded with stubs and overwritten by ``ferry.adapters.__init__`` as each real
+adapter arrives. The registration lives there rather than here so this module
+stays free of adapter imports -- every adapter imports *this* file, so an
+import in the other direction would be a cycle.
+"""
 
 
 def list_adapters() -> list[Adapter]:

@@ -31,6 +31,24 @@ def _isolate_user_config(tmp_path_factory, monkeypatch):
     return fake
 
 
+@pytest.fixture(autouse=True)
+def _isolate_assistant_data(tmp_path_factory, monkeypatch):
+    """Point every adapter at an empty conversation store.
+
+    Without this the suite reads the developer's own Claude Code history: the
+    registry's adapters resolve their paths from the environment, so a test
+    asserting "nothing is installed" passes in CI (where nothing is) and fails
+    on any machine that actually uses the tool. Worse, a test that ever grew a
+    write would be writing into real conversations.
+
+    Adapters constructed with an explicit ``env=`` are unaffected — that is how
+    the adapter's own tests lay out fixtures.
+    """
+    empty = tmp_path_factory.mktemp("assistant-data")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(empty))
+    return empty
+
+
 CONV_ID = UUID("11111111-1111-4111-8111-111111111111")
 ATTACH_ID = UUID("22222222-2222-4222-8222-222222222222")
 
