@@ -130,3 +130,52 @@ src/ferry/
 scripts/          maintained tooling (schema generation, self-checks)
 schemas/          generated JSON schema, checked in
 ```
+
+## The CLI layer (M2)
+
+The interface is deliberately interactive-first: running bare `ferry` scans for
+installed assistants and drops into a menu, rather than requiring the user to
+know command names. Flags exist underneath for scripting and for the planned
+VS Code extension, but they are the secondary path.
+
+```
+ferry.cli.__init__   typer app, flags, non-TTY guard
+ferry.cli.menu       scan screen + top-level menu loop
+ferry.cli.ui         THE presentation layer — all output and prompts
+ferry.cli.theme      palettes, icon sets, capability detection
+ferry.adapters.base  Adapter ABC, events, registry
+```
+
+### Everything on screen goes through `ferry.cli.ui`
+
+No module outside `ferry.cli` may import `rich` or `questionary` directly. The
+moment an adapter prints its own coloured output, half the interface stops
+respecting the active theme and the degradation rules below silently stop
+applying. `UI` is the only sanctioned way to write to the terminal.
+
+### Themes and degradation
+
+Four themes ship: `harbor` (default), `compass`, `classic`, and `mono`.
+Selection order is `--theme` → `FERRY_THEME` → `harbor`. An unrecognised name
+falls back to the default rather than raising — a typo should never block
+someone migrating their history.
+
+Two independent capability checks then constrain the result:
+
+| Condition | Effect |
+|---|---|
+| Not a TTY, `NO_COLOR`, or `TERM=dumb` | Whole theme drops to `mono` |
+| Stream encoding cannot represent the glyphs | Icons drop to ASCII, **colours kept** |
+
+The second check is a crash guard, not a cosmetic one. Windows consoles
+routinely report `cp1252`, which has no mapping for `✔` — printing one there
+raises `UnicodeEncodeError` and takes the process down. `supports_unicode()`
+probes the stream's encoding with the full glyph set and downgrades the icons
+alone, so a Windows user still gets a coloured interface.
+
+### Adapters at M2
+
+`ferry.adapters.base` defines the contract from PLAN.md §4. All four adapters
+are `NotImplementedAdapter` stubs that report `installed=False` with the
+milestone they arrive at. They deliberately do **not** invent conversation
+counts — the scan screen tells the truth about what exists today.
