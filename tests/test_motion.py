@@ -457,7 +457,7 @@ def test_which_menu_glyphs_are_ambiguous_width_is_visible() -> None:
         for ch in "".join(motion.frames) + motion.rest:
             if not ch.isascii() and unicodedata.east_asian_width(ch) == "A":
                 ambiguous.add(ch)
-    assert ambiguous == set("≈·█▄▃▂▁"), sorted(f"U+{ord(c):04X}" for c in ambiguous)
+    assert ambiguous == set("≈·▒▓▄▃▂▁"), sorted(f"U+{ord(c):04X}" for c in ambiguous)
 
 
 def test_every_menu_icon_matches_the_declared_cell_width() -> None:
@@ -513,3 +513,50 @@ def test_the_allow_list_covers_everything_ferry_prints() -> None:
         f"U+{ord(c):04X}" for c in _every_glyph_ferry_can_print() - set(TEXT_ONLY_GLYPHS)
     )
     assert missing == [], f"printed but not allow-listed: {missing}"
+
+
+# ---------- the crossing ----------
+
+
+def test_the_hull_actually_travels_across_the_cell() -> None:
+    """A ferry that holds station is not making a crossing."""
+    positions = [f.index("\u25b8") for f in MENU_MOTION["export"].frames]
+    assert positions == sorted(positions), positions
+    assert positions[0] == 0
+    assert positions[-1] == ICON_CELL - 1
+
+
+def test_import_crosses_the_other_way() -> None:
+    positions = [f.index("\u25c2") for f in MENU_MOTION["import"].frames]
+    assert positions == sorted(positions, reverse=True), positions
+    assert positions[0] == ICON_CELL - 1
+    assert positions[-1] == 0
+
+
+def test_the_wake_trails_behind_the_hull_never_ahead_of_it() -> None:
+    """Water in front of the bow would read as the ferry going backwards."""
+    for name, hull in (("export", "▸"), ("import", "◂")):
+        for frame in MENU_MOTION[name].frames:
+            index = frame.index(hull)
+            ahead = frame[index + 1 :] if name == "export" else frame[:index]
+            assert ahead.strip() == "", f"{name}: wake ahead of the bow in {frame!r}"
+
+
+def test_the_crossing_lengthens_the_wake() -> None:
+    """Later in the crossing there is more water behind you."""
+    counts = [f.count("\u2248") for f in MENU_MOTION["export"].frames]
+    assert counts[0] == 0
+    assert max(counts) > 1
+
+
+def test_every_resting_icon_sits_in_the_middle_column() -> None:
+    """This is what keeps the untouched menu in one straight column."""
+    middle = ICON_CELL // 2
+    for name, motion in MENU_MOTION.items():
+        assert motion.rest[middle] != " ", f"{name}: {motion.rest!r}"
+        assert motion.ascii_rest[middle] != " ", f"{name}: {motion.ascii_rest!r}"
+
+
+def test_the_theme_swatch_is_a_shade_ramp() -> None:
+    """Light to dark reads as a palette even in a single hue."""
+    assert MENU_MOTION["theme"].rest.strip() == "\u2591\u2592\u2593"

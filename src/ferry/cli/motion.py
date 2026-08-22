@@ -160,38 +160,45 @@ class Motion:
 ICON_CELL: Final = 5
 """Columns every menu icon occupies.
 
-Five, not three, because export and import need two columns of wake on one
-side of a centred hull. Anything narrower forces a choice between a wake that
-visibly moves and both hulls sitting in the same column, and the hulls have to
-win — a resting menu with its markers at different offsets is what the column
-looked like before this was fixed.
+Five gives the crossing room to read as a crossing: the hull needs somewhere
+to set off from and somewhere to arrive, and the wake needs two crests behind
+it before the pattern is legible as water rather than as noise.
+
+Every icon is padded to exactly this, and every *resting* icon puts its mark in
+the middle column, so a menu nobody is touching has one straight column of
+markers. Only the row under the cursor travels.
 """
 
-_WAKE_COLUMNS: Final = ICON_CELL - 3
-"""Columns of wake either side of the centred hull."""
 
+def _crossing(*, inbound: bool, ascii_only: bool) -> tuple[str, ...]:
+    """A hull crossing the cell, wake trailing behind it.
 
-def _sailing(*, inbound: bool, ascii_only: bool) -> tuple[str, ...]:
-    """Frames of a hull holding station with its wake drifting past.
+    The hull genuinely travels — it enters one side, crosses, and leaves the
+    other — because a ferry that holds station is not making a crossing. The
+    wake trails at :data:`WAKE_PERIOD` spacing behind wherever the hull has got
+    to, so it lengthens as the crossing proceeds.
 
-    Built from :func:`wake_row` rather than written out, so these icons are
-    literally the same code that draws the wake under the wordmark. The hull
-    stays in the middle column and only the water moves, which is both the
-    honest physics and what keeps the icons aligned at rest.
+    Alignment is preserved by the *resting* frame rather than by pinning the
+    hull: only the selected row animates, so every other marker is sitting in
+    the middle column while this one sails.
 
     Args:
-        inbound: Mirror it — hull facing left, wake on the right.
+        inbound: Mirror it — hull facing left, arriving from the right.
         ascii_only: Use ASCII glyphs.
     """
-    mark, gap, hull = ("~", " ", "<") if ascii_only else ("≈", " ", "◂")
-    if not inbound:
-        hull = ">" if ascii_only else "▸"
+    mark, gap = ("~", " ") if ascii_only else ("≈", " ")
+    hull = ("<" if ascii_only else "◂") if inbound else (">" if ascii_only else "▸")
+
     frames = []
-    for phase in range(WAKE_PERIOD):
-        wake = wake_row(_WAKE_COLUMNS, phase, mark=mark, gap=gap)
-        # The wake always trails the hull, so it sits behind whichever way the
-        # hull points, and reverses with it.
-        frames.append(" " * _WAKE_COLUMNS + hull + wake[::-1] if inbound else wake + hull + "  ")
+    for position in range(ICON_CELL):
+        # Wake crests sit one period apart behind the hull; `distance` counts
+        # columns astern, so the same period that draws the wordmark's water
+        # draws this one.
+        cells = [
+            mark if (position - column) % WAKE_PERIOD == 1 else gap for column in range(position)
+        ]
+        row = "".join(cells) + hull + gap * (ICON_CELL - position - 1)
+        frames.append(row[::-1] if inbound else row)
     return tuple(frames)
 
 
@@ -206,14 +213,14 @@ MENU_MOTION: Final[dict[str, Motion]] = {
     # distinguishable before the labels are read, and both should read as the
     # thing on the banner.
     "export": Motion(
-        frames=_sailing(inbound=False, ascii_only=False),
-        ascii_frames=_sailing(inbound=False, ascii_only=True),
+        frames=_crossing(inbound=False, ascii_only=False),
+        ascii_frames=_crossing(inbound=False, ascii_only=True),
         rest=_still("▸"),
         ascii_rest=_still(">"),
     ),
     "import": Motion(
-        frames=_sailing(inbound=True, ascii_only=False),
-        ascii_frames=_sailing(inbound=True, ascii_only=True),
+        frames=_crossing(inbound=True, ascii_only=False),
+        ascii_frames=_crossing(inbound=True, ascii_only=True),
         rest=_still("◂"),
         ascii_rest=_still("<"),
         styles=("accent",),
@@ -234,13 +241,14 @@ MENU_MOTION: Final[dict[str, Motion]] = {
         rest=" ▃▃▃ ",
         ascii_rest=" === ",
     ),
-    # A solid swatch that holds still while the colour rotates through the
-    # palette — the one icon whose animation *is* its meaning.
+    # A shade ramp — light, medium, dark — which is what a palette looks like
+    # when you only have one hue. It holds still while the colour rotates
+    # through the theme, the one icon whose animation *is* its meaning.
     "theme": Motion(
-        frames=("  █  ",),
-        ascii_frames=("  #  ",),
-        rest="  █  ",
-        ascii_rest="  #  ",
+        frames=(" ░▒▓ ",),
+        ascii_frames=(" .:# ",),
+        rest=" ░▒▓ ",
+        ascii_rest=" .:# ",
         styles=("primary", "accent", "success", "warning"),
     ),
     # The IEC power symbol, breathing dim to red the way a standby light does.

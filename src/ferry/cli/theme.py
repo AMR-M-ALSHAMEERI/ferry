@@ -142,7 +142,8 @@ TEXT_ONLY_GLYPHS: Final = frozenset(
     "╷╰╯"  # the ferry mark: funnel and hull
     "┏┓┗┛┣┳━╸╹╻"  # the wordmark's block letterforms
     "▸◂⏻"  # menu icons: the hulls and the power symbol
-    "█▄▃▂▁"  # menu icons: the theme swatch and the settling cargo
+    "░▒▓"  # menu icons: the theme shade ramp
+    "▄▃▂▁"  # menu icons: the settling cargo
     "—"  # prose punctuation
 )
 """Every non-ASCII character Ferry is allowed to print.
