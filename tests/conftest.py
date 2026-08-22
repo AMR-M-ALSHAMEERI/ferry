@@ -17,6 +17,20 @@ from ferry.ucs import (
     Workspace,
 )
 
+
+@pytest.fixture(autouse=True)
+def _isolate_user_config(tmp_path_factory, monkeypatch):
+    """Point Ferry's settings file at a temp location for every test.
+
+    ``resolve_theme`` consults ``~/.ferry/config.json``, so without this a
+    developer who has saved a theme would get different results from CI. Tests
+    must never read or write the real user config.
+    """
+    fake = tmp_path_factory.mktemp("ferry-config") / "config.json"
+    monkeypatch.setattr("ferry.config.CONFIG_PATH", fake)
+    return fake
+
+
 CONV_ID = UUID("11111111-1111-4111-8111-111111111111")
 ATTACH_ID = UUID("22222222-2222-4222-8222-222222222222")
 

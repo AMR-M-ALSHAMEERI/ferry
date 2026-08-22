@@ -31,7 +31,6 @@ from rich.progress import (
 from rich.table import Table
 from rich.theme import Theme as RichTheme
 
-from ferry import __version__
 from ferry.cli.theme import DEFAULT_THEME, Capability, Theme, detect_capability, resolve_theme
 
 __all__ = ["UI", "NonInteractiveError"]
@@ -101,6 +100,16 @@ class UI:
             highlight=False,
         )
 
+    def set_theme(self, name: str) -> None:
+        """Switch theme mid-session and rebuild the console.
+
+        Goes through :func:`resolve_theme` rather than looking the name up
+        directly, so a theme picked interactively is still subject to the same
+        capability downgrades as one passed with ``--theme``.
+        """
+        self.theme = resolve_theme(name, capability=self.capability)
+        self.console = self._build_console()
+
     @property
     def interactive(self) -> bool:
         """Whether prompts can actually be shown."""
@@ -114,11 +123,15 @@ class UI:
 
     # ---------- output ----------
 
-    def banner(self) -> None:
-        """Print the product name and version."""
-        name = self._style("ferry.heading", "Ferry")
-        ver = self._style("ferry.dim", __version__)
-        self.console.print(f"\n  {name} {ver}\n")
+    def banner(self, *, animate: bool = True) -> None:
+        """Print the animated wordmark.
+
+        Imported here rather than at module level because ``brand`` needs the
+        ``UI`` type for its own annotations.
+        """
+        from ferry.cli import brand
+
+        brand.render(self, self.theme, animate=animate)
 
     def info(self, message: str) -> None:
         """Print a neutral status line."""
@@ -240,7 +253,12 @@ class UI:
             raise NonInteractiveError(action, hint)
 
     def select(
-        self, question: str, choices: Sequence[tuple[str, str]], *, hint: str = ""
+        self,
+        question: str,
+        choices: Sequence[tuple[str, str]],
+        *,
+        hint: str = "",
+        allow_filter: bool = True,
     ) -> str | None:
         """Ask the user to pick one option.
 
@@ -253,13 +271,14 @@ class UI:
             The chosen value, or ``None`` if the user cancelled.
         """
         self._require_interactive(question, hint)
-        answer = questionary.select(
+        from ferry.cli.prompts import SelectorItem, run_select
+
+        return run_select(
             question,
-            choices=[Choice(title=label, value=value) for value, label in choices],
-            qmark=self.theme.icons.info,
-            pointer=self.theme.icons.cursor,
-        ).ask()
-        return answer if isinstance(answer, str) else None
+            [SelectorItem(value, label) for value, label in choices],
+            theme=self.theme,
+            allow_filter=allow_filter,
+        )
 
     def multiselect(
         self,
@@ -290,13 +309,17 @@ class UI:
     def confirm(self, question: str, *, default: bool, hint: str = "") -> bool | None:
         """Ask a yes/no question.
 
+        Rendered as an arrow-selectable Yes/No, never as a typed ``[y/N]``
+        prompt (PROGRESS.md ledger #71).
+
         ``default`` is deliberately a required argument: read operations should
         default to yes, anything that writes to a user's real data should
-        default to no.
+        default to no. It decides which option starts under the cursor.
         """
         self._require_interactive(question, hint)
-        answer = questionary.confirm(question, default=default, qmark=self.theme.icons.info).ask()
-        return answer if isinstance(answer, bool) else None
+        from ferry.cli.prompts import run_confirm
+
+        return run_confirm(question, theme=self.theme, default=default)
 
     def path(self, question: str, *, default: str = "", hint: str = "") -> str | None:
         """Ask for a filesystem path, with tab completion."""

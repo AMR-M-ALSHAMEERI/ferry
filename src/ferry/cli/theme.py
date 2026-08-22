@@ -27,6 +27,8 @@ from enum import Enum
 from typing import Final
 
 __all__ = [
+    "BRAND_MARK",
+    "BRAND_WAKE",
     "DEFAULT_THEME",
     "THEMES",
     "Capability",
@@ -112,8 +114,22 @@ ASCII_ICONS: Final = IconSet(
 )
 """Pure ASCII, for log files and terminals that mangle Unicode."""
 
-_UNICODE_PROBE: Final = "".join(getattr(UNICODE_ICONS, f.name) for f in dataclasses.fields(IconSet))
-"""Every Unicode glyph at once, for testing whether a stream can encode them."""
+BRAND_MARK: Final = "⟢"
+"""The wordmark's leading mark. Defined here rather than in ``brand`` so the
+probe below covers it — a console can carry every status icon and still lack
+this glyph."""
+
+BRAND_WAKE: Final = "≈"
+"""The wordmark's wake character."""
+
+_UNICODE_PROBE: Final = (
+    "".join(getattr(UNICODE_ICONS, f.name) for f in dataclasses.fields(IconSet))
+    + BRAND_MARK
+    + BRAND_WAKE
+)
+"""Every Unicode glyph Ferry can emit, for testing whether a stream can encode
+them. Anything new added to the interface must be added here too, or it will
+crash on a legacy console instead of degrading."""
 
 
 def supports_unicode(stream: object | None = None) -> bool:
@@ -258,6 +274,18 @@ def detect_capability(
     return Capability.COLOR
 
 
+def _saved_theme() -> str | None:
+    """The theme saved in ``~/.ferry/config.json``, if any.
+
+    Imported lazily so this module stays importable without touching the
+    filesystem — the tests resolve themes thousands of times.
+    """
+    from ferry.config import read_setting
+
+    value = read_setting("theme")
+    return value if isinstance(value, str) else None
+
+
 def resolve_theme(
     requested: str | None = None,
     *,
@@ -269,6 +297,7 @@ def resolve_theme(
 
     Selection order for the *requested* name, highest priority first: the
     ``requested`` argument (the ``--theme`` flag), then ``FERRY_THEME``, then
+    the ``theme`` key saved in ``~/.ferry/config.json``, then
     :data:`DEFAULT_THEME`. A name that is not recognised falls back to the
     default rather than raising — a bad theme name should never stop someone
     migrating their conversations.
@@ -290,7 +319,7 @@ def resolve_theme(
     environ = os.environ if env is None else env
     cap = detect_capability(env=environ) if capability is None else capability
 
-    name = requested or environ.get("FERRY_THEME") or DEFAULT_THEME
+    name = requested or environ.get("FERRY_THEME") or _saved_theme() or DEFAULT_THEME
     theme = THEMES.get(name.strip().lower(), THEMES[DEFAULT_THEME])
 
     if cap is not Capability.COLOR:

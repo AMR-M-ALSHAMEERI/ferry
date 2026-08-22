@@ -130,6 +130,59 @@ def check_icons_downgrade_on_legacy_encoding() -> Result:
     return Result(False, f"icons={theme.icons.success!r} colour={theme.uses_color}")
 
 
+def check_wordmark_renders_in_both_glyph_modes() -> Result:
+    """The wordmark must print on a cp1252 console as well as a UTF-8 one."""
+    import dataclasses
+    import io
+
+    from rich.console import Console
+
+    from ferry.cli.theme import ASCII_ICONS, HARBOR, Capability
+    from ferry.cli.ui import UI
+
+    for label, theme in (
+        ("unicode", HARBOR),
+        ("ascii", dataclasses.replace(HARBOR, icons=ASCII_ICONS)),
+    ):
+        buf = io.StringIO()
+        ui = UI(theme, capability=Capability.COLOR)
+        ui.console = Console(file=buf, no_color=True, width=70)
+        ui.banner(animate=False)
+        lines = [line for line in buf.getvalue().splitlines() if line.strip()]
+        if len(lines) != 3:
+            return Result(False, f"{label}: expected 3 lines, got {len(lines)}")
+        if "F E R R Y" not in lines[0]:
+            return Result(False, f"{label}: name missing from first line")
+        if label == "ascii" and not buf.getvalue().isascii():
+            return Result(False, "ascii wordmark emitted a non-ASCII character")
+    return Result(True, "3 lines, unicode and ascii forms")
+
+
+def check_theme_choice_persists() -> Result:
+    """A theme picked in the UI must still apply on the next run."""
+    import tempfile
+    from pathlib import Path as _Path
+
+    from ferry.cli.theme import Capability, resolve_theme
+    from ferry.config import write_setting
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = _Path(tmp) / "config.json"
+        if not write_setting("theme", "compass", path=path):
+            return Result(False, "could not write the settings file")
+        import ferry.config as cfg
+
+        original = cfg.CONFIG_PATH
+        cfg.CONFIG_PATH = path
+        try:
+            theme = resolve_theme(None, capability=Capability.COLOR, env={})
+        finally:
+            cfg.CONFIG_PATH = original
+    if theme.name == "compass":
+        return Result(True, "saved theme honoured on next resolve")
+    return Result(False, f"got {theme.name!r}, expected 'compass'")
+
+
 def main() -> int:
     checks = [
         ("Entry point runs", check_entry_point_runs),
@@ -142,6 +195,8 @@ def main() -> int:
         ("Every adapter listed", check_tools_lists_every_adapter),
         ("Stubs report honestly", check_stubs_claim_nothing_installed),
         ("Icons downgrade on cp1252", check_icons_downgrade_on_legacy_encoding),
+        ("Wordmark renders both ways", check_wordmark_renders_in_both_glyph_modes),
+        ("Theme choice persists", check_theme_choice_persists),
     ]
 
     print("Ferry self-check — M2 (interactive CLI shell)")

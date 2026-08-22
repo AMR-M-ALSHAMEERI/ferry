@@ -1,24 +1,28 @@
 """The interactive flows: scan, top-level menu, and the per-action stubs.
 
-At M2 the actions are stubs. The menu structure, the scan screen and the
-non-interactive guard are real, so later milestones fill in behaviour behind an
-interface that already works.
+At M2 the export/import/inspect/compact actions are stubs. The wordmark, the
+scan screen, the theme picker, the slash filter and the non-interactive guard
+are all real, so later milestones fill in behaviour behind a finished interface.
 """
 
 from __future__ import annotations
 
 from ferry.adapters.base import Adapter, DetectResult, list_adapters
 from ferry.cli.ui import UI, NonInteractiveError, _DetectionRow
+from ferry.config import write_setting
 
-__all__ = ["run_menu", "scan"]
+__all__ = ["MENU_ITEMS", "run_menu", "scan"]
 
-_MENU_CHOICES: list[tuple[str, str]] = [
+MENU_ITEMS: list[tuple[str, str]] = [
     ("export", "Export conversations to a bundle"),
     ("import", "Import a bundle into a tool"),
     ("inspect", "Inspect a bundle"),
     ("compact", "Compact a conversation into a summary"),
+    ("theme", "Change theme"),
     ("quit", "Quit"),
 ]
+"""Top-level actions. Typing `/` filters this list, so the labels double as the
+slash-command vocabulary — `/theme` finds "Change theme"."""
 
 _MILESTONE_FOR_ACTION: dict[str, str] = {
     "export": "M3",
@@ -78,8 +82,29 @@ def _stub(ui: UI, action: str) -> None:
     ui.blank()
 
 
+def _change_theme(ui: UI) -> None:
+    """Open the live-preview theme picker and apply the result.
+
+    The new theme takes effect immediately and is saved, so the next run starts
+    with it. A failed save is reported but not fatal — the choice still applies
+    for this session.
+    """
+    from ferry.cli.themepicker import pick_theme
+
+    chosen = pick_theme(ui.theme)
+    if chosen is None:
+        return
+
+    ui.set_theme(chosen)
+    if write_setting("theme", chosen):
+        ui.success(f"Theme set to {chosen}.")
+    else:
+        ui.warn(f"Theme set to {chosen} for this session — could not save it.")
+    ui.blank()
+
+
 def run_menu(ui: UI) -> int:
-    """Run the scan, then loop on the top-level menu.
+    """Show the wordmark, scan, then loop on the top-level menu.
 
     Returns:
         A process exit code.
@@ -100,7 +125,7 @@ def run_menu(ui: UI) -> int:
         try:
             action = ui.select(
                 "What would you like to do?",
-                _MENU_CHOICES,
+                MENU_ITEMS,
                 hint="Run `ferry --help` to see the non-interactive options.",
             )
         except NonInteractiveError as exc:
@@ -109,5 +134,9 @@ def run_menu(ui: UI) -> int:
 
         if action is None or action == "quit":
             return 0
+
+        if action == "theme":
+            _change_theme(ui)
+            continue
 
         _stub(ui, action)
