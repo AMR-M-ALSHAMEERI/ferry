@@ -580,3 +580,31 @@ def test_the_theme_swatch_differs_in_shape_from_its_neighbour() -> None:
     assert len(theme) == 1, theme
     assert len(compact) > 1, compact
     assert not set(theme) & set(compact)
+
+
+# ---------- colour carries meaning ----------
+
+
+def test_selecting_a_row_never_makes_it_fainter() -> None:
+    """Regression: Quit breathed through `dim`, so putting the cursor on it
+    rendered the row less prominent than leaving it alone."""
+    for name, motion in MENU_MOTION.items():
+        for tick in range(len(motion.styles) * 2):
+            assert motion.style(tick) != "dim", f"{name} goes dim while selected"
+
+
+def test_only_quit_keeps_its_colour_while_unselected() -> None:
+    """A menu where every line is a different colour is a rainbow, not a
+    design. Leaving is the one action worth finding without reading."""
+    tinted = {name for name, m in MENU_MOTION.items() if m.rest_style}
+    assert tinted == {"quit"}
+    assert MENU_MOTION["quit"].rest_style == "error"
+
+
+def test_compact_carries_the_warning_colour() -> None:
+    """It rewrites a conversation into a summary and cannot be undone from it."""
+    assert MENU_MOTION["compact"].styles == ("warning",)
+
+
+def test_export_and_import_are_coloured_apart() -> None:
+    assert MENU_MOTION["export"].styles != MENU_MOTION["import"].styles

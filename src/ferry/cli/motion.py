@@ -121,6 +121,11 @@ class Motion:
         styles: Theme colour tokens cycled alongside the frames. Usually one.
             The theme picker's own icon uses several, so its colour rotates
             while its glyph stays put.
+        rest_style: Theme colour token for the *label* of this row when it is
+            not selected. Empty means the ordinary text colour, which is what
+            almost every row should use — a menu where every line is a
+            different colour is a rainbow, not a design. Reserved for rows
+            that need to be recognisable without being read.
     """
 
     frames: tuple[str, ...]
@@ -128,6 +133,7 @@ class Motion:
     rest: str
     ascii_rest: str
     styles: tuple[str, ...] = ("primary",)
+    rest_style: str = ""
 
     def __post_init__(self) -> None:
         if not self.frames or not self.ascii_frames or not self.styles:
@@ -246,6 +252,10 @@ MENU_MOTION: Final[dict[str, Motion]] = {
         ascii_frames=(" ### ", " === ", " --- ", " ___ ", " --- ", " === "),
         rest=" ▃▃▃ ",
         ascii_rest=" === ",
+        # Compacting rewrites a conversation into a summary and cannot be
+        # undone from the summary, so it carries the warning colour rather
+        # than the ordinary one.
+        styles=("warning",),
     ),
     # A single solid mark. It was a three-cell shade ramp, which sat directly
     # under Compact's three-cell block bar and read as one object split over
@@ -264,7 +274,13 @@ MENU_MOTION: Final[dict[str, Motion]] = {
         ascii_frames=(" (|) ",),
         rest="  ⏻  ",
         ascii_rest=" (|) ",
-        styles=("dim", "error", "error", "dim"),
+        # Breathes red with one amber beat. It used to breathe through `dim`,
+        # which made selecting Quit render it *fainter* than leaving it alone —
+        # selection must never reduce emphasis.
+        styles=("error", "error", "warning", "error"),
+        # The only row that keeps its colour while unselected. Leaving is the
+        # one thing you should be able to find without reading the menu.
+        rest_style="error",
     ),
 }
 """Per-action icons, keyed by the menu action name."""

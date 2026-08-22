@@ -225,7 +225,11 @@ HARBOR: Final = Theme(
     accent="#f59e0b",
     success="#34d399",
     error="#f87171",
-    warning="#f59e0b",
+    # Yellow, not the accent amber. The two were identical, which was harmless
+    # while `warning` only ever appeared on warning lines — but the menu now
+    # colours a selected row by what kind of action it is, and Import (accent)
+    # sitting two rows from Compact (warning) rendered them the same colour.
+    warning="#fcd34d",
     dim="#64748b",
     text="#e2e8f0",
     heading="bold #5eead4",

@@ -251,6 +251,15 @@ def _render(
             glyph = item.motion.frame(tick, selected=selected, ascii_only=ascii_only)
             style = _style_for(theme, item.motion.style(tick, selected=selected))
             out += marker(glyph, style)
+            # The selected row's label takes its own icon's colour rather than
+            # one highlight colour for everything, so choosing an action tells
+            # you what kind of action it is: Compact warns, Quit reds, Change
+            # theme cycles with its swatch. Unselected rows stay neutral unless
+            # the motion asks otherwise.
+            if selected:
+                label_style = style
+            elif not model.filtering and item.motion.rest_style:
+                label_style = _style_for(theme, item.motion.rest_style)
             out += [(label_style, item.label)]
         elif selected:
             out += marker(icons.cursor, primary)

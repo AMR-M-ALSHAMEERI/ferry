@@ -536,3 +536,63 @@ def test_the_theme_picker_marks_the_active_theme() -> None:
     finally:
         tp.run_select = original
     assert captured["current"] == "compass"
+
+
+def test_the_selected_label_takes_its_own_icon_colour() -> None:
+    """Choosing an action should tell you what kind of action it is."""
+    from ferry.cli.motion import MENU_MOTION
+    from ferry.cli.prompts import _render
+
+    items = [
+        SelectorItem("compact", "Compact", motion=MENU_MOTION["compact"]),
+        SelectorItem("export", "Export", motion=MENU_MOTION["export"]),
+    ]
+    frags = _render(SelectorModel(items), HARBOR, "", None, False, 0)
+    label = next(style for style, txt in frags if txt == "Compact")
+    assert label == f"fg:{HARBOR.warning}"
+
+
+def test_quit_stays_red_even_when_the_cursor_is_elsewhere() -> None:
+    from ferry.cli.motion import MENU_MOTION
+    from ferry.cli.prompts import _render
+
+    items = [
+        SelectorItem("export", "Export", motion=MENU_MOTION["export"]),
+        SelectorItem("quit", "Quit", motion=MENU_MOTION["quit"]),
+    ]
+    frags = _render(SelectorModel(items), HARBOR, "", None, False, 0)
+    assert next(style for style, txt in frags if txt == "Quit") == f"fg:{HARBOR.error}"
+
+
+def test_row_colours_vanish_under_mono() -> None:
+    """No colour means no colour, semantic or otherwise."""
+    from ferry.cli.motion import MENU_MOTION
+    from ferry.cli.prompts import _render
+
+    items = [SelectorItem("quit", "Quit", motion=MENU_MOTION["quit"])]
+    frags = _render(SelectorModel(items), MONO, "", None, False, 0)
+    assert {style for style, _ in frags} == {""}
+
+
+def test_no_theme_reuses_one_colour_for_two_meanings() -> None:
+    """The menu colours a selected row by what kind of action it is, so two
+    semantic tokens sharing a hex value make two different actions look alike.
+    Harbor had `accent` and `warning` both amber."""
+    for name, theme in THEMES.items():
+        if not theme.uses_color:
+            continue
+        used = {
+            "primary": theme.primary,
+            "accent": theme.accent,
+            "success": theme.success,
+            "error": theme.error,
+            "warning": theme.warning,
+            "dim": theme.dim,
+        }
+        clashes = [
+            (a, b)
+            for i, (a, va) in enumerate(used.items())
+            for b, vb in list(used.items())[i + 1 :]
+            if va == vb
+        ]
+        assert clashes == [], f"{name}: {clashes}"
