@@ -322,6 +322,7 @@ class UI:
         hint: str = "",
         allow_filter: bool = True,
         motions: Mapping[str, Motion] | None = None,
+        current: str | None = None,
     ) -> str | None:
         """Ask the user to pick one option.
 
@@ -334,6 +335,8 @@ class UI:
                 explicitly rather than looked up by value, so a list whose
                 values happen to collide with action names cannot pick up
                 icons it never asked for.
+            current: Value already in force, marked "in use" in the list. Pass
+                it from every picker that changes a persistent setting.
 
         Returns:
             The chosen value, or ``None`` if the user cancelled.
@@ -347,6 +350,7 @@ class UI:
             [SelectorItem(value, label, motion=marks.get(value)) for value, label in choices],
             theme=self.theme,
             allow_filter=allow_filter,
+            current=current,
         )
 
     def multiselect(

@@ -194,6 +194,7 @@ def _render(
     preview: Callable[[SelectorItem], Fragments] | None,
     allow_filter: bool,
     tick: int = 0,
+    current: str | None = None,
 ) -> Fragments:
     """Build the frame shown on each redraw.
 
@@ -201,6 +202,7 @@ def _render(
         tick: Animation tick. Only the row under the cursor animates — six
             icons moving at once is noise, and animating just the selected one
             doubles as a second cursor indicator for the same redraw cost.
+        current: Value of the option already in force, marked "in use".
     """
     icons = theme.icons
     ascii_only = icons is ASCII_ICONS
@@ -258,12 +260,17 @@ def _render(
             out += [(label_style, item.label)]
         if item.hint:
             out += [(dim, f"   {item.hint}")]
+        if item.value == current:
+            # Which option is already in force is a different fact from which
+            # one the cursor is on, and a picker that only shows the cursor
+            # leaves you guessing what you would be changing away from.
+            out += [(accent, f"   {icons.selected} in use")]
         out += [("", "\n")]
 
-    current = model.current
-    if preview is not None and current is not None:
+    highlighted = model.current
+    if preview is not None and highlighted is not None:
         out += [("", "\n")]
-        out += preview(current)
+        out += preview(highlighted)
 
     out += [("", "\n")]
     if model.filtering:
@@ -285,6 +292,7 @@ def run_select(
     preview: Callable[[SelectorItem], Fragments] | None = None,
     allow_filter: bool = True,
     initial: int = 0,
+    current: str | None = None,
 ) -> str | None:
     """Show an arrow-driven picker and return the chosen value.
 
@@ -296,6 +304,10 @@ def run_select(
             item. Called on every cursor move, so it must be cheap.
         allow_filter: Whether ``/`` opens the filter.
         initial: Index highlighted on open.
+        current: Value of the option already in force, marked "in use". Any
+            picker that changes a persistent setting should pass this — the
+            cursor says what you are looking at, not what you are looking at
+            *instead of*.
 
     Returns:
         The chosen item's value, or ``None`` if the user cancelled.
@@ -359,7 +371,7 @@ def run_select(
                 model.set_filter(model.filter + char)
 
     control = FormattedTextControl(
-        lambda: _render(model, theme, title, preview, allow_filter, tick()),
+        lambda: _render(model, theme, title, preview, allow_filter, tick(), current),
         focusable=True,
         show_cursor=False,
     )

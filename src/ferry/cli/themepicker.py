@@ -104,4 +104,5 @@ def pick_theme(active: Theme) -> str | None:
         preview=preview,
         allow_filter=False,
         initial=initial,
+        current=active.name,
     )

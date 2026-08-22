@@ -467,3 +467,72 @@ def test_lists_without_motion_are_aligned_too() -> None:
         title_col = rows[0].index("A question")
         for row, item in zip(rows[1:], ITEMS, strict=False):
             assert row.index(item.label) == title_col, f"{row!r} vs {rows[0]!r}"
+
+
+# ---------- marking the option already in force ----------
+
+
+def test_the_option_in_use_is_marked() -> None:
+    """The cursor says what you are looking at, not what you are looking at
+    *instead of*. A settings picker has to show both."""
+    from ferry.cli.prompts import _render
+
+    text = _text_of(_render(SelectorModel(ITEMS), HARBOR, "", None, False, 0, "theme"))
+    marked = [line for line in text.split("\n") if "in use" in line]
+    assert len(marked) == 1
+    assert "Change theme" in marked[0]
+
+
+def test_nothing_is_marked_when_no_current_value_is_given() -> None:
+    from ferry.cli.prompts import _render
+
+    text = _text_of(_render(SelectorModel(ITEMS), HARBOR, "", None, False, 0, None))
+    assert "in use" not in text
+
+
+def test_an_unknown_current_value_marks_nothing_rather_than_raising() -> None:
+    """A saved setting naming a theme that no longer exists must not crash."""
+    from ferry.cli.prompts import _render
+
+    text = _text_of(_render(SelectorModel(ITEMS), HARBOR, "", None, False, 0, "nonsense"))
+    assert "in use" not in text
+
+
+def test_the_in_use_marker_survives_the_ascii_fallback() -> None:
+    from ferry.cli.prompts import _render
+
+    theme = dataclasses.replace(HARBOR, icons=ASCII_ICONS)
+    text = _text_of(_render(SelectorModel(ITEMS), theme, "", None, False, 0, "theme"))
+    assert "in use" in text
+    assert text.isascii()
+
+
+def test_the_in_use_marker_does_not_disturb_the_label_column() -> None:
+    from ferry.cli.prompts import _render
+
+    plain = _text_of(_render(SelectorModel(ITEMS), HARBOR, "A question", None, False, 0, None))
+    marked = _text_of(_render(SelectorModel(ITEMS), HARBOR, "A question", None, False, 0, "quit"))
+    for word in ("A question", *(item.label for item in ITEMS)):
+        line_a = next(line for line in plain.split("\n") if word in line)
+        line_b = next(line for line in marked.split("\n") if word in line)
+        assert line_a.index(word) == line_b.index(word), (line_a, line_b)
+
+
+def test_the_theme_picker_marks_the_active_theme() -> None:
+    """The regression this was added for: browsing themes gave no clue which
+    one you already had."""
+    import ferry.cli.themepicker as tp
+
+    captured = {}
+
+    def fake_run_select(title, items, **kwargs):
+        captured.update(kwargs)
+        return None
+
+    original = tp.run_select
+    tp.run_select = fake_run_select
+    try:
+        tp.pick_theme(THEMES["compass"])
+    finally:
+        tp.run_select = original
+    assert captured["current"] == "compass"
