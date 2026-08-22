@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import unicodedata
 
 import pytest
 
@@ -271,10 +272,6 @@ def test_export_and_import_are_mirror_images() -> None:
     assert MENU_MOTION["import"].rest.strip() == "◂"
 
 
-def test_quit_does_not_move() -> None:
-    assert len(MENU_MOTION["quit"].frames) == 1
-
-
 def test_theme_icon_holds_still_but_rotates_colour() -> None:
     motion = MENU_MOTION["theme"]
     assert len(motion.frames) == 1
@@ -428,3 +425,80 @@ def test_the_slowest_menu_icon_still_completes_a_cycle_promptly() -> None:
 
     longest = max(len(m.frames) * MENU_FRAME_SECONDS for m in MENU_MOTION.values())
     assert longest <= 2.0, f"slowest icon takes {longest:.2f}s per cycle"
+
+
+# ---------- display width ----------
+
+
+def test_every_menu_icon_is_exactly_one_cell_wide() -> None:
+    """Menu glyphs must all be East Asian Width Neutral or Narrow.
+
+    "Ambiguous" characters render one cell wide in a Latin terminal but *two*
+    in one configured for CJK. The first icon set mixed the two — `▸` and `◂`
+    are Neutral while `○`, `◆` and `▁▂▃▄` are Ambiguous — so the column would
+    have gone ragged on a CJK-configured terminal while looking fine here.
+    """
+    offenders = []
+    for name, motion in MENU_MOTION.items():
+        for ch in "".join(motion.frames) + motion.rest:
+            if ch.isascii():
+                continue
+            width = unicodedata.east_asian_width(ch)
+            if width not in ("N", "Na"):
+                offenders.append(f"{name}: U+{ord(ch):04X} is {width}")
+    assert offenders == [], f"ambiguous or wide glyphs in the menu column: {offenders}"
+
+
+def test_every_menu_icon_matches_the_declared_cell_width() -> None:
+    from ferry.cli.motion import ICON_CELL
+
+    for name, motion in MENU_MOTION.items():
+        assert motion.width() == ICON_CELL, name
+        assert motion.width(ascii_only=True) == ICON_CELL, name
+
+
+def test_the_quit_icon_is_the_power_symbol() -> None:
+    assert MENU_MOTION["quit"].rest.strip() == "\u23fb"
+
+
+def test_quit_holds_still_and_breathes_instead_of_moving() -> None:
+    """Moored: the glyph does not travel, the colour pulses."""
+    motion = MENU_MOTION["quit"]
+    assert len(motion.frames) == 1
+    assert len(set(motion.styles)) > 1
+
+
+def _every_glyph_ferry_can_print() -> set[str]:
+    """Collect the non-ASCII characters actually reachable on screen."""
+    from ferry.cli.brand import build_wordmark
+    from ferry.cli.motion import WAKE_PERIOD, moored_frame, spinner_frames
+    from ferry.cli.theme import HARBOR
+
+    text = "".join(getattr(UNICODE_ICONS, f) for f in UNICODE_ICONS.__dataclass_fields__)
+    for motion in MENU_MOTION.values():
+        text += "".join(motion.frames) + motion.rest
+    text += "".join(spinner_frames()) + moored_frame()
+
+    wordmark = build_wordmark(HARBOR)
+    text += "".join(wordmark.letter_rows)
+    for phase in range(WAKE_PERIOD):
+        text += "".join(wordmark.mark_rows(phase))
+    return {c for c in text if not c.isascii()}
+
+
+def test_the_allow_list_has_no_dead_glyphs() -> None:
+    """A stale entry is not harmless: ``supports_unicode`` probes every glyph on
+    the list, so one Ferry no longer prints could force a console down to ASCII
+    for no reason."""
+    dead = sorted(
+        f"U+{ord(c):04X} {unicodedata.name(c, '?')}"
+        for c in TEXT_ONLY_GLYPHS - _every_glyph_ferry_can_print()
+    )
+    assert dead == [], f"glyphs on the allow-list that nothing prints: {dead}"
+
+
+def test_the_allow_list_covers_everything_ferry_prints() -> None:
+    missing = sorted(
+        f"U+{ord(c):04X}" for c in _every_glyph_ferry_can_print() - set(TEXT_ONLY_GLYPHS)
+    )
+    assert missing == [], f"printed but not allow-listed: {missing}"

@@ -210,24 +210,52 @@ def _render(
     primary = _style_for(theme, "primary")
     accent = _style_for(theme, "accent")
 
+    # One marker cell, wide enough for every marker this list can show, so the
+    # title and all the labels land in a single column. The widths genuinely
+    # differ: `[i]` is three characters where `>` is one, and an animated icon
+    # is three where a chevron is one. Padding each to a shared width is what
+    # keeps the text edge straight.
+    cell = max(
+        len(icons.cursor),
+        len(icons.info),
+        *(
+            item.motion.width(ascii_only=ascii_only)
+            for item in model.items
+            if item.motion is not None
+        ),
+    )
+
+    def marker(glyph: str, style: str) -> Fragments:
+        """One marker centred in the shared cell, with its trailing space.
+
+        Centred rather than left-aligned so a one-character marker lines up
+        with the body of the three-character icons rather than sitting a column
+        to their left.
+        """
+        return [(style, "  " + glyph.center(cell) + " ")]
+
     out: Fragments = []
     if title:
-        out += [(dim, f"  {icons.info} "), (text, title), ("", "\n\n")]
+        out += marker(icons.info, dim)
+        out += [(text, title), ("", "\n\n")]
 
     visible = model.visible
     if not visible:
         out += [(dim, f"  no match for {model.filter!r}\n")]
     for index, item in enumerate(visible):
         selected = index == min(model.cursor, len(visible) - 1)
+        label_style = primary if selected else (dim if model.filtering else text)
         if item.motion is not None:
             glyph = item.motion.frame(tick, selected=selected, ascii_only=ascii_only)
-            token = item.motion.style(tick, selected=selected)
-            out += [(_style_for(theme, token), f"  {glyph} ")]
-            out += [(primary if selected else (dim if model.filtering else text), item.label)]
+            style = _style_for(theme, item.motion.style(tick, selected=selected))
+            out += marker(glyph, style)
+            out += [(label_style, item.label)]
         elif selected:
-            out += [(primary, f"  {icons.cursor} "), (primary, item.label)]
+            out += marker(icons.cursor, primary)
+            out += [(primary, item.label)]
         else:
-            out += [("", "    "), (dim if model.filtering else text, item.label)]
+            out += marker("", "")
+            out += [(label_style, item.label)]
         if item.hint:
             out += [(dim, f"   {item.hint}")]
         out += [("", "\n")]

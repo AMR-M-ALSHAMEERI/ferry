@@ -24,6 +24,7 @@ from typing import Final
 __all__ = [
     "FRAME_SECONDS",
     "MENU_FRAME_SECONDS",
+    "ICON_CELL",
     "MENU_MOTION",
     "Motion",
     "WAKE_PERIOD",
@@ -156,54 +157,60 @@ class Motion:
         return len(self.ascii_rest if ascii_only else self.rest)
 
 
+ICON_CELL: Final = 3
+"""Columns every menu icon occupies.
+
+Fixed, and every frame is padded to it, so the labels beside them sit in one
+column no matter which icon or which animation frame is showing.
+"""
+
 MENU_MOTION: Final[dict[str, Motion]] = {
-    # Export and import are deliberate mirror images: a hull leaving with its
-    # wake behind it, and a hull arriving with its wake behind it the other
-    # way. The two core operations should be distinguishable before the labels
-    # are read.
+    # Export and import are mirror images: a hull sailing out of the cell, and
+    # a hull sailing into it from the other side. The two core operations
+    # should be distinguishable before the labels are read.
     "export": Motion(
-        frames=("≈▸", "·▸", " ▸", "·▸"),
-        ascii_frames=("~>", "->", " >", "->"),
-        rest=" ▸",
-        ascii_rest=" >",
+        frames=("▸  ", " ▸ ", "  ▸"),
+        ascii_frames=(">  ", " > ", "  >"),
+        rest=" ▸ ",
+        ascii_rest=" > ",
     ),
     "import": Motion(
-        frames=("◂≈", "◂·", "◂ ", "◂·"),
-        ascii_frames=("<~", "<-", "< ", "<-"),
-        rest="◂ ",
-        ascii_rest="< ",
+        frames=("  ◂", " ◂ ", "◂  "),
+        ascii_frames=("  <", " < ", "<  "),
+        rest=" ◂ ",
+        ascii_rest=" < ",
         styles=("accent",),
     ),
-    # An aperture opening and closing.
+    # An aperture closing: dotted outline, ring, solid centre.
     "inspect": Motion(
-        frames=("○ ", "◌ ", "◉ ", "◌ "),
-        ascii_frames=("o ", ". ", "O ", ". "),
-        rest="○ ",
-        ascii_rest="o ",
+        frames=(" ◌ ", " ⊚ ", " ◉ ", " ⊚ "),
+        ascii_frames=(" . ", " o ", " O ", " o "),
+        rest=" ◌ ",
+        ascii_rest=" . ",
     ),
-    # Blocks settling downward — the shape of something being compressed.
+    # A triangle flattening, which is the shape of something being compressed.
     "compact": Motion(
-        frames=("▄▄", "▃▃", "▂▂", "▁▁", "▂▂", "▃▃"),
-        ascii_frames=("##", "==", "--", "__", "--", "=="),
-        rest="▃▃",
-        ascii_rest="==",
+        frames=(" ▾ ", " ▿ ", " ⌄ ", " ▿ "),
+        ascii_frames=(" v ", " - ", " _ ", " - "),
+        rest=" ▾ ",
+        ascii_rest=" v ",
     ),
     # The glyph holds still and the colour rotates through the palette, which
     # is the one icon whose animation *is* its meaning.
     "theme": Motion(
-        frames=("◆ ",),
-        ascii_frames=("<>",),
-        rest="◆ ",
-        ascii_rest="<>",
+        frames=(" ❖ ",),
+        ascii_frames=(" * ",),
+        rest=" ❖ ",
+        ascii_rest=" * ",
         styles=("primary", "accent", "success", "warning"),
     ),
-    # Moored. The only action that does not move.
+    # The IEC power symbol, breathing dim to red the way a standby light does.
     "quit": Motion(
-        frames=("╵ ",),
-        ascii_frames=("| ",),
-        rest="╵ ",
-        ascii_rest="| ",
-        styles=("dim",),
+        frames=(" ⏻ ",),
+        ascii_frames=("(|)",),
+        rest=" ⏻ ",
+        ascii_rest="(|)",
+        styles=("dim", "error", "error", "dim"),
     ),
 }
 """Per-action icons, keyed by the menu action name."""

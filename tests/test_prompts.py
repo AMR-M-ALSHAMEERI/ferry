@@ -345,6 +345,10 @@ def _text_of(fragments) -> str:
     return "".join(f[1] for f in fragments)
 
 
+LABEL_COLUMN = 6
+"""Column every label starts in: two of indent, a three-wide marker, one space."""
+
+
 def _menu_model():
     from ferry.cli.motion import MENU_MOTION
 
@@ -402,9 +406,9 @@ def test_menu_rows_stay_aligned_across_every_tick() -> None:
     for tick in range(12):
         for row in _text_of(_render(model, HARBOR, "", None, False, tick)).split("\n"):
             if "Export" in row:
-                assert row.index("Export") == 5, repr(row)
+                assert row.index("Export") == LABEL_COLUMN, repr(row)
             if "Quit" in row:
-                assert row.index("Quit") == 5, repr(row)
+                assert row.index("Quit") == LABEL_COLUMN, repr(row)
 
 
 def test_ascii_consoles_get_ascii_icons() -> None:
@@ -424,3 +428,42 @@ def test_menu_icon_glyphs_are_all_on_the_allow_list() -> None:
         for ch in _text_of(_render(model, HARBOR, "", None, False, tick)):
             if not ch.isascii():
                 assert ch in TEXT_ONLY_GLYPHS, f"U+{ord(ch):04X}"
+
+
+def test_the_title_and_every_label_share_one_column() -> None:
+    """The user reported the icons looked out of line with the text beside them.
+
+    The marker cell was sized per row: `›` is one character, `[i]` is three and
+    an icon is three, so the title and the labels started in different columns.
+    """
+    from ferry.cli.prompts import _render
+
+    wanted = ("A question", "Export", "Quit")
+    for icons in (UNICODE_ICONS, ASCII_ICONS):
+        theme = dataclasses.replace(HARBOR, icons=icons)
+        model, _ = _menu_model()
+        for tick in range(8):
+            rendered = _text_of(_render(model, theme, "A question", None, False, tick))
+            columns = {}
+            for line in rendered.split("\n"):
+                for word in wanted:
+                    if word in line:
+                        columns[word] = line.index(word)
+            assert set(columns) == set(wanted), f"missing rows: {rendered!r}"
+            assert set(columns.values()) == {
+                LABEL_COLUMN
+            }, f"ascii={icons is ASCII_ICONS} tick={tick}: {columns}"
+
+
+def test_lists_without_motion_are_aligned_too() -> None:
+    """The theme picker under ASCII icons had the same off-by-one: `[i]` is
+    three characters and the `>` cursor is one."""
+    from ferry.cli.prompts import _render
+
+    for icons in (UNICODE_ICONS, ASCII_ICONS):
+        theme = dataclasses.replace(HARBOR, icons=icons)
+        rendered = _text_of(_render(SelectorModel(ITEMS), theme, "A question", None, False, 0))
+        rows = [r for r in rendered.split("\n") if r.strip() and "move" not in r]
+        title_col = rows[0].index("A question")
+        for row, item in zip(rows[1:], ITEMS, strict=False):
+            assert row.index(item.label) == title_col, f"{row!r} vs {rows[0]!r}"
