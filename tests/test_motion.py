@@ -19,6 +19,7 @@ import pytest
 
 from ferry.cli.motion import (
     FRAME_SECONDS,
+    ICON_CELL,
     MENU_MOTION,
     WAKE_PERIOD,
     Motion,
@@ -430,23 +431,33 @@ def test_the_slowest_menu_icon_still_completes_a_cycle_promptly() -> None:
 # ---------- display width ----------
 
 
-def test_every_menu_icon_is_exactly_one_cell_wide() -> None:
-    """Menu glyphs must all be East Asian Width Neutral or Narrow.
+def test_menu_icons_are_uniform_in_character_length() -> None:
+    """What actually keeps the column straight in every terminal anyone uses.
 
-    "Ambiguous" characters render one cell wide in a Latin terminal but *two*
-    in one configured for CJK. The first icon set mixed the two — `▸` and `◂`
-    are Neutral while `○`, `◆` and `▁▂▃▄` are Ambiguous — so the column would
-    have gone ragged on a CJK-configured terminal while looking fine here.
+    An earlier version of this test demanded every glyph be East Asian Width
+    Neutral, so that Ambiguous characters — one cell in a Latin terminal, two
+    in one configured for CJK — could not make the column ragged. That rule was
+    dropped deliberately (PROGRESS.md ledger #91): Ferry's identity is built
+    almost entirely from Ambiguous glyphs. The wordmark letterforms, the hull
+    and the wake `≈` are all Ambiguous, and only `▸` and `◂` are Neutral, so
+    enforcing Neutrality meant the icons could not be drawn from the brand's
+    own vocabulary. CJK-ambiguous-wide terminals are an already-unsupported
+    configuration — the wordmark misrenders there regardless — and that is
+    recorded as a known gap rather than papered over here.
     """
-    offenders = []
     for name, motion in MENU_MOTION.items():
+        lengths = {len(f) for f in motion.frames} | {len(motion.rest)}
+        assert lengths == {ICON_CELL}, f"{name}: {lengths}"
+
+
+def test_which_menu_glyphs_are_ambiguous_width_is_visible() -> None:
+    """Not a ban — a record. If this list changes, the known gap changed too."""
+    ambiguous = set()
+    for motion in MENU_MOTION.values():
         for ch in "".join(motion.frames) + motion.rest:
-            if ch.isascii():
-                continue
-            width = unicodedata.east_asian_width(ch)
-            if width not in ("N", "Na"):
-                offenders.append(f"{name}: U+{ord(ch):04X} is {width}")
-    assert offenders == [], f"ambiguous or wide glyphs in the menu column: {offenders}"
+            if not ch.isascii() and unicodedata.east_asian_width(ch) == "A":
+                ambiguous.add(ch)
+    assert ambiguous == set("≈·█▄▃▂▁"), sorted(f"U+{ord(c):04X}" for c in ambiguous)
 
 
 def test_every_menu_icon_matches_the_declared_cell_width() -> None:

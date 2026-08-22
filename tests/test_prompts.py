@@ -345,8 +345,8 @@ def _text_of(fragments) -> str:
     return "".join(f[1] for f in fragments)
 
 
-LABEL_COLUMN = 6
-"""Column every label starts in: two of indent, a three-wide marker, one space."""
+LABEL_COLUMN = 8
+"""Column every label starts in: two of indent, a five-wide marker, one space."""
 
 
 def _menu_model():

@@ -41,7 +41,7 @@ application costs a full redraw each tick, and over SSH or a slow terminal a
 fast one strobes. Eight frames a second reads as motion without flickering.
 """
 
-MENU_FRAME_SECONDS: Final = 0.2
+MENU_FRAME_SECONDS: Final = 0.3
 """Seconds per tick for the menu icons — 5fps, slower than the spinner.
 
 The two rates are deliberately different. A spinner is saying "work is
@@ -157,59 +157,98 @@ class Motion:
         return len(self.ascii_rest if ascii_only else self.rest)
 
 
-ICON_CELL: Final = 3
+ICON_CELL: Final = 5
 """Columns every menu icon occupies.
 
-Fixed, and every frame is padded to it, so the labels beside them sit in one
-column no matter which icon or which animation frame is showing.
+Five, not three, because export and import need two columns of wake on one
+side of a centred hull. Anything narrower forces a choice between a wake that
+visibly moves and both hulls sitting in the same column, and the hulls have to
+win — a resting menu with its markers at different offsets is what the column
+looked like before this was fixed.
 """
 
+_WAKE_COLUMNS: Final = ICON_CELL - 3
+"""Columns of wake either side of the centred hull."""
+
+
+def _sailing(*, inbound: bool, ascii_only: bool) -> tuple[str, ...]:
+    """Frames of a hull holding station with its wake drifting past.
+
+    Built from :func:`wake_row` rather than written out, so these icons are
+    literally the same code that draws the wake under the wordmark. The hull
+    stays in the middle column and only the water moves, which is both the
+    honest physics and what keeps the icons aligned at rest.
+
+    Args:
+        inbound: Mirror it — hull facing left, wake on the right.
+        ascii_only: Use ASCII glyphs.
+    """
+    mark, gap, hull = ("~", " ", "<") if ascii_only else ("≈", " ", "◂")
+    if not inbound:
+        hull = ">" if ascii_only else "▸"
+    frames = []
+    for phase in range(WAKE_PERIOD):
+        wake = wake_row(_WAKE_COLUMNS, phase, mark=mark, gap=gap)
+        # The wake always trails the hull, so it sits behind whichever way the
+        # hull points, and reverses with it.
+        frames.append(" " * _WAKE_COLUMNS + hull + wake[::-1] if inbound else wake + hull + "  ")
+    return tuple(frames)
+
+
+def _still(glyph: str) -> str:
+    """One glyph centred in the icon cell, no wake."""
+    return glyph.center(ICON_CELL)
+
+
 MENU_MOTION: Final[dict[str, Motion]] = {
-    # Export and import are mirror images: a hull sailing out of the cell, and
-    # a hull sailing into it from the other side. The two core operations
-    # should be distinguishable before the labels are read.
+    # Export and import are mirror images of the mark itself: the same hull,
+    # the same wake, the same generator. The two core operations should be
+    # distinguishable before the labels are read, and both should read as the
+    # thing on the banner.
     "export": Motion(
-        frames=("▸  ", " ▸ ", "  ▸"),
-        ascii_frames=(">  ", " > ", "  >"),
-        rest=" ▸ ",
-        ascii_rest=" > ",
+        frames=_sailing(inbound=False, ascii_only=False),
+        ascii_frames=_sailing(inbound=False, ascii_only=True),
+        rest=_still("▸"),
+        ascii_rest=_still(">"),
     ),
     "import": Motion(
-        frames=("  ◂", " ◂ ", "◂  "),
-        ascii_frames=("  <", " < ", "<  "),
-        rest=" ◂ ",
-        ascii_rest=" < ",
+        frames=_sailing(inbound=True, ascii_only=False),
+        ascii_frames=_sailing(inbound=True, ascii_only=True),
+        rest=_still("◂"),
+        ascii_rest=_still("<"),
         styles=("accent",),
     ),
-    # An aperture closing: dotted outline, ring, solid centre.
+    # A ripple spreading outward, like a ping dropped on the water. Same wake
+    # glyph as the mark, used as an echo rather than a wake.
     "inspect": Motion(
-        frames=(" ◌ ", " ⊚ ", " ◉ ", " ⊚ "),
-        ascii_frames=(" . ", " o ", " O ", " o "),
-        rest=" ◌ ",
-        ascii_rest=" . ",
+        frames=("  ·  ", " ≈≈≈ ", "≈≈≈≈≈", " ≈≈≈ "),
+        ascii_frames=("  .  ", " ~~~ ", "~~~~~", " ~~~ "),
+        rest="  ·  ",
+        ascii_rest="  .  ",
     ),
-    # A triangle flattening, which is the shape of something being compressed.
+    # Cargo settling: the block elements of the wordmark's own letterforms,
+    # sinking and rising. The most literal "made smaller" the set can manage.
     "compact": Motion(
-        frames=(" ▾ ", " ▿ ", " ⌄ ", " ▿ "),
-        ascii_frames=(" v ", " - ", " _ ", " - "),
-        rest=" ▾ ",
-        ascii_rest=" v ",
+        frames=(" ▄▄▄ ", " ▃▃▃ ", " ▂▂▂ ", " ▁▁▁ ", " ▂▂▂ ", " ▃▃▃ "),
+        ascii_frames=(" ### ", " === ", " --- ", " ___ ", " --- ", " === "),
+        rest=" ▃▃▃ ",
+        ascii_rest=" === ",
     ),
-    # The glyph holds still and the colour rotates through the palette, which
-    # is the one icon whose animation *is* its meaning.
+    # A solid swatch that holds still while the colour rotates through the
+    # palette — the one icon whose animation *is* its meaning.
     "theme": Motion(
-        frames=(" ❖ ",),
-        ascii_frames=(" * ",),
-        rest=" ❖ ",
-        ascii_rest=" * ",
+        frames=("  █  ",),
+        ascii_frames=("  #  ",),
+        rest="  █  ",
+        ascii_rest="  #  ",
         styles=("primary", "accent", "success", "warning"),
     ),
     # The IEC power symbol, breathing dim to red the way a standby light does.
     "quit": Motion(
-        frames=(" ⏻ ",),
-        ascii_frames=("(|)",),
-        rest=" ⏻ ",
-        ascii_rest="(|)",
+        frames=("  ⏻  ",),
+        ascii_frames=(" (|) ",),
+        rest="  ⏻  ",
+        ascii_rest=" (|) ",
         styles=("dim", "error", "error", "dim"),
     ),
 }
