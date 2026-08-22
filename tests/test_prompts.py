@@ -450,9 +450,9 @@ def test_the_title_and_every_label_share_one_column() -> None:
                     if word in line:
                         columns[word] = line.index(word)
             assert set(columns) == set(wanted), f"missing rows: {rendered!r}"
-            assert set(columns.values()) == {
-                LABEL_COLUMN
-            }, f"ascii={icons is ASCII_ICONS} tick={tick}: {columns}"
+            assert set(columns.values()) == {LABEL_COLUMN}, (
+                f"ascii={icons is ASCII_ICONS} tick={tick}: {columns}"
+            )
 
 
 def test_lists_without_motion_are_aligned_too() -> None:

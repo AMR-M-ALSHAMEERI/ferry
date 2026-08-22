@@ -24,8 +24,13 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-cov",
-    "ruff",
-    "mypy",
+    # ruff and mypy are exact-pinned, and the same versions are pinned in
+    # .pre-commit-config.yaml. Both are pass/fail gates, so an unpinned one is
+    # a gate that changes its mind: a floating CI ruff once rejected formatting
+    # that the older pre-commit ruff had just applied, failing all 12 legs on a
+    # commit that was green locally. Bump all pins together, never one alone.
+    "ruff==0.16.4",
+    "mypy==2.3.1",
     "pre-commit",
 ]
 
