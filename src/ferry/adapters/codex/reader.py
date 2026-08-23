@@ -35,6 +35,7 @@ import binascii
 import hashlib
 import json
 import mimetypes
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -68,6 +69,18 @@ CALL_PAYLOADS = frozenset({"function_call", "custom_tool_call"})
 OUTPUT_PAYLOADS = frozenset({"function_call_output", "custom_tool_call_output"})
 _TEXT_BLOCKS = {"input_text", "output_text", "text", "summary_text"}
 _ATTACHMENT_NAMESPACE = UUID("6ba7b813-9dad-11d1-80b4-00c04fd430c8")
+_UUID_IN_TEXT = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
+"""Any UUID appearing anywhere in a record.
+
+Codex references a pasted-text attachment by writing its **path into the
+message prose** -- "Files mentioned by the user: ... /attachments/<uuid>/..." --
+and there is no structural field to read instead. Parsing that prose would be
+fragile, so every UUID a record mentions is collected and the caller checks
+which of them name a real attachment directory. A UUID that names nothing costs
+one failed lookup.
+"""
 _EXTENSION_BY_MIME = {
     "image/png": ".png",
     "image/jpeg": ".jpg",
@@ -93,6 +106,8 @@ class SessionRead:
     warnings: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     bytes_read: int = 0
+    mentioned_ids: set[str] = field(default_factory=set)
+    """UUIDs this conversation names, for the caller to resolve against disk."""
 
 
 def _timestamp(value: Any) -> datetime | None:
@@ -244,6 +259,8 @@ def read_rollout(path: Path, *, warn_over_bytes: int | None = None) -> SessionRe
             if not isinstance(record, dict):
                 out.warnings.append(f"{path.name}:{number}: line is not an object; skipped")
                 continue
+
+            out.mentioned_ids.update(_UUID_IN_TEXT.findall(line))
 
             stamp = _timestamp(record.get("timestamp"))
             if stamp is not None:

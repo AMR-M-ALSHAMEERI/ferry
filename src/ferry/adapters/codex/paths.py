@@ -18,6 +18,8 @@ from uuid import UUID
 __all__ = [
     "CODEX_HOME_ENV",
     "ROLLOUT_PATTERN",
+    "attachment_dir",
+    "attachment_files",
     "codex_home",
     "rollout_files",
     "rollout_name",
@@ -51,6 +53,33 @@ def codex_home(env: os._Environ[str] | dict[str, str] | None = None) -> Path:
 def sessions_dir(env: os._Environ[str] | dict[str, str] | None = None) -> Path:
     """The root of the date-partitioned rollout tree."""
     return codex_home(env) / "sessions"
+
+
+def attachment_dir(env: os._Environ[str] | dict[str, str] | None = None) -> Path:
+    """Where Codex keeps files pasted into a conversation."""
+    return codex_home(env) / "attachments"
+
+
+def attachment_files(
+    mentioned: set[str], env: os._Environ[str] | dict[str, str] | None = None
+) -> list[Path]:
+    """Attachment files belonging to any of ``mentioned``.
+
+    Codex names these only inside message prose, so the caller collects every
+    UUID a conversation mentions and this resolves the ones that turn out to be
+    real directories. Twelve of twenty-one such files on the probe machine had
+    their contents **nowhere in any transcript** -- up to 3.4 MB each -- so an
+    export that skipped them would lose real conversation material.
+    """
+    root = attachment_dir(env)
+    if not root.is_dir():
+        return []
+    found: list[Path] = []
+    for name in sorted(mentioned):
+        directory = root / name
+        if directory.is_dir():
+            found.extend(sorted(p for p in directory.rglob("*") if p.is_file()))
+    return found
 
 
 def rollout_files(env: os._Environ[str] | dict[str, str] | None = None) -> list[Path]:

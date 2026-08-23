@@ -13,13 +13,14 @@ is warned before it exports something enormous.
 
 from __future__ import annotations
 
+import hashlib
 import platform
 import shutil
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final
-from uuid import UUID
+from uuid import UUID, uuid5
 
 from ferry import __version__
 from ferry.adapters.base import (
@@ -31,7 +32,7 @@ from ferry.adapters.base import (
 )
 from ferry.adapters.claude_code.writer import remap_prefix
 from ferry.adapters.codex import paths as cx_paths
-from ferry.adapters.codex.reader import read_rollout
+from ferry.adapters.codex.reader import SessionRead, read_rollout
 from ferry.adapters.codex.writer import REBUILD_NOTES, Rebuild, rollout_lines, rollout_stamp
 from ferry.core import Bundle, Manifest, SourceMachine
 from ferry.core.manifest import OSName
@@ -40,6 +41,8 @@ from ferry.ucs import Attachment, Conversation, Provenance, ToolName
 __all__ = ["LARGE_SESSION_BYTES", "TOOL", "CodexAdapter"]
 
 TOOL: Final[ToolName] = "codex"
+
+_PASTED_NAMESPACE = UUID("6ba7b814-9dad-11d1-80b4-00c04fd430c8")
 
 LARGE_SESSION_BYTES: Final = 100 * 1024 * 1024
 """Warn above this. PLAN.md §5 M4 asks for a size guard; this is its threshold."""
@@ -182,12 +185,57 @@ class CodexAdapter(Adapter):
 
         for pending in found.attachments:
             bundle.add_attachment_bytes(conversation_id, pending.data, pending.record)
+
+        pasted = self._pasted_files(bundle, conversation_id, found)
         bundle.add_conversation(found.conversation)
 
         detail = f"{len(found.conversation.messages)} messages"
         if found.attachments:
             detail += f", {len(found.attachments)} images"
+        if pasted:
+            detail += f", {pasted} pasted files"
         yield ExportEvent(kind="progress", conversation_id=str(conversation_id), message=detail)
+
+    def _pasted_files(self, bundle: Bundle, conversation_id: UUID, found: SessionRead) -> int:
+        """Carry the files Codex keeps outside the transcript.
+
+        Text pasted into a conversation is written to
+        ``attachments/<uuid>/pasted-text.txt`` and referenced only by a path
+        inside the message prose. **Twelve of twenty-one such files on the probe
+        machine had their contents nowhere in any transcript**, the largest
+        3.4 MB, so leaving them behind loses real conversation material.
+
+        The path inside the message is not rewritten -- Ferry does not edit what
+        anyone said -- so on another machine that sentence still names the old
+        location. The file itself travels and is restored, which is the part
+        that would otherwise be gone for good.
+        """
+        files = cx_paths.attachment_files(found.mentioned_ids, self._env)
+        if not files or found.conversation is None:
+            return 0
+        root = cx_paths.attachment_dir(self._env)
+        for path in files:
+            try:
+                data = path.read_bytes()
+            except OSError:
+                continue
+            relative = path.relative_to(root).as_posix()
+            attachment = Attachment(
+                id=uuid5(_PASTED_NAMESPACE, f"{conversation_id}:{relative}"),
+                # The relative path, not the bare basename: every one of these
+                # is called pasted-text.txt, and the directory is the only thing
+                # that distinguishes them or says where to put them back.
+                filename=relative,
+                mime_type="text/plain",
+                bundle_path=(
+                    f"attachments/{conversation_id}/"
+                    f"{uuid5(_PASTED_NAMESPACE, f'{conversation_id}:{relative}')}.txt"
+                ),
+                sha256=hashlib.sha256(data).hexdigest(),
+            )
+            bundle.add_attachment_bytes(conversation_id, data, attachment)
+            found.conversation.attachments.append(attachment)
+        return len(files)
 
     def _open_bundle(self, dest: Path) -> Bundle:
         if (dest / "manifest.json").is_file():
@@ -325,11 +373,38 @@ class CodexAdapter(Adapter):
             yield ImportEvent(kind="error", conversation_id=cid, message=f"write failed: {exc}")
             return
 
-        yield ImportEvent(
-            kind="progress",
-            conversation_id=cid,
-            message=f"{len(conversation.messages)} messages to {destination.name}",
-        )
+        restored = self._restore_pasted(bundle, conversation)
+        detail = f"{len(conversation.messages)} messages to {destination.name}"
+        if restored:
+            detail += f", {restored} pasted files restored"
+        yield ImportEvent(kind="progress", conversation_id=cid, message=detail)
+
+    def _restore_pasted(self, bundle: Bundle, conversation: Conversation) -> int:
+        """Put pasted files back under this machine's attachments directory.
+
+        Restored to the same ``<uuid>/<name>`` they came from, so a conversation
+        that mentions one by path finds it in the same relative place. The path
+        written in the message still names the *old* machine's home -- message
+        text is never edited -- so the sentence stays stale even though the file
+        is here. That is the honest trade: the content survives, the reference
+        does not.
+        """
+        root = cx_paths.attachment_dir(self._env)
+        restored = 0
+        for attachment in conversation.attachments:
+            if attachment.mime_type != "text/plain" or "/" not in attachment.filename:
+                continue
+            source = bundle.root / attachment.bundle_path
+            if not source.is_file():
+                continue
+            destination = root / attachment.filename
+            try:
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, destination)
+            except OSError:
+                continue
+            restored += 1
+        return restored
 
     @staticmethod
     def _images(bundle: Bundle, conversation: Conversation) -> dict[UUID, tuple[Attachment, bytes]]:

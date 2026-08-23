@@ -636,3 +636,77 @@ def test_a_missing_header_yields_none_rather_than_a_guess() -> None:
         workspace=Workspace(),
     )
     assert session_meta_for(conversation, Rebuild(cwd="/x", thread_id=BASIC_ID)) is None
+
+
+# --------------------------------------------------------------------------
+# pasted-text attachments
+# --------------------------------------------------------------------------
+
+
+def paste(home: Path, attachment_id: str, text: str) -> Path:
+    """Lay out a pasted-text attachment the way Codex does."""
+    path = home / "attachments" / attachment_id / "pasted-text.txt"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_a_pasted_file_the_transcript_only_names_in_prose_is_carried(
+    source: Path, tmp_path: Path
+) -> None:
+    """Twelve of twenty-one real ones existed nowhere in any transcript.
+
+    Codex writes pasted text to a file and refers to it by *path inside the
+    message*, with no structural field to follow. Leaving them behind loses
+    conversation material outright -- the largest on the probe machine was
+    3.4 MB of text that appears in no rollout at all.
+    """
+    paste(source, PARENT_ID, "pasted content that lives only on disk")
+    adapter = CodexAdapter(env={"CODEX_HOME": str(source)})
+
+    list(adapter.export(tmp_path / "bundle"))
+    bundle = Bundle.open(tmp_path / "bundle")
+    conversation = bundle.load_conversation(EDGE_ID)
+
+    pasted = [a for a in conversation.attachments if a.mime_type == "text/plain"]
+    assert [a.filename for a in pasted] == [f"{PARENT_ID}/pasted-text.txt"]
+    written = tmp_path / "bundle" / pasted[0].bundle_path
+    assert written.read_text(encoding="utf-8") == "pasted content that lives only on disk"
+
+
+def test_a_pasted_file_is_restored_to_the_same_relative_place(
+    source: Path, target: CodexAdapter, tmp_path: Path
+) -> None:
+    paste(source, PARENT_ID, "restore me")
+    adapter = CodexAdapter(env={"CODEX_HOME": str(source)})
+    list(adapter.export(tmp_path / "bundle"))
+
+    list(target.import_(tmp_path / "bundle", ImportOptions()))
+
+    restored = tmp_path / "target" / "attachments" / PARENT_ID / "pasted-text.txt"
+    assert restored.read_text(encoding="utf-8") == "restore me"
+
+
+def test_a_uuid_that_names_no_attachment_costs_nothing(source: Path, tmp_path: Path) -> None:
+    """Every UUID in the prose is looked up; almost none of them are attachments."""
+    adapter = CodexAdapter(env={"CODEX_HOME": str(source)})
+    list(adapter.export(tmp_path / "bundle"))
+
+    conversation = Bundle.open(tmp_path / "bundle").load_conversation(EDGE_ID)
+    assert [a for a in conversation.attachments if a.mime_type == "text/plain"] == []
+
+
+def test_pasted_files_survive_the_round_trip(
+    source: Path, target: CodexAdapter, tmp_path: Path
+) -> None:
+    paste(source, PARENT_ID, "round trip me")
+    adapter = CodexAdapter(env={"CODEX_HOME": str(source)})
+    list(adapter.export(tmp_path / "bundle"))
+    list(target.import_(tmp_path / "bundle", ImportOptions()))
+    list(target.export(tmp_path / "again"))
+
+    first, second = Bundle.open(tmp_path / "bundle"), Bundle.open(tmp_path / "again")
+    before = first.load_conversation(EDGE_ID)
+    after = second.load_conversation(EDGE_ID)
+    assert [a.filename for a in before.attachments] == [a.filename for a in after.attachments]
+    assert [a.sha256 for a in before.attachments] == [a.sha256 for a in after.attachments]
