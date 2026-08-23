@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import io
 from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -364,3 +365,110 @@ def test_an_unreadable_root_is_skipped_rather_than_fatal(tmp_path: Path, monkeyp
     monkeypatch.setattr(Path, "iterdir", refuse)
 
     assert find_bundles([tmp_path]) == []
+
+
+# --------------------------------------------------------------------------
+# progress
+# --------------------------------------------------------------------------
+
+
+class _Bar:
+    """Records what the progress bar was told, without drawing one."""
+
+    def __init__(self) -> None:
+        self.advanced = 0
+        self.labels: list[str] = []
+
+    def advance(self, n: int = 1) -> None:
+        self.advanced += n
+
+    def describe(self, text: str) -> None:
+        self.labels.append(text)
+
+
+class _Watched(_Answers):
+    def __init__(self, **kwargs) -> None:  # type: ignore[no-untyped-def]
+        super().__init__(**kwargs)
+        self.bar = _Bar()
+        self.sized: list[tuple[str, int]] = []
+
+    @contextmanager
+    def progress(self, label, total):  # type: ignore[no-untyped-def]
+        self.sized.append((label, total))
+        yield self.bar
+
+
+def test_export_shows_a_bar_sized_from_the_scan(tmp_path: Path) -> None:
+    """Ten seconds passed with nothing on screen before this existed, and a
+    single gap between two conversations was 3.6s."""
+    adapter = _Recorder(events=[ExportEvent(kind="progress", message=f"c{i}") for i in range(3)])
+    ui = _Watched(path=str(tmp_path / "bundle"))
+
+    run_export(ui, scanned(adapter))
+
+    assert ui.sized == [("Exporting", 2)]  # _Recorder.detect estimates 2
+    assert ui.bar.advanced == 3
+
+
+def test_a_low_estimate_makes_the_bar_grow_rather_than_sit_full() -> None:
+    """detect() counts files; export reads them. The two disagree in practice,
+    and a bar pinned at 100% while work continues is worse than no bar."""
+    ui = UI(MONO, capability=Capability.NO_COLOR)
+    ui.console.file = io.StringIO()
+
+    with ui.progress("Exporting", 2) as bar:
+        for _ in range(5):
+            bar.advance()
+
+    assert getattr(bar, "done", None) == 5
+
+
+def test_skipped_conversations_move_the_bar_too(tmp_path: Path) -> None:
+    """A skipped conversation is work done. Leaving it out strands the bar
+    short of the end with nothing left to advance it."""
+    adapter = _Recorder(
+        events=[
+            ExportEvent(kind="progress", message="ok"),
+            ExportEvent(kind="skipped", message="already in bundle"),
+        ]
+    )
+    ui = _Watched(path=str(tmp_path / "bundle"))
+
+    run_export(ui, scanned(adapter))
+
+    assert ui.bar.advanced == 2
+
+
+def test_a_long_description_is_trimmed_to_fit_beside_the_bar(tmp_path: Path) -> None:
+    adapter = _Recorder(events=[ExportEvent(kind="progress", message="x" * 200)])
+    ui = _Watched(path=str(tmp_path / "bundle"))
+
+    run_export(ui, scanned(adapter))
+
+    assert all(len(label) <= 46 for label in ui.bar.labels)
+    assert ui.bar.labels[-1].endswith("...")
+
+
+def test_import_sizes_the_bar_from_the_bundle_not_a_guess(bundle_dir: Path) -> None:
+    adapter = _Recorder(events=[ImportEvent(kind="progress", message="ok")])
+    ui = _Watched(path=str(bundle_dir), confirm=True)
+
+    run_import(ui, scanned(adapter))
+
+    assert ui.sized == [("Importing", 1)]
+
+
+def test_warnings_are_printed_after_the_bar_not_under_it(tmp_path: Path) -> None:
+    """A warning that scrolls past beneath a live bar is a warning nobody reads."""
+    adapter = _Recorder(
+        events=[
+            ExportEvent(kind="warning", message="token counts are not carried"),
+            ExportEvent(kind="progress", message="ok"),
+        ]
+    )
+    ui = _Watched(path=str(tmp_path / "bundle"))
+
+    run_export(ui, scanned(adapter))
+
+    assert "token counts are not carried" in ui.text
+    assert "token counts are not carried" not in " ".join(ui.bar.labels)

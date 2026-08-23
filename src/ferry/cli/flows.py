@@ -59,6 +59,19 @@ def _installed(adapters: Scanned) -> list[Adapter]:
     return [adapter for adapter, result in adapters if result.installed]
 
 
+def _estimate(adapters: Scanned, chosen: Adapter) -> int:
+    """How many conversations the scan thought this tool had.
+
+    Only ever an estimate -- the scan counts files, the export reads them, and
+    a file that turns out to be empty or unreadable never becomes a
+    conversation. Used to size the bar, never to decide anything.
+    """
+    for adapter, result in adapters:
+        if adapter is chosen:
+            return result.conversation_count_estimate
+    return 0
+
+
 def _search_roots() -> list[Path]:
     """Where a bundle plausibly is, most likely first.
 
@@ -152,28 +165,64 @@ def _default_bundle_name() -> str:
     return f"ferry-bundle-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}"
 
 
-def _report(ui: UI, events: Iterator[ExportEvent | ImportEvent], noun: str) -> int:
+_MAX_LABEL = 46
+"""How much of a conversation's description fits beside the bar."""
+
+
+def _shorten(text: str) -> str:
+    """Trim a label so the bar and counter are never pushed off the line.
+
+    The ellipsis counts toward the budget. Trimming to ``_MAX_LABEL`` and then
+    appending it produces a longer string than the limit it was meant to keep.
+    """
+    if len(text) <= _MAX_LABEL:
+        return text
+    return text[: _MAX_LABEL - 3].rstrip() + "..."
+
+
+def _report(
+    ui: UI,
+    events: Iterator[ExportEvent | ImportEvent],
+    noun: str,
+    *,
+    label: str,
+    total: int,
+) -> int:
     """Render an adapter's event stream. Returns the number of conversations handled.
 
     The adapters are generators, so this is also what drives them -- the work
-    happens as the events are consumed.
+    happens as the events are consumed, which is what lets the bar advance in
+    step with it rather than after the fact.
+
+    ``total`` is an estimate, not a promise. It comes from ``detect()`` for an
+    export and from the manifest for an import, and both can be out by the time
+    the work runs; :meth:`UI.progress` raises its own total rather than sitting
+    full while work continues.
+
+    Warnings and errors are collected and printed *after* the bar rather than
+    during it. A warning scrolling past under a live bar is a warning nobody
+    reads, and the whole point of showing them is that they are read.
     """
     kinds: Counter[str] = Counter()
     warnings: list[str] = []
     errors: list[str] = []
     handled = 0
 
-    for event in events:
-        kinds[event.kind] += 1
-        if event.kind == "started":
-            ui.info(event.message)
-        elif event.kind == "progress":
-            handled += 1
-            ui.detail(event.message)
-        elif event.kind == "warning":
-            warnings.append(event.message)
-        elif event.kind == "error":
-            errors.append(event.message)
+    with ui.progress(label, total) as bar:
+        for event in events:
+            kinds[event.kind] += 1
+            if event.kind == "started":
+                bar.describe(_shorten(event.message))
+            elif event.kind == "progress":
+                handled += 1
+                bar.advance()
+                bar.describe(_shorten(event.message))
+            elif event.kind == "skipped":
+                bar.advance()
+            elif event.kind == "warning":
+                warnings.append(event.message)
+            elif event.kind == "error":
+                errors.append(event.message)
 
     ui.blank()
     for message in errors:
@@ -244,7 +293,13 @@ def run_export(ui: UI, adapters: Scanned) -> None:
         return
 
     ui.blank()
-    _report(ui, adapter.export(target), "conversations exported")
+    _report(
+        ui,
+        adapter.export(target),
+        "conversations exported",
+        label="Exporting",
+        total=_estimate(adapters, adapter),
+    )
     ui.info(f"Bundle: {target}")
     ui.blank()
 
@@ -301,4 +356,10 @@ def run_import(ui: UI, adapters: Scanned) -> None:
         return
 
     ui.blank()
-    _report(ui, adapter.import_(bundle_dir, ImportOptions()), "conversations imported")
+    _report(
+        ui,
+        adapter.import_(bundle_dir, ImportOptions()),
+        "conversations imported",
+        label="Importing",
+        total=count,
+    )

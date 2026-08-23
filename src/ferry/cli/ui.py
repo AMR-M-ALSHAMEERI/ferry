@@ -17,6 +17,7 @@ import time
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
+from typing import Protocol
 
 import questionary
 from questionary import Choice
@@ -44,7 +45,23 @@ from ferry.cli.theme import (
     resolve_theme,
 )
 
-__all__ = ["UI", "NonInteractiveError"]
+__all__ = ["UI", "NonInteractiveError", "ProgressHandle"]
+
+
+class ProgressHandle(Protocol):
+    """What :meth:`UI.progress` hands back.
+
+    Stated as a protocol so callers are type-checked against it. The bar and
+    the piped fallback are different classes with nothing in common but this,
+    and a caller that only knows ``object`` has to reach past the type checker
+    to use either.
+    """
+
+    def advance(self, n: int = 1) -> None:
+        """Record ``n`` more units of work done."""
+
+    def describe(self, text: str) -> None:
+        """Say what is being worked on now."""
 
 
 class NonInteractiveError(RuntimeError):
@@ -278,11 +295,15 @@ class UI:
             yield
 
     @contextmanager
-    def progress(self, label: str, total: int) -> Iterator[object]:
-        """Show a progress bar for a known amount of work.
+    def progress(self, label: str, total: int) -> Iterator[ProgressHandle]:
+        """Show a progress bar for a roughly known amount of work.
 
-        Yields an object with ``advance(n=1)``. Under ``mono`` or when piped,
-        the bar is suppressed and only start/finish lines are printed.
+        Yields an object with ``advance(n=1)`` and ``describe(text)``. The
+        total may be an estimate: going past it raises the total rather than
+        letting the bar sit full while work continues.
+
+        Under ``mono`` or when piped, the bar is suppressed and only start and
+        finish lines are printed -- no escape codes ever reach a log.
         """
         if not self.theme.uses_color or not self.interactive:
             self.console.print(f"  {label} (0/{total})")
@@ -293,6 +314,9 @@ class UI:
 
                 def advance(self, n: int = 1) -> None:
                     self.done += n
+
+                def describe(self, text: str) -> None:
+                    """No-op. A label that changes 200 times is noise in a log."""
 
             silent = _Silent()
             yield silent
@@ -317,8 +341,23 @@ class UI:
             task = prog.add_task(label, total=total)
 
             class _Live:
+                def __init__(self) -> None:
+                    self.done = 0
+                    self.total = total
+
                 def advance(self, n: int = 1) -> None:
+                    self.done += n
+                    # Callers pass an estimate. A bar pinned at 100% while work
+                    # visibly continues is worse than one that grows, so the
+                    # total follows reality rather than the guess.
+                    if self.done > self.total:
+                        self.total = self.done
+                        prog.update(task, total=self.total)
                     prog.advance(task, n)
+
+                def describe(self, text: str) -> None:
+                    """Change the label to name what is being worked on now."""
+                    prog.update(task, description=text)
 
             yield _Live()
 
