@@ -222,6 +222,7 @@ def read_rollout(path: Path, *, warn_over_bytes: int | None = None) -> SessionRe
     version: str | None = None
     provider: str | None = None
     title: str | None = None
+    first_typed: str | None = None
     header: dict[str, Any] | None = None
     encrypted_reasoning = 0
 
@@ -350,14 +351,23 @@ def read_rollout(path: Path, *, warn_over_bytes: int | None = None) -> SessionRe
                         timestamp=stamp,
                     )
                 )
-            elif kind == "user_message" and not any(m.role == "user" for m in messages[-3:]):
-                # Only reached when response_item did not carry the turn; the
-                # canonical record is preferred whenever it exists.
-                text = payload.get("message")
-                if isinstance(text, str) and text:
-                    messages.append(
-                        Message(role="user", content=[TextBlock(text=text)], timestamp=stamp)
-                    )
+            elif kind == "user_message":
+                # This record marks a turn the *person* typed.
+                # ``response_item``/``message`` with role "user" covers those
+                # too, but also every block of injected context -- permissions
+                # preambles, environment blocks, plugin and skill listings --
+                # which Codex sends as user messages and its own interface
+                # hides. This is the only record that tells the two apart.
+                typed = payload.get("message")
+                if first_typed is None and isinstance(typed, str) and typed.strip():
+                    first_typed = typed
+                if not any(m.role == "user" for m in messages[-3:]):
+                    # Only reached when response_item did not carry the turn;
+                    # the canonical record is preferred whenever it exists.
+                    if isinstance(typed, str) and typed:
+                        messages.append(
+                            Message(role="user", content=[TextBlock(text=typed)], timestamp=stamp)
+                        )
 
     duplicates = [index for index, call_id in mcp_positions if call_id in response_call_ids]
     for index in sorted(duplicates, reverse=True):
@@ -390,16 +400,22 @@ def read_rollout(path: Path, *, warn_over_bytes: int | None = None) -> SessionRe
         out.warnings.append(f"{path.name}: no timestamps anywhere; skipped")
         return out
 
-    for message in messages:
-        for block in message.content:
-            if block.type == "text" and not title:
-                title = block.text.strip().splitlines()[0][:80] if block.text.strip() else None
-        if title:
-            break
+    # Titled by the first thing the person actually typed. Taking the first
+    # text block instead produced titles like "<permissions instructions>",
+    # because a Codex conversation opens with several screens of injected
+    # context that the format records as ordinary user messages.
+    if first_typed:
+        title = first_typed.strip().splitlines()[0].strip()[:80] or None
 
     raw: dict[str, Any] = {"format": "codex-rollout-jsonl"}
     if provider:
         raw["model_provider"] = provider
+    if first_typed:
+        # Kept so a rebuilt rollout can carry the marker forward. UCS has no way
+        # to say "this message was typed by a person rather than injected as
+        # context", and the whole conversation is user-role either way, so
+        # without this the title is lost the moment the file is rebuilt.
+        raw["first_typed"] = first_typed
     if header is not None:
         raw["session_meta"] = header
 

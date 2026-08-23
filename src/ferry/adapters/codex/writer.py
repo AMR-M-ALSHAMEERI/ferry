@@ -186,8 +186,35 @@ def rollout_lines(conversation: Conversation, rebuild: Rebuild) -> bytes | None:
             "payload": header,
         }
     ]
+
+    # Codex emits this event for a turn the person typed, as against the screens
+    # of context it injects as user messages. The distinction has no UCS field,
+    # so it is carried in source_raw and replayed here -- without it the title of
+    # a rebuilt conversation becomes "<permissions instructions>".
+    #
+    # It goes *after* the message it echoes, which is where Codex puts it. Placed
+    # before any message, a reader has nothing to attribute it to and treats it
+    # as a turn of its own, duplicating the first user message.
+    typed = (conversation.source_raw or {}).get("first_typed")
+    marker_pending = isinstance(typed, str) and bool(typed)
+
     for ordinal, message in enumerate(conversation.messages):
         records.extend(_records_for(message, rebuild, ordinal))
+        if marker_pending and message.role == "user":
+            records.append(
+                {
+                    "type": "event_msg",
+                    "timestamp": _iso(message.timestamp or conversation.created_at),
+                    "payload": {
+                        "type": "user_message",
+                        "message": typed,
+                        "images": [],
+                        "local_images": [],
+                        "text_elements": [],
+                    },
+                }
+            )
+            marker_pending = False
 
     return "".join(json.dumps(record, ensure_ascii=False) + "\n" for record in records).encode(
         "utf-8"

@@ -180,6 +180,20 @@ def test_the_session_header_is_kept_so_a_rebuild_can_be_valid(source: Path) -> N
     assert isinstance(header["context_window"], dict)
 
 
+def test_the_title_is_what_the_person_typed(source: Path) -> None:
+    """Found by reading a migrated conversation, not by any automated check.
+
+    A Codex session opens with several screens of injected context -- permissions
+    preambles, environment blocks, plugin listings -- recorded as ordinary user
+    messages. Titling from the first text block produced
+    "<permissions instructions>" for every real conversation on the probe
+    machine. Only ``event_msg``/``user_message`` marks a genuinely typed turn.
+    """
+    found = basic(source)
+    assert found.conversation is not None
+    assert found.conversation.title == "Rename the gadget module."
+
+
 def test_the_conversation_is_dated_by_its_messages(source: Path) -> None:
     """Not by the last token-count event, which a rebuild does not reproduce."""
     found = basic(source)
