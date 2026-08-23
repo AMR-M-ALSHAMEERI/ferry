@@ -18,15 +18,18 @@ from ferry.adapters.base import (
 )
 from ferry.adapters.claude_code import ClaudeCodeAdapter
 from ferry.adapters.codex import CodexAdapter
+from ferry.adapters.copilot import CopilotAdapter
 
 REGISTRY["claude-code"] = ClaudeCodeAdapter()
 REGISTRY["codex"] = CodexAdapter()
+REGISTRY["copilot"] = CopilotAdapter()
 
 __all__ = [
     "REGISTRY",
     "Adapter",
     "ClaudeCodeAdapter",
     "CodexAdapter",
+    "CopilotAdapter",
     "DetectResult",
     "ExportEvent",
     "ImportEvent",

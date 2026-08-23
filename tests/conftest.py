@@ -34,6 +34,7 @@ def _isolate_user_config(tmp_path_factory, monkeypatch):
 ASSISTANT_HOME_VARS = (
     "CLAUDE_CONFIG_DIR",
     "CODEX_HOME",
+    "FERRY_VSCODE_USER_DIR",
 )
 """Every environment variable that points an adapter at a real conversation store.
 
