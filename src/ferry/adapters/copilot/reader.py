@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID, uuid5
 
 from ferry.adapters.copilot import paths as cp_paths
 from ferry.adapters.copilot.deltas import replay_lines
@@ -52,6 +52,16 @@ a silent drop is how a real block type gets lost for a release.
 """
 
 _TITLE_LIMIT = 80
+
+_IMAGE_NAMESPACE = UUID("6ba7b811-9dad-11d1-80b4-00c04fd430c8")
+"""Namespace for deriving an image's attachment id.
+
+Deterministic on purpose. With a random id, exporting the same conversation
+twice produced two different bundles -- not lost data, but it means a bundle
+cannot be compared with another, a re-export cannot be deduplicated, and a
+round-trip check reports a difference that is not one. Found by the round trip
+itself, which is the only thing that would have.
+"""
 
 
 @dataclass
@@ -209,7 +219,13 @@ def _images(turn: dict[str, Any], conversation_id: UUID) -> list[PendingImage]:
         mime = variable.get("mimeType")
         mime = mime if isinstance(mime, str) and mime else "image/png"
         name = variable.get("name")
-        attachment_id = uuid4()
+        # Copilot gives each image a content-derived id. Where it does not, the
+        # bytes themselves serve -- either way the same image in the same
+        # conversation always gets the same attachment id.
+        marker = variable.get("id")
+        if not isinstance(marker, str) or not marker:
+            marker = hashlib.sha256(data).hexdigest()
+        attachment_id = uuid5(_IMAGE_NAMESPACE, f"{conversation_id}:{marker}")
         suffix = mime.rsplit("/", 1)[-1] or "png"
         found.append(
             PendingImage(

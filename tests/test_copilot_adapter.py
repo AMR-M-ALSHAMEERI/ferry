@@ -190,12 +190,151 @@ def test_export_reports_an_error_when_there_is_nothing_to_read(
 # --------------------------------------------------------------------------
 
 
-def test_import_says_plainly_that_it_is_not_built(store: Path, tmp_path: Path) -> None:
-    """A transcript written without its entry in chat.ChatSessionStore.index is
-    a conversation VS Code will never show. Refusing beats writing that."""
+# --------------------------------------------------------------------------
+# import
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture
+def exported(store: Path, tmp_path: Path) -> Path:
+    dest = tmp_path / "bundle"
+    list(CopilotAdapter().export(dest))
+    return dest
+
+
+@pytest.fixture
+def target(tmp_path: Path) -> dict[str, str]:
+    """A separate VS Code user directory to import into."""
+    import os
+
+    user = tmp_path / "target" / "Code" / "User"
+    user.mkdir(parents=True)
+    env = dict(os.environ)
+    env[cp.USER_DIR_ENV] = str(user)
+    return env
+
+
+def test_import_writes_the_transcript_and_lists_it(exported: Path, target) -> None:  # type: ignore[no-untyped-def]
+    """Both halves, or neither. A transcript VS Code does not list is a
+    conversation the user cannot reach and cannot discover exists."""
+    from ferry.adapters.base import ImportOptions
+    from ferry.adapters.copilot.writer import index_lists
+
+    events = list(CopilotAdapter(target).import_(exported, ImportOptions()))
+
+    assert sum(1 for e in events if e.kind == "progress") == 3
+    written = cp.session_files(target)
+    assert len(written) == 3
+    listed = index_lists(cp.global_storage(target) / "state.vscdb")
+    assert {path.stem for _, path in written} <= listed
+
+
+def test_import_round_trips_the_conversation_unchanged(exported: Path, target) -> None:  # type: ignore[no-untyped-def]
+    """The check that catches what no unit test does: read what was written and
+    compare it with what was exported, block for block."""
+    from ferry.adapters.base import ImportOptions
+    from ferry.adapters.copilot.reader import read_session
+
+    list(CopilotAdapter(target).import_(exported, ImportOptions()))
+
+    bundle = Bundle.open(exported)
+    for key, path in cp.session_files(target):
+        rebuilt = read_session(path, key, target).conversation
+        assert rebuilt is not None
+        original = bundle.load_conversation(rebuilt.id)
+        assert rebuilt.title == original.title
+        assert [[b.model_dump() for b in m.content] for m in rebuilt.messages] == [
+            [b.model_dump() for b in m.content] for m in original.messages
+        ]
+
+
+def test_importing_twice_does_not_duplicate(exported: Path, target) -> None:  # type: ignore[no-untyped-def]
     from ferry.adapters.base import ImportOptions
 
-    events = list(CopilotAdapter().import_(tmp_path / "bundle", ImportOptions()))
+    list(CopilotAdapter(target).import_(exported, ImportOptions()))
+    events = list(CopilotAdapter(target).import_(exported, ImportOptions()))
+
+    assert sum(1 for e in events if e.kind == "progress") == 0
+    assert sum(1 for e in events if e.kind == "skipped") == 3
+    assert len(cp.session_files(target)) == 3
+
+
+def test_import_does_not_invent_a_workspace_that_is_not_here(exported: Path, target) -> None:  # type: ignore[no-untyped-def]
+    """The recorded key is a digest of a folder path *and its creation time* on
+    another machine. Creating a directory to make it fit would produce a
+    workspace VS Code has never heard of, so these land in the no-folder list."""
+    from ferry.adapters.base import ImportOptions
+
+    list(CopilotAdapter(target).import_(exported, ImportOptions()))
+
+    assert all(key == "" for key, _ in cp.session_files(target))
+    assert not (cp.workspace_storage(target) / WS_KEY).exists()
+
+
+def test_import_returns_a_conversation_to_its_workspace_when_it_is_here(
+    exported: Path,
+    target,  # type: ignore[no-untyped-def]
+) -> None:
+    from ferry.adapters.base import ImportOptions
+
+    (cp.workspace_storage(target) / WS_KEY).mkdir(parents=True)
+
+    list(CopilotAdapter(target).import_(exported, ImportOptions()))
+
+    assert all(key == WS_KEY for key, _ in cp.session_files(target))
+
+
+def test_an_existing_chat_list_is_added_to_not_replaced(exported: Path, target) -> None:  # type: ignore[no-untyped-def]
+    """The index is one JSON blob holding every conversation. A careless write
+    deletes the user's chat list while appearing to add to it."""
+    import json
+    import sqlite3
+
+    from ferry.adapters.base import ImportOptions
+    from ferry.adapters.copilot.writer import INDEX_KEY, index_lists
+
+    database = cp.global_storage(target) / "state.vscdb"
+    database.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(database)
+    with connection:
+        connection.execute("CREATE TABLE ItemTable (key TEXT UNIQUE, value BLOB)")
+        connection.execute(
+            "INSERT INTO ItemTable VALUES (?, ?)",
+            (
+                INDEX_KEY,
+                json.dumps({"version": 1, "entries": {"keep-me": {"sessionId": "keep-me"}}}),
+            ),
+        )
+    connection.close()
+
+    list(CopilotAdapter(target).import_(exported, ImportOptions()))
+
+    assert "keep-me" in index_lists(database)
+
+
+def test_a_conversation_from_another_tool_is_skipped_not_mangled(
+    tmp_path: Path,
+    target,  # type: ignore[no-untyped-def]
+    manifest,
+    conversation,
+) -> None:
+    """Cross-tool import is M7b. Writing a Claude Code conversation into
+    Copilot's format now would produce something neither tool can read."""
+    from ferry.adapters.base import ImportOptions
+
+    dest = tmp_path / "foreign"
+    bundle = Bundle.create(dest, manifest)
+    bundle.add_conversation(conversation)
+
+    events = list(CopilotAdapter(target).import_(dest, ImportOptions()))
+
+    assert sum(1 for e in events if e.kind == "progress") == 0
+    assert any("M7b" in e.message for e in events if e.kind == "skipped")
+
+
+def test_import_reports_a_bundle_it_cannot_open(tmp_path: Path, target) -> None:  # type: ignore[no-untyped-def]
+    from ferry.adapters.base import ImportOptions
+
+    events = list(CopilotAdapter(target).import_(tmp_path / "nothing", ImportOptions()))
 
     assert [e.kind for e in events] == ["error"]
-    assert "not built yet" in events[0].message
