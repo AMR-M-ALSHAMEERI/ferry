@@ -69,3 +69,8 @@ docs/ACCEPTANCE.md
 # Explicitly allow curated, audited test fixtures
 !tests/fixtures/**/*.jsonl
 !tests/fixtures/**/*.pb
+
+# Exported bundles are user data, not source. A bundle written into the
+# working directory must never be committed - the repo hooks would rewrite
+# its whitespace and silently alter exported conversations.
+ferry-bundle-*/
