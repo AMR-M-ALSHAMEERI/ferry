@@ -72,26 +72,17 @@ def test_adapters_still_waiting_report_not_installed_with_a_reason() -> None:
         assert "not yet implemented" in result.notes[0]
 
 
-def test_the_menu_does_not_claim_a_shipped_milestone_is_pending() -> None:
-    """Regression: Export said "arrives at M3" long after M3 and M4 had shipped.
+def test_export_and_import_reach_a_real_adapter() -> None:
+    """They were stubs saying "arrives at M3" long after M3 and M4 had shipped.
 
-    Telling someone a finished feature is unfinished is worse than silence. The
-    adapters are real and tested; only the menu wiring is missing, and the
-    message now says that instead.
+    The assertion that replaced that message is now itself obsolete: the two
+    actions no longer print anything, they run. What must stay true is that
+    neither is treated as unbuilt.
     """
-    from ferry.cli.menu import _BUILT_BUT_UNWIRED, _MILESTONE_FOR_ACTION, _stub
+    from ferry.cli.menu import _MILESTONE_FOR_ACTION, _WIRED
 
-    assert _BUILT_BUT_UNWIRED == {"export", "import"}
-    assert not (_BUILT_BUT_UNWIRED & set(_MILESTONE_FOR_ACTION))
-
-    for action in ("export", "import"):
-        ui = _plain_ui()
-        buf = io.StringIO()
-        ui.console.file = buf
-        _stub(ui, action)
-        text = buf.getvalue()
-        assert "M3" not in text and "M4" not in text, text
-        assert "adapters work" in text
+    assert _WIRED == {"export", "import"}
+    assert not (_WIRED & set(_MILESTONE_FOR_ACTION))
 
 
 def test_an_action_that_really_is_unbuilt_still_names_its_milestone() -> None:

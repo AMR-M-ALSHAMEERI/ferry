@@ -1,6 +1,7 @@
 """The interactive flows: scan, top-level menu, and the per-action stubs.
 
-At M2 the export/import/inspect/compact actions are stubs. The wordmark, the
+Export and Import reach real adapters; Inspect and Compact are still stubs.
+The wordmark, the
 scan screen, the theme picker, the slash filter and the non-interactive guard
 are all real, so later milestones fill in behaviour behind a finished interface.
 """
@@ -8,6 +9,7 @@ are all real, so later milestones fill in behaviour behind a finished interface.
 from __future__ import annotations
 
 from ferry.adapters.base import Adapter, DetectResult, list_adapters
+from ferry.cli.flows import run_export, run_import
 from ferry.cli.motion import MENU_MOTION
 from ferry.cli.theme import IconSet
 from ferry.cli.ui import UI, NonInteractiveError, _DetectionRow
@@ -36,13 +38,12 @@ _MILESTONE_FOR_ACTION: dict[str, str] = {
 }
 """Actions that genuinely do not exist yet, and when they arrive."""
 
-_BUILT_BUT_UNWIRED = frozenset({"export", "import"})
-"""Actions whose adapters work but which the menu cannot reach yet.
+_WIRED = frozenset({"export", "import"})
+"""Actions that reach a real adapter.
 
-Export and Import used to be listed above as "arrives at M3". M3 shipped, and
-so did M4, and the message went on claiming otherwise -- which is worse than
-saying nothing, because it tells someone a finished thing is unfinished. The
-adapters are tested against real data; only this wiring is missing.
+These were stubs reporting "arrives at M3" long after M3 and M4 had shipped --
+two working adapters with no way to reach them. :mod:`ferry.cli.flows` is the
+wiring; this set is what routes to it.
 """
 
 
@@ -90,13 +91,9 @@ def scan(ui: UI, adapters: list[Adapter] | None = None) -> list[tuple[Adapter, D
 
 
 def _stub(ui: UI, action: str) -> None:
-    """Say accurately why an action did nothing."""
-    if action in _BUILT_BUT_UNWIRED:
-        dash = ui.theme.icons.dash
-        ui.warn(f"Not available from the menu yet {dash} the adapters work, this screen does not.")
-    else:
-        milestone = _MILESTONE_FOR_ACTION.get(action, "a later milestone")
-        ui.warn(f"Not implemented yet {ui.theme.icons.dash} arrives at {milestone}.")
+    """Report that an action exists but has not been built yet."""
+    milestone = _MILESTONE_FOR_ACTION.get(action, "a later milestone")
+    ui.warn(f"Not implemented yet {ui.theme.icons.dash} arrives at {milestone}.")
     ui.blank()
 
 
@@ -157,6 +154,16 @@ def run_menu(ui: UI) -> int:
 
         if action == "theme":
             _change_theme(ui)
+            continue
+
+        if action in _WIRED:
+            # Re-scanned rather than reused: the user may have installed or
+            # removed a tool since the menu opened, and acting on a stale answer
+            # is how an export silently misses a whole assistant.
+            if action == "export":
+                run_export(ui, scan(ui))
+            else:
+                run_import(ui, scan(ui))
             continue
 
         _stub(ui, action)

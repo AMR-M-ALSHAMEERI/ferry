@@ -210,6 +210,17 @@ class UI:
         icon = self.theme.icons.error
         self.console.print(f"  {self._style('ferry.error', icon)} {message}")
 
+    def detail(self, message: str) -> None:
+        """Print one indented line of a running list.
+
+        For the per-conversation lines an export or import produces: quieter
+        than :meth:`info` and indented under it, because a hundred of them
+        should read as one block of progress rather than a hundred
+        announcements.
+        """
+        icon = self.theme.icons.success
+        self.console.print(f"    {self._style('ferry.dim', icon + ' ' + message)}")
+
     def debug(self, message: str) -> None:
         """Print detail, but only under ``--verbose``."""
         if self.verbose:
