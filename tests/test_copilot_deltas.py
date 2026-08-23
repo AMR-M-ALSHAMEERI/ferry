@@ -212,3 +212,60 @@ def test_a_file_that_never_had_a_snapshot_still_replays() -> None:
     result = replay([append(["requests"], [{"requestId": "r1"}])])
 
     assert result.document["requests"] == [{"requestId": "r1"}]
+
+
+# --------------------------------------------------------------------------
+# the splice index
+# --------------------------------------------------------------------------
+
+
+def splice(path: list[object], at: int, value: object) -> dict[str, object]:
+    return {"kind": APPEND, "k": path, "i": at, "v": value}
+
+
+def test_a_splice_index_cuts_the_list_before_appending() -> None:
+    """`i` is where the existing list is cut, not where the new items land.
+
+    VS Code revises a response while it streams and re-sends the tail. Treating
+    the record as a plain append does not lose data, it *invents* it -- the
+    superseded blocks stay and the answer appears twice.
+    """
+    result = replay(
+        [
+            snap(requests=[{"response": ["a", "b", "c", "d", "e"]}]),
+            splice(["requests", 0, "response"], 2, ["x", "y"]),
+        ]
+    )
+
+    assert result.document["requests"][0]["response"] == ["a", "b", "x", "y"]
+
+
+def test_an_append_without_an_index_still_just_appends() -> None:
+    result = replay([snap(r=["a"]), append(["r"], ["b"])])
+
+    assert result.document["r"] == ["a", "b"]
+
+
+def test_a_splice_at_zero_replaces_the_whole_list() -> None:
+    result = replay([snap(r=["a", "b"]), splice(["r"], 0, ["z"])])
+
+    assert result.document["r"] == ["z"]
+
+
+def test_a_splice_past_the_end_keeps_everything_and_appends() -> None:
+    result = replay([snap(r=["a", "b"]), splice(["r"], 99, ["c"])])
+
+    assert result.document["r"] == ["a", "b", "c"]
+
+
+def test_a_splice_into_a_key_that_does_not_exist_yet_creates_it() -> None:
+    result = replay([snap(), splice(["r"], 3, ["a"])])
+
+    assert result.document["r"] == ["a"]
+
+
+def test_a_non_integer_index_is_ignored_rather_than_obeyed() -> None:
+    """A malformed `i` must not silently truncate a real conversation."""
+    result = replay([snap(r=["a", "b"]), {"kind": APPEND, "k": ["r"], "i": "2", "v": ["c"]}])
+
+    assert result.document["r"] == ["a", "b", "c"]

@@ -16,15 +16,22 @@ only through the adapter.
 
 Record shape, verified against VS Code 1.134.0 (see ``PROGRESS.md`` §4.2)::
 
-    {"kind": 0, "v": {...}}                  full snapshot, replaces everything
-    {"kind": 1, "k": ["a", "b"], "v": x}     set: doc["a"]["b"] = x
-    {"kind": 2, "k": ["requests"], "v": [y]} append: doc["requests"] += [y]
+    {"kind": 0, "v": {...}}                     snapshot, replaces everything
+    {"kind": 1, "k": ["a", "b"], "v": x}        set: doc["a"]["b"] = x
+    {"kind": 2, "k": ["requests"], "v": [y]}    append: doc["requests"] += [y]
+    {"kind": 2, "k": [...], "i": 5, "v": [y]}   splice: cut to 5, then append
 
-Only kinds 0, 1 and 2 were observed, across 18 records. **The set is assumed
-incomplete** -- the sample is one machine and one VS Code build -- so an
-unrecognised kind is counted and skipped, never raised. A future VS Code that
-adds kind 3 should cost the user the records it could not read, not the whole
-conversation.
+**The ``i`` field is the trap in this format.** It was absent from the first
+sample entirely and appeared only once there was real tool use to look at.
+It is not a position for the new items -- it is where the existing list is
+**cut** before they are added, because VS Code revises a response as it
+streams and re-sends the tail. Ignoring it does not lose data, it invents
+data: see :func:`_spliced`.
+
+Only kinds 0, 1 and 2 have been observed. **The set is assumed incomplete** --
+the first sample had 18 records and missed ``i`` outright -- so an unrecognised
+kind is counted and skipped, never raised. A future VS Code that adds kind 3
+should cost the user the records it could not read, not the whole conversation.
 """
 
 from __future__ import annotations
@@ -112,22 +119,48 @@ def _assign(container: Any, key: Any, value: Any) -> bool:
     return False
 
 
-def _extend(container: Any, key: Any, value: Any) -> bool:
+def _spliced(existing: list[Any], addition: list[Any], at: int | None) -> list[Any]:
+    """The list after an append that may carry a splice index.
+
+    ``at`` is the record's ``i``. When present it is **not** where the new
+    items go on the end -- it is where the existing list is cut before they are
+    added. VS Code revises a response while it streams (thinking that later
+    collapses, a tool call that gains its result) and re-sends the tail rather
+    than the whole block list.
+
+    Ignoring it does not lose data, it *invents* data: on the sample every
+    ``i`` was below the current length, so a plain append reproduced blocks
+    that had already been superseded -- 44 blocks where the conversation held
+    34, the answer duplicated with stale drafts between the copies.
+
+    One honesty note. Truncate-then-extend and replace-in-place cannot be told
+    apart on the data available, because ``i + len(addition) >= len(existing)``
+    held for all seven observed records. Truncation is chosen as the simpler
+    reading; if a record ever arrives where they differ, this is where to look.
+    """
+    if at is None:
+        return existing + addition
+    if at < 0:
+        at = max(0, len(existing) + at)
+    return existing[:at] + addition
+
+
+def _extend(container: Any, key: Any, value: Any, at: int | None) -> bool:
     """Append to the list at ``key``, treating a missing key as an empty list.
 
     A non-list ``v`` is appended as a single element. VS Code always sends a
     list, but a scalar arriving here should join the conversation rather than
-    be dropped or splatted into characters.
+    be dropped or split into characters.
     """
     addition = list(value) if isinstance(value, list) else [value]
     if isinstance(container, dict):
         existing = container.get(key)
         if existing is None:
-            container[key] = addition
+            container[key] = _spliced([], addition, at)
             return True
         if not isinstance(existing, list):
             return False
-        existing.extend(addition)
+        container[key] = _spliced(existing, addition, at)
         return True
     if isinstance(container, list):
         if not isinstance(key, int) or not -len(container) <= key < len(container):
@@ -135,7 +168,7 @@ def _extend(container: Any, key: Any, value: Any) -> bool:
         existing = container[key]
         if not isinstance(existing, list):
             return False
-        existing.extend(addition)
+        container[key] = _spliced(existing, addition, at)
         return True
     return False
 
@@ -187,10 +220,11 @@ def replay(records: Iterable[Any]) -> ReplayResult:
             result.bad_paths += 1
             continue
 
+        at = record.get("i")
         applied = (
             _assign(container, path[-1], value)
             if kind == SET
-            else _extend(container, path[-1], value)
+            else _extend(container, path[-1], value, at if isinstance(at, int) else None)
         )
         if applied:
             result.applied += 1
