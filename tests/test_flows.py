@@ -25,7 +25,7 @@ from ferry.adapters.base import (
     ImportEvent,
     ImportOptions,
 )
-from ferry.cli.flows import run_export, run_import
+from ferry.cli.flows import _describe, find_bundles, run_export, run_import
 from ferry.cli.theme import MONO, Capability
 from ferry.cli.ui import UI, NonInteractiveError
 
@@ -197,6 +197,17 @@ def test_skipped_conversations_are_counted_separately(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _no_real_bundles(monkeypatch, tmp_path: Path):
+    """Keep the picker off the developer's own disk.
+
+    ``find_bundles`` looks in Desktop and Downloads. A test that reads those
+    passes or fails depending on whose machine it runs on -- the same fault as
+    a test that reads a real conversation store.
+    """
+    monkeypatch.setattr("ferry.cli.flows._search_roots", lambda: [tmp_path / "nowhere"])
+
+
 @pytest.fixture
 def bundle_dir(tmp_path: Path, manifest, conversation) -> Path:
     from ferry.core import Bundle
@@ -280,3 +291,76 @@ def test_a_screen_that_cannot_prompt_gives_up_rather_than_hanging(tmp_path: Path
         flow(ui, scanned(adapter))
         assert adapter.exported_to is None
         assert adapter.imported_from is None
+
+
+# --------------------------------------------------------------------------
+# choosing a bundle
+# --------------------------------------------------------------------------
+
+
+def test_a_bundle_lying_nearby_is_offered_rather_than_asked_for(
+    monkeypatch, bundle_dir: Path
+) -> None:
+    """The screen used to present a blank line and wait. Nothing told the user
+    what to type, which is the failure this picker exists to prevent."""
+    monkeypatch.setattr("ferry.cli.flows._search_roots", lambda: [bundle_dir.parent])
+    adapter = _Recorder(events=[ImportEvent(kind="progress", message="ok")])
+    ui = _Answers(path=None, confirm=True)  # no typing available at all
+
+    run_import(ui, scanned(adapter))
+
+    assert adapter.imported_from == bundle_dir
+
+
+def test_a_listed_bundle_says_what_is_in_it(monkeypatch, bundle_dir: Path) -> None:
+    monkeypatch.setattr("ferry.cli.flows._search_roots", lambda: [bundle_dir.parent])
+
+    label = _describe(bundle_dir)
+
+    assert "1 conversation" in label
+    assert "claude-code" in label
+
+
+def test_typing_a_path_is_still_possible_when_nothing_is_found(bundle_dir: Path) -> None:
+    adapter = _Recorder()
+    ui = _Answers(path=str(bundle_dir), confirm=True)
+
+    run_import(ui, scanned(adapter))
+
+    assert adapter.imported_from == bundle_dir
+    assert "No bundle found nearby" in ui.text
+
+
+def test_find_bundles_looks_one_level_down_and_no_further(tmp_path: Path, manifest) -> None:
+    from ferry.core import Bundle
+
+    Bundle.create(tmp_path / "near", manifest)
+    Bundle.create(tmp_path / "a" / "b" / "deep", manifest)
+
+    found = find_bundles([tmp_path])
+
+    assert found == [tmp_path / "near"]
+
+
+def test_find_bundles_ignores_a_root_that_is_not_there(tmp_path: Path) -> None:
+    assert find_bundles([tmp_path / "gone"]) == []
+
+
+def test_a_bundle_with_a_broken_manifest_is_still_listed(tmp_path: Path) -> None:
+    """Better to offer it and let Bundle.open explain, than to hide it and
+    leave the user certain their bundle is missing."""
+    broken = tmp_path / "broken"
+    broken.mkdir()
+    (broken / "manifest.json").write_text("{ not json", encoding="utf-8")
+
+    assert find_bundles([tmp_path]) == [broken]
+    assert "unreadable" in _describe(broken)
+
+
+def test_an_unreadable_root_is_skipped_rather_than_fatal(tmp_path: Path, monkeypatch) -> None:
+    def refuse(self):  # type: ignore[no-untyped-def]
+        raise PermissionError("nope")
+
+    monkeypatch.setattr(Path, "iterdir", refuse)
+
+    assert find_bundles([tmp_path]) == []

@@ -33,11 +33,22 @@ from ferry.adapters.base import (
 )
 from ferry.cli.ui import UI, NonInteractiveError
 from ferry.core import Bundle, BundleError
+from ferry.core.bundle import MANIFEST_NAME
 
-__all__ = ["Scanned", "run_export", "run_import"]
+__all__ = ["Scanned", "find_bundles", "run_export", "run_import"]
 
 _MAX_SHOWN_WARNINGS = 8
 """Warnings printed in full before the rest are counted rather than listed."""
+
+_TYPE_A_PATH = "\n type a path"
+"""Sentinel choice value.
+
+It holds a newline. Every other value in the list is ``str(absolute_path)``,
+and no path can contain one, so this cannot be mistaken for a real directory.
+"""
+
+_MAX_LISTED_BUNDLES = 12
+"""Enough to cover a working directory; past that the list stops being a list."""
 
 
 Scanned = Sequence[tuple[Adapter, DetectResult]]
@@ -46,6 +57,95 @@ Scanned = Sequence[tuple[Adapter, DetectResult]]
 
 def _installed(adapters: Scanned) -> list[Adapter]:
     return [adapter for adapter, result in adapters if result.installed]
+
+
+def _search_roots() -> list[Path]:
+    """Where a bundle plausibly is, most likely first.
+
+    The working directory comes first because that is where ``run_export``
+    offers to put one. The rest are the three places a bundle copied from
+    another machine actually lands.
+    """
+    home = Path.home()
+    roots = [Path.cwd(), home / "Desktop", home / "Downloads", home / "Documents"]
+    seen: set[Path] = set()
+    unique: list[Path] = []
+    for root in roots:
+        if root not in seen:
+            seen.add(root)
+            unique.append(root)
+    return unique
+
+
+def find_bundles(roots: Sequence[Path] | None = None) -> list[Path]:
+    """Directories that look like bundles, nearest first.
+
+    Deliberately shallow -- a root and its immediate children. Walking a whole
+    home directory to populate a menu would cost seconds and surprise the user
+    for a list they will read in one glance.
+    """
+    found: list[Path] = []
+    seen: set[Path] = set()
+    for root in _search_roots() if roots is None else roots:
+        try:
+            if not root.is_dir():
+                continue
+            candidates = [root, *sorted(p for p in root.iterdir() if p.is_dir())]
+        except OSError:
+            # An unreadable or disconnected root is not worth a failure here.
+            continue
+        for candidate in candidates:
+            resolved = candidate.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            if (candidate / MANIFEST_NAME).is_file():
+                found.append(candidate)
+    return found
+
+
+def _describe(path: Path) -> str:
+    """A one-line label: what is in this bundle, and where it is."""
+    try:
+        manifest = Bundle.open(path).manifest
+    except BundleError:
+        return f"{path.name}  -  unreadable"
+    tools = ", ".join(manifest.tools_included) or "nothing"
+    plural = "" if manifest.conversation_count == 1 else "s"
+    return (
+        f"{path.name}  -  {manifest.conversation_count} conversation{plural}"
+        f" from {tools}, {manifest.created_at:%d %b %Y}"
+    )
+
+
+def _choose_bundle(ui: UI) -> Path | None:
+    """Pick a bundle by arrow key, falling back to typing a path.
+
+    The first version of this screen asked for a path outright. With no
+    default and no list, it presented a blank line and waited -- the user had
+    no way to know what to enter, which is the same failure as asking someone
+    to type an identifier.
+    """
+    bundles = find_bundles()
+    if not bundles:
+        ui.info("No bundle found nearby - looked in this folder, Desktop, Downloads, Documents.")
+        return _typed_bundle(ui)
+
+    listed = bundles[:_MAX_LISTED_BUNDLES]
+    choices = [(str(p), _describe(p)) for p in listed]
+    choices.append((_TYPE_A_PATH, "Somewhere else - type the path"))
+    chosen = ui.select("Which bundle should be imported?", choices, hint="use --bundle")
+    if chosen is None:
+        return None
+    if chosen == _TYPE_A_PATH:
+        return _typed_bundle(ui)
+    return Path(chosen)
+
+
+def _typed_bundle(ui: UI) -> Path | None:
+    ui.detail("Type or paste the folder holding the bundle. Tab completes it.")
+    answer = ui.path("Path to the bundle", hint="use --bundle")
+    return Path(answer).expanduser() if answer else None
 
 
 def _default_bundle_name() -> str:
@@ -119,6 +219,7 @@ def run_export(ui: UI, adapters: Scanned) -> None:
                 return
             adapter = next(a for a in available if a.name == chosen)
 
+        ui.detail("A new folder will be made here. Enter accepts the suggestion below.")
         destination = ui.path(
             "Where should the bundle go?",
             default=str(Path.cwd() / _default_bundle_name()),
@@ -157,10 +258,10 @@ def run_import(ui: UI, adapters: Scanned) -> None:
         return
 
     try:
-        source = ui.path("Which bundle should be imported?", hint="use --bundle")
-        if not source:
+        picked = _choose_bundle(ui)
+        if picked is None:
             return
-        bundle_dir = Path(source).expanduser()
+        bundle_dir = picked
 
         try:
             bundle = Bundle.open(bundle_dir)
