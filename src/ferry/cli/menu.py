@@ -31,11 +31,19 @@ keyed by the same value.
 """
 
 _MILESTONE_FOR_ACTION: dict[str, str] = {
-    "export": "M3",
-    "import": "M3",
     "inspect": "M7",
     "compact": "M7",
 }
+"""Actions that genuinely do not exist yet, and when they arrive."""
+
+_BUILT_BUT_UNWIRED = frozenset({"export", "import"})
+"""Actions whose adapters work but which the menu cannot reach yet.
+
+Export and Import used to be listed above as "arrives at M3". M3 shipped, and
+so did M4, and the message went on claiming otherwise -- which is worse than
+saying nothing, because it tells someone a finished thing is unfinished. The
+adapters are tested against real data; only this wiring is missing.
+"""
 
 
 def _describe(result: DetectResult, icons: IconSet) -> str:
@@ -82,9 +90,13 @@ def scan(ui: UI, adapters: list[Adapter] | None = None) -> list[tuple[Adapter, D
 
 
 def _stub(ui: UI, action: str) -> None:
-    """Report that an action exists but has not been built yet."""
-    milestone = _MILESTONE_FOR_ACTION.get(action, "a later milestone")
-    ui.warn(f"Not implemented yet {ui.theme.icons.dash} arrives at {milestone}.")
+    """Say accurately why an action did nothing."""
+    if action in _BUILT_BUT_UNWIRED:
+        dash = ui.theme.icons.dash
+        ui.warn(f"Not available from the menu yet {dash} the adapters work, this screen does not.")
+    else:
+        milestone = _MILESTONE_FOR_ACTION.get(action, "a later milestone")
+        ui.warn(f"Not implemented yet {ui.theme.icons.dash} arrives at {milestone}.")
     ui.blank()
 
 
