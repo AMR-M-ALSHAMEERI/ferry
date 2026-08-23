@@ -77,6 +77,23 @@ the tool being written into, `provenance` is mandatory and `conversion_notes`
 must list every lossy conversion. Silently passing a converted conversation off
 as native is a correctness bug.
 
+**Beware a format that records every turn twice.** Codex writes a canonical
+record and an interface event for the same turn; reading both doubles the
+conversation, and reading only the canonical one loses the parts it does not
+carry. Census which side holds what before mapping either.
+
+**A field that looks like a duplicate id may be a link.** Codex's `session_id`
+equals `id` on an ordinary thread and holds the *parent's* id on a subagent
+thread. Overwriting it on import reparented the subagent to itself — caught by
+the round-trip test, not by any unit test that existed at the time.
+
+**Carry the header, not the whole file.** When a tool validates a session
+header strictly, guessing its schema means the tool rejects the entire
+conversation, usually with no error. Keeping the real header verbatim in
+`source_raw` costs a few tens of KB and removes the guess. That is often a
+better trade than copying the whole transcript: for Codex it is 40 KB against
+57 MB.
+
 ## Probing a new tool
 
 Do this before writing any adapter code, and record the findings in

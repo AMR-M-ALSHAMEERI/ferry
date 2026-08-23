@@ -50,17 +50,19 @@ def test_get_adapter_raises_on_unknown_name() -> None:
         get_adapter("cursor")
 
 
-def test_the_claude_code_slot_holds_the_real_adapter_now() -> None:
-    """M3 replaced one stub. The registration lives in ``ferry.adapters``."""
+def test_the_implemented_slots_hold_real_adapters_now() -> None:
+    """M3 and M4 each replaced a stub. Registration lives in ``ferry.adapters``."""
     from ferry.adapters.claude_code import ClaudeCodeAdapter
+    from ferry.adapters.codex import CodexAdapter
 
     assert isinstance(get_adapter("claude-code"), ClaudeCodeAdapter)
+    assert isinstance(get_adapter("codex"), CodexAdapter)
 
 
 def test_adapters_still_waiting_report_not_installed_with_a_reason() -> None:
     """Stubs must be honest — no invented conversation counts."""
     pending = [a for a in list_adapters() if isinstance(a, NotImplementedAdapter)]
-    assert [a.name for a in pending] == ["codex", "copilot", "antigravity"]
+    assert [a.name for a in pending] == ["copilot", "antigravity"]
 
     for adapter in pending:
         result = adapter.detect()

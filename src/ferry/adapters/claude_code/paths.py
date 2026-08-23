@@ -25,6 +25,8 @@ import re
 import unicodedata
 from pathlib import Path
 
+from ferry.adapters.pathutil import basename
+
 __all__ = [
     "CONFIG_DIR_ENV",
     "MAX_PROJECT_DIR_NAME",
@@ -111,29 +113,6 @@ def mangle(path_text: str) -> str:
         return mangled
     suffix = _base36(abs(_int32_hash(path_text)))
     return f"{mangled[:MAX_PROJECT_DIR_NAME]}-{suffix}"
-
-
-def basename(path_text: str) -> str:
-    """The last segment of a path **recorded on any operating system**.
-
-    ``Path(...).name`` is wrong here and wrong in a way that only shows up on
-    the other platform. ``pathlib`` splits using the separators of the machine
-    it is running on, so a Windows path handed to a Linux interpreter has no
-    separators at all and the "last segment" comes back as the entire string.
-
-    That is not a hypothetical. Moving history between machines is what Ferry is
-    *for*: the paths in a bundle were written by the source machine and are read
-    by the target one, which is frequently a different OS. Both separators are
-    therefore always significant, whichever host is doing the reading.
-
-    A trailing separator is ignored, and a path that is nothing but separators
-    has no last segment, so the whole string comes back rather than an empty one.
-    """
-    trimmed = path_text.rstrip("/" + chr(92))
-    if not trimmed:
-        return path_text
-    cut = max(trimmed.rfind("/"), trimmed.rfind(chr(92)))
-    return trimmed[cut + 1 :] if cut >= 0 else trimmed
 
 
 def config_root(env: os._Environ[str] | dict[str, str] | None = None) -> Path:

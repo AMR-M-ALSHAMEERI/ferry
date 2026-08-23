@@ -1,4 +1,4 @@
-.PHONY: install lint format typecheck test check clean verify-m1 verify-m2 verify-m3
+.PHONY: install lint format typecheck test check clean verify-m1 verify-m2 verify-m3 verify-m4
 
 install:
 	pip install -e ".[dev]"
@@ -26,6 +26,9 @@ verify-m2:
 
 verify-m3:
 	python scripts/selfcheck/verify_m3.py
+
+verify-m4:
+	python scripts/selfcheck/verify_m4.py
 
 clean:
 	rm -rf .pytest_cache .mypy_cache .ruff_cache .pytest-tmp htmlcov .coverage dist build

@@ -31,21 +31,33 @@ def _isolate_user_config(tmp_path_factory, monkeypatch):
     return fake
 
 
+ASSISTANT_HOME_VARS = (
+    "CLAUDE_CONFIG_DIR",
+    "CODEX_HOME",
+)
+"""Every environment variable that points an adapter at a real conversation store.
+
+**Add to this the moment an adapter learns to read a new one.** It has already
+been forgotten once per adapter: the omission is invisible in CI, where no tool
+is installed, and only shows up as a failure on a machine that actually uses
+the thing.
+"""
+
+
 @pytest.fixture(autouse=True)
 def _isolate_assistant_data(tmp_path_factory, monkeypatch):
     """Point every adapter at an empty conversation store.
 
-    Without this the suite reads the developer's own Claude Code history: the
-    registry's adapters resolve their paths from the environment, so a test
-    asserting "nothing is installed" passes in CI (where nothing is) and fails
-    on any machine that actually uses the tool. Worse, a test that ever grew a
-    write would be writing into real conversations.
+    Without this the suite reads the developer's own history. A test asserting
+    "nothing is installed" then passes in CI and fails locally, and — far worse
+    — any test that ever grew a write would be writing into real conversations.
 
-    Adapters constructed with an explicit ``env=`` are unaffected — that is how
-    the adapter's own tests lay out fixtures.
+    Adapters constructed with an explicit ``env=`` are unaffected, which is how
+    the adapters' own tests lay out fixtures.
     """
     empty = tmp_path_factory.mktemp("assistant-data")
-    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(empty))
+    for variable in ASSISTANT_HOME_VARS:
+        monkeypatch.setenv(variable, str(empty / variable.lower()))
     return empty
 
 

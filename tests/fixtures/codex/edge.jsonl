@@ -1,0 +1,14 @@
+{"type":"session_meta","timestamp":"2026-08-02T10:00:00.000Z","payload":{"id":"019f2222-2222-7222-8222-222222222222","session_id":"019f0000-0000-7000-8000-000000000000","timestamp":"2026-08-02T10:00:00.000Z","cwd":"C:\\Users\\sample\\Projects\\edge","originator":"Codex Desktop","cli_version":"0.149.0-alpha.4.1","source":{"subagent":{"other":"guardian"}},"thread_source":"subagent","model_provider":"openai","history_mode":"legacy","base_instructions":{"kind":"default","text":""},"context_window":{"total":272000}}}
+
+{"type":"response_item","timestamp":"2026-08-02T10:00:01.000Z","payload":{"type":"message","id":"msg_e1","role":"user","content":[{"type":"input_image","detail":"high","image_url":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="},{"type":"input_text","text":"what is in this screenshot"}]}}
+this line is not json at all
+["a bare array, not an object"]
+{"type":"world_state","timestamp":"2026-08-02T10:00:02.000Z","payload":{"full":true,"state":{"files":[]}}}
+{"type":"response_item","timestamp":"2026-08-02T10:00:03.000Z","payload":{"type":"custom_tool_call","id":"ctc_1","call_id":"call_dup","name":"mcp__weather__forecast","input":"{\"city\":\"Cairo\"}"}}
+{"type":"event_msg","timestamp":"2026-08-02T10:00:04.000Z","payload":{"type":"mcp_tool_call_end","call_id":"call_dup","app_name":"weather","action_name":"forecast","connector_id":"c1","link_id":"l1","read_only_hint":true,"duration":{"secs":1,"nanos":0},"invocation":{"tool":"forecast"},"result":{"ok":true,"summary":"duplicate of the response_item output"}}}
+{"type":"response_item","timestamp":"2026-08-02T10:00:05.000Z","payload":{"type":"custom_tool_call_output","id":"ctco_1","call_id":"call_dup","output":[{"type":"text","text":"canonical output"}]}}
+{"type":"event_msg","timestamp":"2026-08-02T10:00:06.000Z","payload":{"type":"mcp_tool_call_end","call_id":"call_only_here","app_name":"weather","action_name":"alerts","connector_id":"c1","link_id":"l2","read_only_hint":true,"duration":{"secs":2,"nanos":0},"invocation":{"tool":"alerts"},"result":{"ok":true,"summary":"exists nowhere else"}}}
+{"type":"response_item","timestamp":"2026-08-02T10:00:07.000Z","payload":{"type":"telepathy","note":"a payload type that did not exist when this reader was written"}}
+{"type":"loom_operation","timestamp":"2026-08-02T10:00:08.000Z","payload":{"type":"unknown_record","note":"a record type that did not exist when this reader was written"}}
+{"type":"response_item","timestamp":"2026-08-02T10:00:09.000Z","payload":{"type":"message","id":"msg_e2","role":"assistant","content":[{"type":"output_text","text":"A single pixel."},{"type":"hologram","payload":"an unknown content block"}]}}
+{"type":"compacted","timestamp":"2026-08-02T10:00:10.000Z","payload":{"window_id":"w2","previous_window_id":"w1","first_window_id":"w1","window_number":2,"message":"compacted","replacement_history":[]}}

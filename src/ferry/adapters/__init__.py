@@ -17,13 +17,16 @@ from ferry.adapters.base import (
     list_adapters,
 )
 from ferry.adapters.claude_code import ClaudeCodeAdapter
+from ferry.adapters.codex import CodexAdapter
 
 REGISTRY["claude-code"] = ClaudeCodeAdapter()
+REGISTRY["codex"] = CodexAdapter()
 
 __all__ = [
     "REGISTRY",
     "Adapter",
     "ClaudeCodeAdapter",
+    "CodexAdapter",
     "DetectResult",
     "ExportEvent",
     "ImportEvent",

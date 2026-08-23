@@ -12,7 +12,7 @@ rather than a fact.
 | Assistant | Status | Verified against |
 |---|---|---|
 | Claude Code | Documented below | 2.1.229 – 2.1.237, Windows |
-| OpenAI Codex | Not yet | — |
+| OpenAI Codex | Documented below | 0.149.0-alpha.4.1, Windows |
 | GitHub Copilot Chat | Not yet | — |
 | Google Antigravity | Not yet | — |
 
@@ -136,3 +136,99 @@ It is **not** a conversation index. Conversations appear because Claude Code
 reads the `projects` directory, so Ferry does not write this file: the only
 consequence of its absence is the first-run trust prompt, and the file also
 holds credentials that nothing should be rewriting on a user's behalf.
+
+---
+
+## OpenAI Codex
+
+Verified against Codex CLI **0.149.0-alpha.4.1** on Windows, over 25,884 real
+records in 6 sessions.
+
+### Where it lives
+
+```
+%USERPROFILE%\.codex\                    $CODEX_HOME overrides this
+    sessions\YYYY\MM\DD\
+        rollout-<ISO stamp>-<uuid>.jsonl   the conversation
+    state_5.sqlite                         thread index (the _N moves)
+    session_index.jsonl                    top-level thread list
+    sqlite\codex-dev.db                    a third index: local_thread_catalog
+    attachments\<uuid>\pasted-text.txt     pasted text
+    generated_images\<call id>.png         images the model produced
+```
+
+The filename's timestamp uses dashes where ISO 8601 uses colons, because a
+colon cannot appear in a Windows filename. It is not authoritative — the record
+timestamps inside the file are.
+
+**`~/.codex/history.jsonl` and `~/.codex/memories/` do not exist**, despite
+being widely reported. Memories are in `memories_1.sqlite`.
+
+### The transcript
+
+JSONL, and unusually regular: **every record is exactly
+`{type, timestamp, payload}`**, with no optional keys and no bare-string
+variants. All variation lives in `payload`.
+
+| `type` | What it is |
+|---|---|
+| `response_item` | **The canonical record.** Messages, tool calls, tool output. |
+| `event_msg` | The interface's echo of the same turn. **Reading both double-counts the conversation.** |
+| `session_meta` | The header. Line 1 is always one of these. |
+| `turn_context` | Per-turn model, sandbox and approval settings |
+| `world_state`, `compacted` | Workspace snapshot and compaction history |
+
+Those last four carry structured config rather than a typed event, so
+`payload.type` is **absent** — a reader must branch on `type` first and only
+then on `payload.type`, or it loses all of them (944 of 25,884 records here).
+
+### The two traps
+
+**Reasoning is stored twice, and only one copy is readable.**
+
+| | record | fields |
+|---|---|---|
+| `reasoning` | `response_item` | `encrypted_content`, `id`, `summary` — **no plaintext** |
+| `agent_reasoning` | `event_msg` | `text` |
+
+Mapping the canonical one produces reasoning full of ciphertext with a
+perfectly plausible block count.
+
+**MCP results are not always duplicates.** Of 461 `mcp_tool_call_end` records,
+only 206 had a matching `call_id` in `response_item`. **255 existed nowhere
+else**, so skipping `event_msg` wholesale loses real tool output.
+
+### `session_meta`, which is validated strictly
+
+`base_instructions` and `context_window` are **objects, not scalars**. Get
+either shape wrong and Codex rejects the entire file — *"does not start with
+session metadata"* — so the conversation disappears with no error and no
+partial read. The session id must also be valid hex.
+
+`session_id` is **not** a second copy of `id`: on a subagent thread it holds the
+**parent** thread's id. Overwriting it reparents the subagent to itself.
+
+### Images
+
+`input_image` blocks carry `image_url` as a **`data:image/png;base64,…` URI** —
+inline in the transcript. A sibling `local_images` array holds paths into
+`%TEMP%`, and **all of them pointed at files that no longer existed**; the data
+URI is the only surviving copy.
+
+`user_message` also has `audio` and `local_audio` keys. Both were empty in all
+440 records, but `dictation-history/` holds 177 files, so audio input exists on
+this machine and simply did not reach a rollout. **Unverified, not absent.**
+
+### Resuming
+
+`codex exec resume <id>` resolves the transcript **from disk** — verified by
+writing a rebuilt rollout into a scratch `CODEX_HOME` with an empty `threads`
+table and watching Codex load it. `codex.exe` does contain
+`SELECT rollout_path FROM threads WHERE id = ? AND archived = 0`, so the
+database is presumably what the interactive picker and the Desktop list read;
+that path is **untested**, because the picker cannot be driven headlessly.
+
+### Size
+
+One rollout was **53 MB**; six sessions totalled **121 MB**. Public reports
+describe files an order of magnitude larger. Nothing may read one whole.
