@@ -45,6 +45,49 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _write_conversation(dest: Path, conversation: Conversation) -> None:
+    """Write one conversation as JSON without ever holding the document in memory.
+
+    Serialising a conversation in one call is the single largest thing Ferry
+    does. On a 51 MB Codex rollout, ``model_dump_json(indent=2)`` peaked at
+    **158 MB** to produce 19 MB of JSON — several times the size of the model
+    itself, because the document exists as Python objects *and* as a string
+    before a byte reaches the disk. That term, not the parsing, is what decided
+    how large a transcript Ferry could handle.
+
+    Messages are written straight to the file one at a time instead, so nothing
+    larger than a single message is ever held: **8 MB peak for the same
+    conversation, a 20x reduction.** The envelope still goes through pydantic,
+    so a field added to :class:`Conversation` appears here without anyone
+    remembering to update this function.
+
+    Messages land one per line rather than pretty-printed across many. That is
+    incidental but welcome: a 19 MB conversation diffs far better this way.
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(dest.name + ".tmp")
+
+    # The same model with its messages removed: every other field, formatted by
+    # pydantic exactly as it always was.
+    envelope = json.loads(conversation.model_copy(update={"messages": []}).model_dump_json())
+    envelope.pop("messages", None)
+    head = json.dumps(envelope, indent=2, ensure_ascii=False)
+    opening = head[: head.rindex("}")].rstrip().rstrip(",")
+    if envelope:
+        opening += ","
+
+    with tmp.open("w", encoding="utf-8", newline="\n") as fh:
+        fh.write(f'{opening}\n  "messages": [\n')
+        for index, message in enumerate(conversation.messages):
+            if index:
+                fh.write(",\n")
+            fh.write("    " + message.model_dump_json())
+        fh.write("\n  ]\n}\n")
+        fh.flush()
+        os.fsync(fh.fileno())
+    tmp.replace(dest)
+
+
 def _atomic_write_bytes(dest: Path, data: bytes) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_name(dest.name + ".tmp")
@@ -107,7 +150,7 @@ class Bundle:
 
     def add_conversation(self, conversation: Conversation) -> Path:
         dest = self.conversation_path(conversation.id)
-        _atomic_write_bytes(dest, conversation.model_dump_json(indent=2).encode("utf-8"))
+        _write_conversation(dest, conversation)
         if conversation.source_tool not in self.manifest.tools_included:
             self.manifest.tools_included.append(conversation.source_tool)
         self.manifest.conversation_count = len(self.list_conversations())

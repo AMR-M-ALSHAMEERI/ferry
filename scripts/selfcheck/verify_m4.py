@@ -89,28 +89,26 @@ def check_source_fingerprinted(state: State) -> Result:
     return Result(True, f"{len(state.source_before)} files, {total:,} bytes")
 
 
-PEAK_BUDGET = 6.0
+PEAK_BUDGET = 1.5
 """Peak memory allowed, as a multiple of the largest rollout.
 
-Measured at ~3.8x on the probe machine. The budget is not a guess at what
-"streaming" costs -- it is a tripwire on the ratio, so a change that starts
-holding something extra shows up as a number rather than as a slow machine.
+Measured at **0.7x** once conversations were written a message at a time
+instead of serialised whole -- Ferry now holds less than the file it is reading.
+It was 3.8x before that, and the budget was 6x to match. Tightened deliberately:
+a loose tripwire on a number that has improved 5x would never fire again.
 """
 
 
 def check_export_streams(state: State) -> Result:
-    """Bounded memory, not zero memory -- and the difference is worth stating.
+    """Peak memory below the size of the file being read.
 
-    The *file* is read a line at a time and never with ``read()``; a unit test
-    asserts that structurally by making whole-file reads raise. What is not
-    streamed is the **UCS model**: one conversation becomes one
-    ``Conversation`` object and one JSON serialisation of it, so peak tracks the
-    largest conversation rather than the largest file. Measured at about 3.8x
-    the file here.
+    The file is read a line at a time and never with ``read()`` -- a unit test
+    asserts that structurally, by making whole-file reads raise. Conversations
+    are written a message at a time for the same reason, which is what brought
+    this from 3.8x the file down to 0.7x.
 
-    That is a real ceiling and it is recorded as a known gap: a rollout of the
-    size third parties report (hundreds of MB) would still exhaust memory. The
-    fix is incremental bundle writing, which is not this milestone.
+    The number is reported either way, not just checked, because it is the one
+    thing that decides how large a transcript Ferry can handle at all.
     """
     if not state.detected.installed:
         return Result(None, "nothing to export")

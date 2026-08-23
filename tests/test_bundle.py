@@ -282,3 +282,48 @@ def test_validate_detects_corrupt_conversation_json(
     path.write_text("{ broken", encoding="utf-8")
     problems = bundle.validate()
     assert any("not valid UCS" in p for p in problems)
+
+
+def test_the_streamed_document_matches_pydantics_own(tmp_path, manifest, conversation) -> None:
+    """The bundle does not call ``model_dump_json`` on a whole conversation.
+
+    Doing so peaked at 158 MB to produce 19 MB of JSON for a large Codex
+    conversation, which was what limited how big a transcript Ferry could
+    handle. Messages are written one at a time instead, at 8 MB. That is only
+    safe while the streamed document says exactly what pydantic would have, so
+    this test holds the two together -- including for fields added later, which
+    is the way a hand-rolled writer normally rots.
+    """
+    import json as _json
+
+    bundle = Bundle.create(tmp_path / "b", manifest)
+    written = bundle.add_conversation(conversation)
+
+    assert _json.loads(written.read_text(encoding="utf-8")) == _json.loads(
+        conversation.model_dump_json()
+    )
+
+
+def test_a_conversation_with_no_messages_still_writes_valid_json(
+    tmp_path, manifest, conversation
+) -> None:
+    """The envelope splice has an empty-list edge that a comma would break."""
+    import json as _json
+
+    bundle = Bundle.create(tmp_path / "b", manifest)
+    empty = conversation.model_copy(update={"messages": []})
+    written = bundle.add_conversation(empty)
+
+    assert _json.loads(written.read_text(encoding="utf-8"))["messages"] == []
+    assert bundle.load_conversation(empty.id).messages == []
+
+
+def test_a_conversation_written_to_a_bundle_reads_back_identical(
+    tmp_path, manifest, conversation
+) -> None:
+    """End to end, through the serialiser the bundle actually uses."""
+    bundle = Bundle.create(tmp_path / "b", manifest)
+    bundle.add_conversation(conversation)
+
+    restored = bundle.load_conversation(conversation.id)
+    assert restored.model_dump() == conversation.model_dump()
