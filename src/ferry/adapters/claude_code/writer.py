@@ -24,8 +24,10 @@ reference the tool will follow.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -33,10 +35,11 @@ from typing import Any
 from uuid import UUID, uuid5
 
 from ferry.adapters.claude_code.paths import basename
-from ferry.ucs import Conversation, Message
+from ferry.ucs import Attachment, Conversation, Message
 
 __all__ = [
     "SYNTHESIS_NOTES",
+    "missing_images",
     "remap_prefix",
     "remap_record",
     "session_lines",
@@ -125,7 +128,12 @@ def _tool_use_id(conversation_id: UUID, ordinal: int) -> str:
     return f"toolu_{digest[:24]}"
 
 
-def _blocks_for(message: Message, conversation_id: UUID, counter: list[int]) -> list[Any]:
+def _blocks_for(
+    message: Message,
+    conversation_id: UUID,
+    counter: list[int],
+    images: Mapping[UUID, dict[str, Any]],
+) -> list[Any]:
     blocks: list[Any] = []
     for block in message.content:
         if block.type == "text":
@@ -143,7 +151,10 @@ def _blocks_for(message: Message, conversation_id: UUID, counter: list[int]) -> 
             blocks.append(
                 {
                     "type": "tool_use",
-                    "id": _tool_use_id(conversation_id, counter[0]),
+                    # The original id when UCS 1.3 carried one; a generated
+                    # stand-in only when it did not. The stand-in keeps a call
+                    # and its result linked, but it is not what the tool wrote.
+                    "id": block.id or _tool_use_id(conversation_id, counter[0]),
                     "name": block.name,
                     "input": block.input,
                 }
@@ -156,11 +167,44 @@ def _blocks_for(message: Message, conversation_id: UUID, counter: list[int]) -> 
                     "content": block.output,
                 }
             )
+        elif block.type == "image":
+            image = images.get(block.attachment_id)
+            if image is not None:
+                blocks.append(image)
+            # An image whose bytes are not in the bundle is dropped rather than
+            # written as a broken reference. The caller reports it; see
+            # missing_images() below.
     return blocks
 
 
+def _encoded_image(attachment: Attachment, data: bytes) -> dict[str, Any]:
+    """Rebuild the inline base64 block Claude Code stores images as."""
+    return {
+        "type": "image",
+        "source": {
+            "type": "base64",
+            "media_type": attachment.mime_type,
+            "data": base64.b64encode(data).decode("ascii"),
+        },
+    }
+
+
+def missing_images(conversation: Conversation, image_bytes: Mapping[UUID, bytes]) -> list[UUID]:
+    """Image blocks whose bytes are not available to write back."""
+    return [
+        block.attachment_id
+        for message in conversation.messages
+        for block in message.content
+        if block.type == "image" and block.attachment_id not in image_bytes
+    ]
+
+
 def synthesize_records(
-    conversation: Conversation, *, cwd: str, version: str
+    conversation: Conversation,
+    *,
+    cwd: str,
+    version: str,
+    image_bytes: Mapping[UUID, bytes] | None = None,
 ) -> list[dict[str, Any]]:
     """Build transcript records from UCS alone.
 
@@ -169,7 +213,20 @@ def synthesize_records(
     does not carry the original tree. A branched conversation therefore comes
     back linear. That is a real loss and it is named in :data:`SYNTHESIS_NOTES`
     rather than hidden.
+
+    Args:
+        image_bytes: Attachment bytes read from the bundle, keyed by attachment
+            id. Claude Code stores images inline, so they have to be re-encoded
+            into the record rather than referenced. An image with no bytes is
+            omitted rather than written as a dangling reference -- ask
+            :func:`missing_images` first if you want to report that.
     """
+    available = image_bytes or {}
+    images = {
+        attachment.id: _encoded_image(attachment, available[attachment.id])
+        for attachment in conversation.attachments
+        if attachment.id in available
+    }
     records: list[dict[str, Any]] = []
     parent: str | None = None
     counter = [0]
@@ -179,7 +236,7 @@ def synthesize_records(
         role = message.role
         payload: dict[str, Any] = {
             "role": "assistant" if role == "assistant" else "user",
-            "content": _blocks_for(message, conversation.id, counter),
+            "content": _blocks_for(message, conversation.id, counter, images),
         }
         if message.model:
             payload["model"] = message.model

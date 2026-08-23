@@ -32,6 +32,7 @@ from ferry.ucs import (
     Attachment,
     ContentBlock,
     Conversation,
+    ImageBlock,
     Message,
     TextBlock,
     ThinkingBlock,
@@ -149,9 +150,13 @@ def _block(raw: Any, out: SessionRead, conversation_id: UUID) -> ContentBlock | 
     if kind == "tool_use":
         name = raw.get("name")
         arguments = raw.get("input")
+        call_id = raw.get("id")
         return ToolUseBlock(
             name=str(name) if name is not None else "",
             input=arguments if isinstance(arguments, dict) else {},
+            # Carried since UCS 1.3, so the tool_result that follows names a
+            # call this file actually identifies.
+            id=call_id if isinstance(call_id, str) and call_id else None,
         )
     if kind == "tool_result":
         tool_use_id = raw.get("tool_use_id")
@@ -165,7 +170,11 @@ def _block(raw: Any, out: SessionRead, conversation_id: UUID) -> ContentBlock | 
             pending = _image_attachment(conversation_id, len(out.attachments), source)
             if pending is not None:
                 out.attachments.append(pending)
-                return None
+                # The bytes go to the bundle; the block stays here, holding the
+                # place in the conversation where the picture was. Before UCS
+                # 1.3 there was nowhere to put this and the image showed up in
+                # the attachment list with no indication of where it belonged.
+                return ImageBlock(attachment_id=pending.record.id)
         out.warnings.append("image block could not be decoded; kept only in source_raw")
         return None
     out.warnings.append(f"unknown content block type {kind!r}; skipped")

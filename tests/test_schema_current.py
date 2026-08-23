@@ -49,7 +49,25 @@ def test_schema_documents_every_conversation_field() -> None:
     assert set(on_disk["properties"]) == expected
 
 
-def test_schema_defines_all_four_content_blocks() -> None:
+def test_schema_defines_every_content_block() -> None:
+    """Exactly these five, not merely at least them.
+
+    A subset check let UCS 1.3's ImageBlock land without the schema test
+    noticing either way. The whole job of this file is to catch a model change
+    the checked-in schema did not follow.
+    """
     on_disk = json.loads(schema_path().read_text(encoding="utf-8"))
-    defs = set(on_disk["$defs"])
-    assert {"TextBlock", "ThinkingBlock", "ToolUseBlock", "ToolResultBlock"} <= defs
+    blocks = {name for name in on_disk["$defs"] if name.endswith("Block")}
+    assert blocks == {
+        "TextBlock",
+        "ThinkingBlock",
+        "ToolUseBlock",
+        "ToolResultBlock",
+        "ImageBlock",
+    }
+
+
+def test_only_the_current_schema_is_checked_in() -> None:
+    """A superseded schema left lying around is a trap for the next reader."""
+    stale = sorted(p.name for p in schema_path().parent.glob("ucs-*.json") if p != schema_path())
+    assert stale == [], f"delete or archive: {stale}"

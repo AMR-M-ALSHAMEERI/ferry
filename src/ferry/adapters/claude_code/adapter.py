@@ -42,6 +42,7 @@ from ferry.adapters.claude_code.reader import read_session
 from ferry.adapters.claude_code.writer import (
     SYNTHESIS_NOTES,
     Remap,
+    missing_images,
     remap_prefix,
     remap_record,
     session_lines,
@@ -391,8 +392,33 @@ class ClaudeCodeAdapter(Adapter):
             return session_lines(records), notes
 
         version = conversation.source_tool_version or f"ferry-{__version__}"
-        records = synthesize_records(conversation, cwd=target_cwd, version=version)
-        return session_lines(records), list(SYNTHESIS_NOTES)
+        image_bytes = self._attachment_bytes(bundle, conversation)
+        notes = list(SYNTHESIS_NOTES)
+        absent = missing_images(conversation, image_bytes)
+        if absent:
+            notes.append(f"{len(absent)} image blocks dropped: their bytes are not in the bundle")
+        records = synthesize_records(
+            conversation, cwd=target_cwd, version=version, image_bytes=image_bytes
+        )
+        return session_lines(records), notes
+
+    @staticmethod
+    def _attachment_bytes(bundle: Bundle, conversation: Conversation) -> dict[UUID, bytes]:
+        """Read the conversation's attachments back out of the bundle.
+
+        Claude Code stores images inline, so rebuilding a record means putting
+        the bytes back into it. An attachment that has gone missing is skipped
+        here and reported by the caller, rather than crashing an import over one
+        absent picture.
+        """
+        found: dict[UUID, bytes] = {}
+        for attachment in conversation.attachments:
+            path = bundle.root / attachment.bundle_path
+            try:
+                found[attachment.id] = path.read_bytes()
+            except OSError:
+                continue
+        return found
 
     @staticmethod
     def _free_name(destination: Path) -> Path:

@@ -40,18 +40,31 @@ decouples adapters from each other.
 `tests/test_schema_current.py` fails if the checked-in schema drifts from the
 models, so the two cannot silently diverge.
 
-### Current version: 1.2
+### Current version: 1.3
 
 | Version | Change |
 |---|---|
 | 1.0 | Initial schema |
 | 1.1 | Added the `thinking` content block (with optional `signature`) |
 | 1.2 | Added the optional `provenance` block for cross-tool migration |
+| 1.3 | Added the `image` content block; `tool_use` gained an optional `id` |
+
+**1.2 bundles cannot be read by 1.3, and no converter is provided.** 1.2 was
+never released, so there is no bundle anywhere that needs one.
 
 **Schema rules that matter when writing an adapter:**
 
 - **Additive only.** Adding fields is fine; removing or renaming one means a
-  version bump.
+  version bump. **A new member of a content-block union is not additive** — the
+  models reject unknown `type` values outright, so a reader built for the older
+  version refuses the document rather than ignoring the block. That is what
+  1.3 was for.
+- **An image block holds no bytes.** It carries an `attachment_id` pointing at
+  an entry in `attachments[]`, where the file is stored and checksummed. Tools
+  keep images inline as base64; re-embedding them in UCS would drag megabytes
+  of encoded pixels through every read, diff and round-trip. The block exists
+  to record *where in the conversation* the picture was, which is the one thing
+  an attachment list cannot say.
 - **Never fabricate data.** If the source tool did not store a timestamp, the
   UCS field is `null` — not `now()`, not `"unknown"`.
 - **`source_raw` is the escape hatch** for lossless same-tool round trips.

@@ -111,7 +111,7 @@ those messages and reports success.
 | `thinking` | `thinking`, `signature` | The text is under **`thinking`**, not `text` |
 | `tool_use` | `id`, `name`, `input`, `caller` | |
 | `tool_result` | `tool_use_id`, `content`, `is_error` | `content` is a string *or* a list |
-| `image` | `source: {type, media_type, data}` | Base64, **inline in the transcript** — not a file on disk |
+| `image` | `source: {type, media_type, data}` | Base64, **inline in the transcript** — not a file on disk. Ferry extracts it into the bundle's `attachments/` and records its position with a UCS `image` block |
 
 ### Spilled tool output
 

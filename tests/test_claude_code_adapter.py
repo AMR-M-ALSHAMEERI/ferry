@@ -204,6 +204,22 @@ def test_an_inline_image_is_extracted_as_an_attachment(source: Path) -> None:
     assert found.conversation.attachments == [pending.record]
 
 
+def test_the_image_keeps_its_position_in_the_message(source: Path) -> None:
+    """UCS 1.3. Before it, the picture reached the bundle with no place in the text.
+
+    The fixture message is an image followed by a question about it — exactly
+    the case an attachment list cannot represent: reading the words alone gives
+    no clue that anything was shown.
+    """
+    found = edge(source)
+    assert found.conversation is not None
+    blocks = found.conversation.messages[1].content
+
+    assert [b.type for b in blocks] == ["image", "text"]
+    assert blocks[0].attachment_id == found.attachments[0].record.id
+    assert blocks[1].text == "what is in this screenshot"
+
+
 def test_the_image_bytes_are_the_ones_the_fixture_encoded(source: Path) -> None:
     raw = json.loads(
         [
@@ -740,6 +756,76 @@ def test_a_cross_tool_import_records_where_it_came_from(
 
     assert any(e.kind == "progress" for e in events)
     assert any("rebuilt from UCS" in e.message for e in events if e.kind == "warning")
+
+
+def test_rebuilding_puts_the_image_bytes_back_inline(
+    adapter: ClaudeCodeAdapter, target: ClaudeCodeAdapter, tmp_path: Path
+) -> None:
+    """Claude Code stores images inline, so a rebuild has to re-embed them.
+
+    Exercised by deleting ``source_raw`` from the bundle, which forces the
+    synthesis path — otherwise the replay path carries the original bytes and
+    this code never runs.
+    """
+    list(adapter.export(tmp_path / "bundle"))
+    (tmp_path / "bundle" / "source_raw" / f"{EDGE_ID}.bin").unlink()
+
+    list(target.import_(tmp_path / "bundle", ImportOptions()))
+
+    written = next((tmp_path / "target").rglob(f"{EDGE_ID}.jsonl"))
+    blocks = [
+        block
+        for record in read_jsonl(written)
+        for block in record["message"]["content"]
+        if isinstance(block, dict) and block.get("type") == "image"
+    ]
+    assert len(blocks) == 1
+    assert blocks[0]["source"]["type"] == "base64"
+    assert blocks[0]["source"]["media_type"] == "image/png"
+    assert base64.b64decode(blocks[0]["source"]["data"]).startswith(b"\x89PNG")
+
+
+def test_a_rebuild_keeps_the_original_tool_call_ids(
+    adapter: ClaudeCodeAdapter, target: ClaudeCodeAdapter, tmp_path: Path
+) -> None:
+    """UCS 1.3 carries ``tool_use.id``, so a rebuild no longer has to invent one."""
+    list(adapter.export(tmp_path / "bundle"))
+    (tmp_path / "bundle" / "source_raw" / f"{BASIC_ID}.bin").unlink()
+
+    list(target.import_(tmp_path / "bundle", ImportOptions()))
+
+    written = next((tmp_path / "target").rglob(f"{BASIC_ID}.jsonl"))
+    calls = [
+        block
+        for record in read_jsonl(written)
+        for block in record["message"]["content"]
+        if isinstance(block, dict) and block.get("type") == "tool_use"
+    ]
+    assert [c["id"] for c in calls] == ["toolu_01"]
+
+    results = [
+        block
+        for record in read_jsonl(written)
+        for block in record["message"]["content"]
+        if isinstance(block, dict) and block.get("type") == "tool_result"
+    ]
+    assert [r["tool_use_id"] for r in results] == ["toolu_01"]
+
+
+def test_an_image_whose_bytes_are_gone_is_dropped_and_reported(
+    adapter: ClaudeCodeAdapter, target: ClaudeCodeAdapter, tmp_path: Path
+) -> None:
+    """A dangling reference is worse than an honest absence."""
+    list(adapter.export(tmp_path / "bundle"))
+    (tmp_path / "bundle" / "source_raw" / f"{EDGE_ID}.bin").unlink()
+    bundle = Bundle.open(tmp_path / "bundle")
+    (tmp_path / "bundle" / bundle.load_conversation(EDGE_ID).attachments[0].bundle_path).unlink()
+
+    events = list(target.import_(tmp_path / "bundle", ImportOptions()))
+
+    assert any("1 image blocks dropped" in e.message for e in events if e.kind == "warning")
+    written = next((tmp_path / "target").rglob(f"{EDGE_ID}.jsonl"))
+    assert '"image"' not in written.read_text(encoding="utf-8")
 
 
 def test_a_broken_bundle_is_reported_rather_than_raised(

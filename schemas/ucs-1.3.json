@@ -35,6 +35,28 @@
       "title": "Attachment",
       "type": "object"
     },
+    "ImageBlock": {
+      "additionalProperties": false,
+      "description": "An image, in the position it occupied in the conversation.\n\nThe bytes are not here. They live in the bundle as a real file, listed in\n:attr:`Conversation.attachments` and checksummed like any other attachment;\nthis block records only *where in the conversation the picture was*, which\nis the part an attachment list cannot express.\n\nKeeping the two apart matters for size as much as for tidiness: tools store\nimages inline as base64, and a UCS file that re-embedded them would carry\nmegabytes of encoded pixels through every read, diff and round-trip.\n\n``attachment_id`` must match an ``Attachment.id`` on the same conversation.",
+      "properties": {
+        "type": {
+          "const": "image",
+          "default": "image",
+          "title": "Type",
+          "type": "string"
+        },
+        "attachment_id": {
+          "format": "uuid",
+          "title": "Attachment Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "attachment_id"
+      ],
+      "title": "ImageBlock",
+      "type": "object"
+    },
     "Message": {
       "additionalProperties": false,
       "properties": {
@@ -52,6 +74,7 @@
           "items": {
             "discriminator": {
               "mapping": {
+                "image": "#/$defs/ImageBlock",
                 "text": "#/$defs/TextBlock",
                 "thinking": "#/$defs/ThinkingBlock",
                 "tool_result": "#/$defs/ToolResultBlock",
@@ -71,6 +94,9 @@
               },
               {
                 "$ref": "#/$defs/ToolResultBlock"
+              },
+              {
+                "$ref": "#/$defs/ImageBlock"
               }
             ]
           },
@@ -243,6 +269,7 @@
     },
     "ToolUseBlock": {
       "additionalProperties": false,
+      "description": "A tool call.\n\n``id`` was added in 1.3 and is optional, so 1.2 records still validate. It\nexists because :class:`ToolResultBlock` carries a ``tool_use_id`` that,\nuntil now, named a call no UCS block identified \u2014 the link between a call\nand its result was expressible only in the original format. Adapters that\nhave the source id should preserve it.",
       "properties": {
         "type": {
           "const": "tool_use",
@@ -258,6 +285,18 @@
           "additionalProperties": true,
           "title": "Input",
           "type": "object"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
         }
       },
       "required": [
@@ -314,8 +353,8 @@
   "additionalProperties": false,
   "properties": {
     "ucs_version": {
-      "const": "1.2",
-      "default": "1.2",
+      "const": "1.3",
+      "default": "1.3",
       "title": "Ucs Version",
       "type": "string"
     },
@@ -422,7 +461,7 @@
     "updated_at",
     "workspace"
   ],
-  "title": "Ferry Universal Conversation Schema v1.2",
+  "title": "Ferry Universal Conversation Schema v1.3",
   "type": "object",
   "$schema": "https://json-schema.org/draft/2020-12/schema"
 }
