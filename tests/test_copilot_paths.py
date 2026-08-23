@@ -82,10 +82,26 @@ def test_a_folder_key_matches_what_vs_code_would_compute(tmp_path: Path) -> None
     folder = tmp_path / "project"
     folder.mkdir()
     stat = folder.stat()
-    stamp = str(stat.st_ino) if sys.platform == "linux" else str(int(stat.st_birthtime * 1000))
+    if sys.platform == "linux":
+        stamp = str(stat.st_ino)
+    else:
+        # st_birthtime is absent on Windows before 3.12, where st_ctime is the
+        # creation time. The test has to span the same versions Ferry does.
+        birth = getattr(stat, "st_birthtime", None)
+        stamp = str(int((birth if birth is not None else stat.st_ctime) * 1000))
     expected = hashlib.md5((cp.vscode_fs_path(folder) + stamp).encode()).hexdigest()  # noqa: S324
 
     assert cp.folder_key(folder) == expected
+
+
+def test_a_folder_key_is_produced_on_every_python_ferry_supports(tmp_path: Path) -> None:
+    """The regression CI caught: `st_birthtime` does not exist on Windows
+    before 3.12, and without a fallback the derivation returned None on the
+    oldest Python Ferry claims to run on -- with no error anywhere."""
+    folder = tmp_path / "project"
+    folder.mkdir()
+
+    assert cp.folder_key(folder) is not None
 
 
 def test_a_folder_key_is_stable_across_calls(tmp_path: Path) -> None:

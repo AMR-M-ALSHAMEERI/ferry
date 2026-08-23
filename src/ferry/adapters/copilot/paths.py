@@ -140,22 +140,45 @@ def vscode_fs_path(path: Path) -> str:
     return text
 
 
-def folder_key(folder: Path) -> str | None:
-    """The ``workspaceStorage`` directory name VS Code uses for this folder.
-
-    ``md5(fsPath + stamp)``, where the stamp is the folder's identity on disk
-    and **differs by platform**:
+def _identity(stat: os.stat_result) -> str | None:
+    """The part of a folder's identity that is not its path, as VS Code sees it.
 
     ==========  ================================================
-    Linux       ``stat.st_ino`` -- the inode number
+    Linux       ``st_ino`` -- the inode number
     macOS       birth time in milliseconds
     Windows     birth time in milliseconds, floored
     ==========  ================================================
 
+    **``st_birthtime`` does not exist on Windows before Python 3.12**, and
+    Ferry supports 3.11. There the creation time is ``st_ctime`` -- the same
+    number under an older name, not the metadata-change time it means
+    elsewhere. Without this fallback the whole derivation returned ``None`` on
+    the oldest Python Ferry claims to run on, which CI caught and a 3.14
+    machine could not.
+    """
+    if sys.platform == "linux":
+        return str(stat.st_ino)
+
+    birth = getattr(stat, "st_birthtime", None)
+    if birth is None:
+        if sys.platform != "win32":
+            # On macOS st_ctime is the metadata-change time and would produce a
+            # confidently wrong key. Better to decline, as VS Code does.
+            return None
+        birth = stat.st_ctime
+    return str(int(birth * 1000))
+
+
+def folder_key(folder: Path) -> str | None:
+    """The ``workspaceStorage`` directory name VS Code uses for this folder.
+
+    ``md5(fsPath + stamp)``, where the stamp is the folder's identity on disk
+    -- see :func:`_identity`, which differs by platform.
+
     Using the wrong one does not raise. It produces a valid-looking key for a
     directory that does not exist, so an import would write a conversation
-    somewhere VS Code will never look. That is why this is one function with
-    the branch inside it rather than a formula repeated at call sites.
+    somewhere VS Code will never look. That is why the branch lives in one
+    function rather than being a formula repeated at call sites.
 
     Returns:
         The key, or ``None`` if the folder cannot be stat'd -- VS Code also
@@ -166,13 +189,9 @@ def folder_key(folder: Path) -> str | None:
     except OSError:
         return None
 
-    if sys.platform == "linux":
-        stamp = str(stat.st_ino)
-    else:
-        birth = getattr(stat, "st_birthtime", None)
-        if birth is None:
-            return None
-        stamp = str(int(birth * 1000))
+    stamp = _identity(stat)
+    if stamp is None:
+        return None
 
     return hashlib.md5(  # noqa: S324 - matching VS Code's choice, not securing anything
         (vscode_fs_path(folder) + stamp).encode()
