@@ -60,15 +60,31 @@ adapters are implemented.
 
 | Tool | Status |
 |---|---|
-| Claude Code | planned |
-| OpenAI Codex | planned |
-| GitHub Copilot Chat | planned |
-| Google Antigravity IDE | planned |
+| Claude Code | export and import |
+| OpenAI Codex | export and import |
+| GitHub Copilot Chat | export and import |
+| Google Antigravity IDE | export and import |
+
+Ferry counts the conversations **each application lists**, which is not the
+same as the files on disk: an unused chat panel writes a file nobody had a
+conversation in, and a subagent gets a file of its own that the tool never
+shows you. Everything is still carried into the bundle; it is just not counted
+as a conversation you had.
 
 ## Safety
 
 - Ferry never modifies your source conversation data — it only reads.
-- Backups of the target tool's data are created by default before any import.
+- **Preview first.** The import screen offers to show you exactly what would
+  change, writing nothing, before you commit to it. That option is the one
+  under the cursor.
+- Anything an import would replace is copied into
+  `~/.ferry/backups/<timestamp>/` first, with a record of where each file came
+  from so it can be put back. Nothing prunes them.
+- If a conversation is already there, Ferry leaves it alone unless you say
+  otherwise. You can also keep both copies, or replace it.
+- A bundle made on another machine records that machine's home folder; if it
+  is not on this one, Ferry asks where those folders live now rather than
+  restoring paths that point nowhere.
 - Close the target IDE before importing.
 
 See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for contributing, and

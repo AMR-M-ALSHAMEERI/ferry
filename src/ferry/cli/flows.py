@@ -23,6 +23,7 @@ from collections import Counter
 from collections.abc import Callable, Iterator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 from ferry.adapters.base import (
     Adapter,
@@ -30,6 +31,7 @@ from ferry.adapters.base import (
     ExportEvent,
     ImportEvent,
     ImportOptions,
+    OnConflict,
 )
 from ferry.cli.ui import UI, NonInteractiveError
 from ferry.core import Bundle, BundleError
@@ -305,6 +307,93 @@ def _report(
     return handled
 
 
+_ACTIONS: list[tuple[str, str]] = [
+    ("preview", "Preview it first - nothing is written"),
+    ("skip", "Import, leaving anything already there alone"),
+    ("rename", "Import, keeping both copies of anything already there"),
+    ("overwrite", "Import, replacing what is there - the old copy is backed up"),
+    ("cancel", "Cancel"),
+]
+"""One screen instead of three.
+
+The options an import takes -- preview or write, and what to do about a
+conversation already there -- were separate questions in the first draft of
+this screen. Asked separately they are three prompts standing between someone
+and a routine restore, and two of them are about a situation that may not
+arise. Asked as one sentence they are a single choice with a safe default under
+the cursor.
+"""
+
+
+def _conflict(action: str) -> OnConflict:
+    """The chosen action as the option the adapters take.
+
+    A lookup rather than a cast: if a choice is ever added to ``_ACTIONS``
+    without a matching behaviour, this fails loudly here instead of reaching an
+    adapter as an unrecognised string and being treated as "overwrite" by
+    whichever branch happens to fall through.
+    """
+    if action not in ("skip", "rename", "overwrite"):
+        raise ValueError(f"no import behaviour for {action!r}")
+    return cast("OnConflict", action)
+
+
+def _recorded_home(bundle: Bundle) -> str | None:
+    """The home directory of the machine the bundle came from.
+
+    Read from the manifest rather than from the conversations. Every adapter
+    records an absolute working directory per conversation, so the complete
+    answer means opening every conversation file -- and one Codex conversation
+    is 53 MB. The manifest's home covers the case this exists for, which is a
+    bundle restored onto a different machine or under a different username;
+    ``ferry inspect`` is where the full list of recorded folders belongs.
+    """
+    home = bundle.manifest.source_machine.user_home
+    return home or None
+
+
+def _path_remap(ui: UI, bundle: Bundle) -> tuple[tuple[str, str], ...] | None:
+    """Ask where the bundle's folders live on this machine, if they have moved.
+
+    Silent when the recorded home is this machine's home, or when it still
+    exists here -- the overwhelmingly common case is restoring onto the machine
+    the bundle came from, and a question with one sensible answer is not worth
+    asking.
+
+    Returns ``None`` if the user cancelled, ``()`` if nothing needs remapping.
+    """
+    recorded = _recorded_home(bundle)
+    if not recorded:
+        return ()
+    here = str(Path.home())
+    if recorded == here or Path(recorded).is_dir():
+        return ()
+
+    ui.blank()
+    ui.warn(f"This bundle was made on a machine whose home folder was {recorded}.")
+    ui.info("That folder is not on this machine, so the paths inside would be wrong.")
+    chosen = ui.select(
+        "Where should those folders be read as now?",
+        [
+            ("here", f"{here} - this machine's home folder"),
+            ("other", "Somewhere else - choose a folder"),
+            ("leave", "Leave them as they are"),
+        ],
+        hint="use --path-remap",
+    )
+    if chosen is None:
+        return None
+    if chosen == "leave":
+        return ()
+    if chosen == "here":
+        return ((recorded, here),)
+
+    typed = ui.path("Which folder?", default=here, hint="use --path-remap")
+    if not typed:
+        return None
+    return ((recorded, str(Path(typed).expanduser())),)
+
+
 def run_export(ui: UI, adapters: Scanned) -> None:
     """Pick a tool, pick a destination, export."""
     available = _installed(adapters)
@@ -401,12 +490,21 @@ def run_import(ui: UI, adapters: Scanned) -> None:
                 return
             adapter = next(a for a in available if a.name == chosen)
 
+        remap = _path_remap(ui, bundle)
+        if remap is None:
+            return
+
         # The only screen in Ferry that writes into a user's real conversation
-        # history. It says so, and it defaults to no.
+        # history. It says so, and the option under the cursor is the one that
+        # writes nothing.
         ui.blank()
         ui.warn(f"This writes into your real {adapter.display_name} history.")
-        ui.info("Existing conversations are kept: anything already there is skipped.")
-        if not ui.confirm(f"Import {count} conversations?", default=False, hint="use --yes"):
+        action = ui.select(
+            f"Import {count} conversations?",
+            _ACTIONS,
+            hint="use --dry-run / --on-conflict",
+        )
+        if action is None or action == "cancel":
             ui.info("Nothing was written.")
             ui.blank()
             return
@@ -414,10 +512,34 @@ def run_import(ui: UI, adapters: Scanned) -> None:
         ui.error(str(exc))
         return
 
+    if action == "preview":
+        ui.blank()
+        ui.info("Preview only. Nothing below is written.")
+        _report(
+            ui,
+            adapter.import_(bundle_dir, ImportOptions(dry_run=True, path_remap=remap)),
+            "conversations would be imported",
+            label="Previewing",
+            total=count,
+        )
+        try:
+            action = ui.select(
+                "Import for real?",
+                [choice for choice in _ACTIONS if choice[0] != "preview"],
+                hint="use --on-conflict",
+            )
+        except NonInteractiveError as exc:
+            ui.error(str(exc))
+            return
+        if action is None or action == "cancel":
+            ui.info("Nothing was written.")
+            ui.blank()
+            return
+
     ui.blank()
     _report(
         ui,
-        adapter.import_(bundle_dir, ImportOptions()),
+        adapter.import_(bundle_dir, ImportOptions(on_conflict=_conflict(action), path_remap=remap)),
         "conversations imported",
         label="Importing",
         total=count,

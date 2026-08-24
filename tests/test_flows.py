@@ -15,6 +15,7 @@ from __future__ import annotations
 import io
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -46,6 +47,7 @@ class _Recorder(Adapter):
         self._installed = installed
         self.exported_to: Path | None = None
         self.imported_from: Path | None = None
+        self.options: list[ImportOptions] = []
 
     def detect(self) -> DetectResult:
         return DetectResult(installed=self._installed, conversation_count_estimate=2)
@@ -56,13 +58,20 @@ class _Recorder(Adapter):
 
     def import_(self, bundle_dir: Path, options: ImportOptions) -> Iterator[ImportEvent]:
         self.imported_from = bundle_dir
+        self.options.append(options)
         yield from self._events  # type: ignore[misc]
 
 
 class _Answers(UI):
     """A UI with the prompts pre-answered."""
 
-    def __init__(self, *, path: str | None = None, confirm: bool | None = True) -> None:
+    def __init__(
+        self,
+        *,
+        path: str | None = None,
+        confirm: bool | None = True,
+        actions: Sequence[str] | None = None,
+    ) -> None:
         super().__init__(MONO, capability=Capability.PLAIN)
         # The real console, redirected -- not a replacement. A bare rich Console
         # has none of the ferry.* styles, so swapping it out tests a renderer
@@ -72,9 +81,24 @@ class _Answers(UI):
         self.console.width = 100
         self._path = path
         self._confirm = confirm
+        # Answers taken in order, by value rather than by position, so a test
+        # says which option it is choosing instead of which row it happens to
+        # sit on. Falls back to the first choice, which every screen makes the
+        # safe one.
+        self._actions = list(actions or [])
+        self.asked = 0
+        self.questions: list[str] = []
         self.asked_to_confirm = 0
 
     def select(self, question, choices, **kwargs):  # type: ignore[no-untyped-def]
+        self.questions.append(question)
+        values = [value for value, _ in choices]
+        self.asked += 1
+        # Consumed only when it fits this screen, so a test naming the answer to
+        # one question is not silently spent on a different question appearing
+        # before it.
+        if self._actions and self._actions[0] in values:
+            return self._actions.pop(0)
         return choices[0][0]
 
     def path(self, question, *, default="", hint=""):  # type: ignore[no-untyped-def]
@@ -221,7 +245,7 @@ def bundle_dir(tmp_path: Path, manifest, conversation) -> Path:
 def test_import_refuses_to_write_without_an_explicit_yes(bundle_dir: Path) -> None:
     """The one screen that writes into a real conversation store."""
     adapter = _Recorder()
-    ui = _Answers(path=str(bundle_dir), confirm=False)
+    ui = _Answers(path=str(bundle_dir), actions=["cancel"])
 
     run_import(ui, scanned(adapter))
 
@@ -231,7 +255,7 @@ def test_import_refuses_to_write_without_an_explicit_yes(bundle_dir: Path) -> No
 
 def test_import_says_it_is_writing_into_real_history(bundle_dir: Path) -> None:
     adapter = _Recorder()
-    ui = _Answers(path=str(bundle_dir), confirm=False)
+    ui = _Answers(path=str(bundle_dir), actions=["cancel"])
 
     run_import(ui, scanned(adapter))
 
@@ -451,7 +475,7 @@ def test_a_long_description_is_trimmed_to_fit_beside_the_bar(tmp_path: Path) -> 
 
 def test_import_sizes_the_bar_from_the_bundle_not_a_guess(bundle_dir: Path) -> None:
     adapter = _Recorder(events=[ImportEvent(kind="progress", message="ok")])
-    ui = _Watched(path=str(bundle_dir), confirm=True)
+    ui = _Watched(path=str(bundle_dir), actions=["skip"])
 
     run_import(ui, scanned(adapter))
 
@@ -551,3 +575,114 @@ class TestExportMessageGrouping:
         )
         assert "2 conversations exported, plus 4 subagents" in text
         assert "6 exported" not in text
+
+
+class TestImportOptionsScreen:
+    """One screen carrying the options, instead of three prompts.
+
+    `ImportOptions` has carried `dry_run`, `on_conflict` and `path_remap` since
+    M3 and the import screen passed `ImportOptions()` -- the defaults, always.
+    Everything below existed and was unreachable, including the path remapping
+    the whole Antigravity milestone was built around: a bundle restored onto
+    another machine had every recorded path left wrong.
+    """
+
+    def _bundle(self, tmp_path: Path, conversation, home: str) -> Path:
+        from ferry.core import Bundle, Manifest, SourceMachine
+
+        bundle = Bundle.create(
+            tmp_path / "remap-bundle",
+            Manifest(
+                created_at=datetime(2026, 8, 1, tzinfo=UTC),
+                created_by="ferry test",
+                source_machine=SourceMachine(os="win32", user_home=home),
+            ),
+        )
+        bundle.add_conversation(conversation)
+        return tmp_path / "remap-bundle"
+
+    def test_the_safe_option_is_the_one_under_the_cursor(self, bundle_dir: Path) -> None:
+        """First in the list is what enter takes, and it must write nothing."""
+        adapter = _Recorder(events=[ImportEvent(kind="progress", message="ok")])
+        ui = _Answers(path=str(bundle_dir))
+
+        run_import(ui, scanned(adapter))
+
+        assert adapter.options[0].dry_run is True
+
+    def test_a_preview_runs_a_dry_run_and_then_the_real_thing(self, bundle_dir: Path) -> None:
+        adapter = _Recorder(events=[ImportEvent(kind="progress", message="ok")])
+        ui = _Answers(path=str(bundle_dir), actions=["preview", "skip"])
+
+        run_import(ui, scanned(adapter))
+
+        assert [option.dry_run for option in adapter.options] == [True, False]
+        assert "Nothing below is written" in ui.text
+
+    def test_cancelling_after_a_preview_writes_nothing(self, bundle_dir: Path) -> None:
+        adapter = _Recorder(events=[ImportEvent(kind="progress", message="ok")])
+        ui = _Answers(path=str(bundle_dir), actions=["preview", "cancel"])
+
+        run_import(ui, scanned(adapter))
+
+        assert [option.dry_run for option in adapter.options] == [True]
+        assert "Nothing was written" in ui.text
+
+    def test_keeping_both_copies_reaches_the_adapter(self, bundle_dir: Path) -> None:
+        adapter = _Recorder(events=[ImportEvent(kind="progress", message="ok")])
+        ui = _Answers(path=str(bundle_dir), actions=["rename"])
+
+        run_import(ui, scanned(adapter))
+
+        assert adapter.options[-1].on_conflict == "rename"
+        assert adapter.options[-1].dry_run is False
+
+    def test_replacing_reaches_the_adapter(self, bundle_dir: Path) -> None:
+        adapter = _Recorder(events=[ImportEvent(kind="progress", message="ok")])
+        ui = _Answers(path=str(bundle_dir), actions=["overwrite"])
+
+        run_import(ui, scanned(adapter))
+
+        assert adapter.options[-1].on_conflict == "overwrite"
+
+    def test_a_bundle_from_this_machine_is_not_asked_about(
+        self, tmp_path: Path, conversation
+    ) -> None:
+        """A question with one sensible answer is not worth asking."""
+        bundle_dir = self._bundle(tmp_path, conversation, str(Path.home()))
+        adapter = _Recorder(events=[ImportEvent(kind="progress", message="ok")])
+        ui = _Answers(path=str(bundle_dir), actions=["skip"])
+
+        run_import(ui, scanned(adapter))
+
+        assert not any("read as now" in question for question in ui.questions)
+        assert adapter.options[-1].path_remap == ()
+
+    def test_a_bundle_from_a_machine_that_is_not_here_offers_to_remap(
+        self, tmp_path: Path, conversation
+    ) -> None:
+        """The gap this closes is the point of the Antigravity milestone.
+
+        A bundle carrying `C:\\Users\\someone-else` restored here left every
+        recorded path pointing at a folder that does not exist, and the CLI
+        never offered the remapper that had been built to fix exactly that.
+        """
+        gone = str(tmp_path / "not-a-real-home")
+        bundle_dir = self._bundle(tmp_path, conversation, gone)
+        adapter = _Recorder(events=[ImportEvent(kind="progress", message="ok")])
+        ui = _Answers(path=str(bundle_dir), actions=["here", "skip"])
+
+        run_import(ui, scanned(adapter))
+
+        assert any("read as now" in question for question in ui.questions)
+        assert adapter.options[-1].path_remap == ((gone, str(Path.home())),)
+
+    def test_the_paths_can_be_left_alone(self, tmp_path: Path, conversation) -> None:
+        gone = str(tmp_path / "not-a-real-home")
+        bundle_dir = self._bundle(tmp_path, conversation, gone)
+        adapter = _Recorder(events=[ImportEvent(kind="progress", message="ok")])
+        ui = _Answers(path=str(bundle_dir), actions=["leave", "skip"])
+
+        run_import(ui, scanned(adapter))
+
+        assert adapter.options[-1].path_remap == ()

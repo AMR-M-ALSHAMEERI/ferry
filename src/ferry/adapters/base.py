@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Literal
 
 __all__ = [
+    "OnConflict",
     "REGISTRY",
     "Adapter",
     "DetectResult",
@@ -110,6 +111,15 @@ class ImportEvent:
     """
 
 
+OnConflict = Literal["skip", "overwrite", "rename"]
+"""What to do about a conversation the target tool already has.
+
+``rename`` means importing it as a separate conversation under a new id;
+see :mod:`ferry.adapters.conflict` for why a new *filename* is not a
+coherent answer.
+"""
+
+
 @dataclass(frozen=True)
 class ImportOptions:
     """Caller-controlled behaviour for an import.
@@ -126,7 +136,7 @@ class ImportOptions:
 
     backup: bool = True
     dry_run: bool = False
-    on_conflict: Literal["skip", "overwrite", "rename"] = "skip"
+    on_conflict: OnConflict = "skip"
     allow_cross_tool: bool = False
     path_remap: tuple[tuple[str, str], ...] = ()
 

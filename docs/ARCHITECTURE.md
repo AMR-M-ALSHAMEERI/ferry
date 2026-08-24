@@ -130,6 +130,51 @@ Every adapter implements three methods (see PLAN.md §4 for the full signature):
 files came from its own tool — which is what makes cross-tool migration
 possible without new import machinery.
 
+### `ImportOptions`, and holding every adapter to them
+
+| Option | Meaning |
+|---|---|
+| `backup` | Copy anything about to be overwritten into `~/.ferry/backups` first. On by default. |
+| `dry_run` | Report what would happen. **Write nothing.** |
+| `on_conflict` | `skip` (default), `rename`, or `overwrite`. |
+| `path_remap` | `(old_prefix, new_prefix)` pairs, applied in order, first match wins. |
+| `allow_cross_tool` | Permit a conversation from a different tool. Off by default. |
+
+Every adapter was tested against these in its own test file — except Copilot,
+whose import ignored the options object entirely for two milestones. **A dry
+run into Copilot Chat would have written**: a row into VS Code's chat index and
+a transcript file. Nothing caught it, because the CLI passed the defaults and
+never set `dry_run`, so the option was only reachable from tests nobody had
+written.
+
+`tests/test_import_contract.py` now asks all four adapters the same questions,
+so a fifth adapter inherits the whole contract by being added to `BUILDERS`.
+
+### What `rename` means
+
+All four tools identify a conversation by its id **and put that id in the
+filename**. Writing `<uuid>-1.jsonl` that still says `sessionId: <uuid>` inside
+produces a session contradicting itself — and, in Claude Code, one sharing its
+spilled tool output with the file it was trying not to overwrite.
+
+So `rename` imports a **new identity**: a fresh id carried into the filename,
+the records, and anything keyed on it. Antigravity refuses instead, with a
+reason — its id is written through protobuf blobs Ferry has no schema to
+re-identify, and a half-re-identified database is worse than no copy.
+
+### Backups
+
+`ferry.core.backup` writes one directory per Ferry run —
+`~/.ferry/backups/<timestamp>/<tool>/` — with a `manifest.jsonl` recording each
+file's original path. Each adapter previously had its own copy of this helper,
+computing the timestamp per file (so an import crossing a second boundary split
+across directories) and recording nothing about where the file came from, which
+made the copies useless for the one thing a backup is for. Antigravity wrote
+its `.bak` *beside the original*, inside the store Antigravity itself reads.
+
+Nothing prunes backups. A tool that quietly deletes copies it made of someone's
+conversation history has misunderstood its job.
+
 ## Layout
 
 ```
