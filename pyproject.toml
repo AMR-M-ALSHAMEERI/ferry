@@ -63,6 +63,14 @@ disallow_untyped_defs = false
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--strict-markers"
+# The repository root, so `from tests.<helper> import ...` resolves.
+#
+# `python -m pytest` puts the working directory on sys.path and the `pytest`
+# console script does not. Every local run used the first and CI runs the
+# second, so shared test helpers imported as `tests.x` worked here and failed
+# there -- across two pushes, while the local suite reported green. This makes
+# the two invocations mean the same thing.
+pythonpath = ["."]
 
 [tool.coverage.run]
 source = ["src/ferry"]
