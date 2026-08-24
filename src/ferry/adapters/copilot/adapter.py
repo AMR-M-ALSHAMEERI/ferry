@@ -43,6 +43,7 @@ from ferry.adapters.copilot.writer import (
     upsert_index_entry,
     vs_code_is_running,
 )
+from ferry.adapters.dedup import compare_duplicate
 from ferry.core import Bundle, Manifest, SourceMachine
 from ferry.core.manifest import OSName
 from ferry.ucs import Conversation, ToolName
@@ -160,38 +161,27 @@ class CopilotAdapter(Adapter):
     def _skip_duplicate(
         self, bundle: Bundle, key: str, path: Path, conversation_id: UUID
     ) -> Iterator[ExportEvent]:
-        """Skip a conversation already in the bundle -- but check it first.
+        """Skip a conversation already in the bundle -- after checking it.
 
         The same session id really does appear under more than one workspace:
-        one conversation on this machine exists in two, byte-different files
-        holding identical content. Skipping the second is right.
-
-        It is only right while the two agree. If the copy being skipped holds
-        **more** messages, the bundle has the shorter one and silently keeping
-        it would lose turns -- so that case is reported rather than swallowed.
-        Reading the file to find out is affordable here: ten real transcripts
-        totalled 1.65 MB.
+        one conversation here exists in two byte-different files holding
+        identical content. Skipping the second is right, and stays right only
+        while they agree -- see :mod:`ferry.adapters.dedup`.
         """
-        message = "already in bundle"
         try:
-            mine = read_session(path, key, self._env).conversation
-            theirs = bundle.load_conversation(conversation_id)
+            incoming = read_session(path, key, self._env).conversation
+            existing = bundle.load_conversation(conversation_id)
         except (OSError, ValueError):
-            mine = theirs = None
+            incoming = existing = None
 
-        if mine is not None and theirs is not None and len(mine.messages) > len(theirs.messages):
+        verdict = compare_duplicate(conversation_id, incoming, existing, path.name)
+        if verdict.warning:
             yield ExportEvent(
-                kind="warning",
-                conversation_id=str(conversation_id),
-                message=(
-                    f"{path.name} holds {len(mine.messages)} messages but the bundle already "
-                    f"has this conversation with {len(theirs.messages)}; the longer copy was "
-                    "not carried"
-                ),
+                kind="warning", conversation_id=str(conversation_id), message=verdict.warning
             )
-            message = "already in bundle (a longer copy exists - see warning)"
-
-        yield ExportEvent(kind="skipped", conversation_id=str(conversation_id), message=message)
+        yield ExportEvent(
+            kind="skipped", conversation_id=str(conversation_id), message=verdict.message
+        )
 
     def _export_one(self, bundle: Bundle, key: str, path: Path) -> Iterator[ExportEvent]:
         conversation_id = cp_paths.session_id_of(path)

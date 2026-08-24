@@ -48,6 +48,7 @@ from ferry.adapters.claude_code.writer import (
     session_lines,
     synthesize_records,
 )
+from ferry.adapters.dedup import compare_duplicate
 from ferry.core import Bundle, Manifest, SourceMachine
 from ferry.core.manifest import OSName
 from ferry.ucs import Conversation, Provenance, ToolName
@@ -190,10 +191,24 @@ class ClaudeCodeAdapter(Adapter):
             yield ExportEvent(kind="skipped", message=f"{session.name}: not a session file")
             return
         if bundle.has_conversation(conversation_id):
+            # Checked, not assumed: two files can claim one id, and skipping on
+            # the id alone keeps whichever was read first. See adapters/dedup.
+            try:
+                incoming = read_session(session).conversation
+                existing = bundle.load_conversation(conversation_id)
+            except (OSError, ValueError):
+                incoming = existing = None
+            verdict = compare_duplicate(conversation_id, incoming, existing, session.name)
+            if verdict.warning:
+                yield ExportEvent(
+                    kind="warning",
+                    conversation_id=str(conversation_id),
+                    message=verdict.warning,
+                )
             yield ExportEvent(
                 kind="skipped",
                 conversation_id=str(conversation_id),
-                message="already in bundle",
+                message=verdict.message,
             )
             return
 

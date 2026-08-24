@@ -34,6 +34,7 @@ from ferry.adapters.claude_code.writer import remap_prefix
 from ferry.adapters.codex import paths as cx_paths
 from ferry.adapters.codex.reader import SessionRead, read_rollout
 from ferry.adapters.codex.writer import REBUILD_NOTES, Rebuild, rollout_lines, rollout_stamp
+from ferry.adapters.dedup import compare_duplicate
 from ferry.core import Bundle, Manifest, SourceMachine
 from ferry.core.manifest import OSName
 from ferry.ucs import Attachment, Conversation, Provenance, ToolName
@@ -152,8 +153,24 @@ class CodexAdapter(Adapter):
             yield ExportEvent(kind="skipped", message=f"{path.name}: not a rollout file")
             return
         if bundle.has_conversation(conversation_id):
+            # Re-reads the rollout, which can be 53 MB -- but only on the
+            # duplicate path, which real data hits close to never. Skipping on
+            # the id alone would keep whichever copy was read first. See
+            # adapters/dedup.
+            try:
+                incoming = read_rollout(path, warn_over_bytes=LARGE_SESSION_BYTES).conversation
+                existing = bundle.load_conversation(conversation_id)
+            except (OSError, ValueError):
+                incoming = existing = None
+            verdict = compare_duplicate(conversation_id, incoming, existing, path.name)
+            if verdict.warning:
+                yield ExportEvent(
+                    kind="warning",
+                    conversation_id=str(conversation_id),
+                    message=verdict.warning,
+                )
             yield ExportEvent(
-                kind="skipped", conversation_id=str(conversation_id), message="already in bundle"
+                kind="skipped", conversation_id=str(conversation_id), message=verdict.message
             )
             return
 
