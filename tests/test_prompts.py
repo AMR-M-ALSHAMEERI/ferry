@@ -781,3 +781,59 @@ class TestPathPromptKeys:
 
         assert event.app.exited is False
         assert event.current_buffer.complete_state is None
+
+
+class TestPathPromptDefault:
+    """The suggestion the export screen has offered since M2.
+
+    ``PromptSession.prompt()`` resets its own buffer as it starts, so a default
+    written into the buffer beforehand is silently wiped. Replacing
+    questionary's path prompt with Ferry's carried that mistake in, and the
+    export screen stopped suggesting a bundle name and a folder -- leaving a
+    blank line where there had been an answer to accept.
+    """
+
+    def test_the_default_reaches_the_prompt(self, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        from ferry.cli import prompts
+
+        seen: dict[str, object] = {}
+
+        class _Session:
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                self.kwargs = kwargs
+
+            def prompt(self, default: str = "", **kwargs: object) -> str:
+                seen["default"] = default
+                return default
+
+        monkeypatch.setattr(prompts, "PromptSession", _Session)
+
+        answer = prompts.run_path(
+            "Where?", theme=THEMES["compass"], default="C:/somewhere/ferry-bundle"
+        )
+
+        assert seen["default"] == "C:/somewhere/ferry-bundle"
+        assert answer == "C:/somewhere/ferry-bundle"
+
+    def test_the_keys_are_named_along_the_bottom(self) -> None:
+        """A key that works and is never mentioned is a key nobody presses.
+
+        Escape had just been fixed in this prompt, and this was the one screen
+        in Ferry that never said escape was there.
+        """
+        text = "".join(part for _, part in prompts_path_hints(has_default=False))
+
+        assert "esc cancel" in text
+        assert "tab completes" in text
+        assert "enter accept" in text
+
+    def test_a_suggestion_is_advertised_as_one(self) -> None:
+        text = "".join(part for _, part in prompts_path_hints(has_default=True))
+
+        assert "enter alone takes the suggestion" in text
+
+
+def prompts_path_hints(*, has_default: bool):  # type: ignore[no-untyped-def]
+    from ferry.cli.prompts import path_hints
+
+    return path_hints(THEMES["compass"], has_default=has_default)

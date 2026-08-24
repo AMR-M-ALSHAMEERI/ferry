@@ -19,13 +19,13 @@ from dataclasses import dataclass
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.completion import PathCompleter
-from prompt_toolkit.document import Document
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import StyleAndTextTuples
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import HSplit, Layout, Window
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.shortcuts import CompleteStyle, PromptSession
+from prompt_toolkit.styles import Style
 
 from ferry.cli.motion import MENU_FRAME_SECONDS, Motion
 from ferry.cli.theme import ASCII_ICONS, Theme
@@ -37,6 +37,7 @@ __all__ = [
     "SelectorModel",
     "build_bindings",
     "path_bindings",
+    "path_hints",
     "run_confirm",
     "run_path",
     "run_select",
@@ -496,29 +497,54 @@ def path_bindings() -> KeyBindings:
     return keys
 
 
+def path_hints(theme: Theme, *, has_default: bool) -> Fragments:
+    """The key line under the path prompt.
+
+    Every picker in Ferry names its keys along the bottom, and this prompt did
+    not -- so the one screen where escape had just been fixed was also the one
+    screen that never said escape was available. A key that works and is not
+    mentioned is a key nobody presses.
+    """
+    dim = _style_for(theme, "ferry.dim")
+    sep = theme.icons.separator
+    keys = [f"tab completes  {sep}  enter accept"]
+    if has_default:
+        keys.append(f"{sep}  enter alone takes the suggestion")
+    keys.append(f"{sep}  esc cancel")
+    return [(dim, "  " + " ".join(keys))]
+
+
 def run_path(question: str, *, theme: Theme, default: str = "") -> str | None:
     """Ask for a filesystem path, with tab completion.
 
     The one prompt in Ferry that takes typing, because a folder that does not
     exist yet cannot be offered as a choice. Everything else about it matches
-    the pickers: the same icon, the same styles, and escape goes back.
+    the pickers: the same icon, the same styles, a key line along the bottom,
+    and escape goes back.
+
+    Args:
+        default: Pre-filled, and **passed to** :meth:`PromptSession.prompt`
+            rather than written into the buffer beforehand. ``prompt()`` resets
+            the buffer itself as it starts, so a default set in advance is
+            silently wiped -- which is how the export screen lost the suggested
+            bundle name it had offered since M2.
 
     Returns:
         The path, or ``None`` if the user backed out.
     """
     icon = theme.icons.info
-    completer = PathCompleter(expanduser=True)
     session: PromptSession[str | None] = PromptSession(
         [
             (_style_for(theme, "ferry.dim"), f"  {icon} "),
             (_style_for(theme, "ferry.text"), f"{question}  "),
         ],
-        completer=completer,
+        completer=PathCompleter(expanduser=True),
         complete_style=CompleteStyle.MULTI_COLUMN,
         key_bindings=path_bindings(),
+        bottom_toolbar=lambda: path_hints(theme, has_default=bool(default)),
+        style=Style.from_dict({"bottom-toolbar": "noreverse"}),
     )
-    session.default_buffer.reset(Document(default))
-    return session.prompt()
+    return session.prompt(default=default)
 
 
 def run_confirm(
