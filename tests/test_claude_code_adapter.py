@@ -549,17 +549,38 @@ def test_importing_twice_skips_by_default(
     assert written.read_bytes() == stamp
 
 
-def test_rename_on_conflict_keeps_both(
+def test_rename_on_conflict_keeps_both_as_separate_conversations(
     exported: Path, target: ClaudeCodeAdapter, tmp_path: Path
 ) -> None:
+    """Keeping both means a second conversation, not a second filename.
+
+    Claude Code writes the conversation id into every record as ``sessionId``,
+    and every real transcript has it agreeing with the filename. A copy called
+    ``<uuid>-1.jsonl`` while still saying ``sessionId: <uuid>`` inside is a
+    session that contradicts itself -- and its spilled tool output would be
+    read from the directory belonging to the file it was trying not to
+    overwrite.
+    """
     list(target.import_(exported, ImportOptions()))
-    list(target.import_(exported, ImportOptions(on_conflict="rename")))
+    events = list(target.import_(exported, ImportOptions(on_conflict="rename")))
 
     project = tmp_path / "target" / "projects" / "C--Users-sample-Projects-widget"
-    assert sorted(p.name for p in project.glob(f"{BASIC_ID}*.jsonl")) == [
-        f"{BASIC_ID}-1.jsonl",
-        f"{BASIC_ID}.jsonl",
-    ]
+    written = sorted(project.glob("*.jsonl"))
+    assert len(written) == 2
+    assert {path.stem for path in written} != {str(BASIC_ID)}
+
+    for path in written:
+        ids = {record["sessionId"] for record in read_jsonl(path) if "sessionId" in record}
+        assert ids == {path.stem}, "the id inside must be the id in the name"
+
+    # Named in both directions: the old id is how they will look for it in the
+    # bundle, the new one is how they will find it in Claude Code.
+    assert any(
+        event.kind == "warning"
+        and str(BASIC_ID) in event.message
+        and "separate copy" in event.message
+        for event in events
+    )
 
 
 def test_overwriting_backs_the_old_file_up_first(

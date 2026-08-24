@@ -53,9 +53,10 @@ from ferry.adapters.base import (
     ImportOptions,
 )
 from ferry.adapters.census import census, count_of
+from ferry.adapters.conflict import RENAME_NOT_POSSIBLE
 from ferry.adapters.dedup import compare_duplicate
 from ferry.adapters.formatcheck import FormatCheck
-from ferry.core import Bundle, Manifest, SourceMachine
+from ferry.core import Bundle, Manifest, SourceMachine, back_up
 from ferry.core.manifest import OSName
 from ferry.ucs import ToolName
 
@@ -536,10 +537,7 @@ class AntigravityAdapter(Adapter):
                 yield ImportEvent(
                     kind="skipped",
                     conversation_id=identifier,
-                    message=(
-                        "already in Antigravity; renaming is not possible because a "
-                        "conversation is identified by its filename"
-                    ),
+                    message=RENAME_NOT_POSSIBLE,
                 )
                 return
 
@@ -577,8 +575,11 @@ class AntigravityAdapter(Adapter):
         destination.parent.mkdir(parents=True, exist_ok=True)
 
         if options.backup and destination.exists():
-            stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-            shutil.copy2(destination, destination.with_name(f"{destination.name}.{stamp}.bak"))
+            # Into ~/.ferry/backups, not beside the original. A `.bak` file left
+            # in `conversations/` is a file Antigravity may try to open, and it
+            # is invisible to anyone looking for their backups where Ferry says
+            # backups are.
+            back_up(destination, TOOL)
 
         staged = destination.with_name(destination.name + ".ferry-tmp")
         shutil.copyfile(original, staged)

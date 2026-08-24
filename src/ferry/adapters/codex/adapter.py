@@ -36,9 +36,10 @@ from ferry.adapters.claude_code.writer import remap_prefix
 from ferry.adapters.codex import paths as cx_paths
 from ferry.adapters.codex.reader import SessionRead, parent_thread, read_rollout
 from ferry.adapters.codex.writer import REBUILD_NOTES, Rebuild, rollout_lines, rollout_stamp
+from ferry.adapters.conflict import reidentify, rename_note
 from ferry.adapters.dedup import compare_duplicate
 from ferry.adapters.formatcheck import FormatCheck
-from ferry.core import Bundle, Manifest, SourceMachine
+from ferry.core import Bundle, Manifest, SourceMachine, back_up
 from ferry.core.manifest import OSName
 from ferry.ucs import Attachment, Conversation, Provenance, ToolName
 
@@ -444,9 +445,10 @@ class CodexAdapter(Adapter):
                 message=f"bundle records no working directory; filing under {target_cwd}",
             )
 
+        written_id = conversation_id
         rebuild = Rebuild(
             cwd=target_cwd,
-            thread_id=conversation_id,
+            thread_id=written_id,
             images=self._images(bundle, conversation),
         )
         payload = rollout_lines(conversation, rebuild)
@@ -470,11 +472,33 @@ class CodexAdapter(Adapter):
             / cx_paths.rollout_name(conversation_id, rollout_stamp(created))
         )
 
-        if destination.exists() and options.on_conflict == "skip":
-            yield ImportEvent(
-                kind="skipped", conversation_id=cid, message=f"already at {destination.name}"
-            )
-            return
+        if destination.exists():
+            if options.on_conflict == "skip":
+                yield ImportEvent(
+                    kind="skipped", conversation_id=cid, message=f"already at {destination.name}"
+                )
+                return
+            if options.on_conflict == "rename":
+                # A new thread id, not a new filename. `ROLLOUT_PATTERN`
+                # requires the name to end in the thread uuid, so a suffixed
+                # file is one neither Codex nor Ferry would recognise -- and
+                # two files claiming the same thread id is worse still.
+                written_id = reidentify(conversation)
+                rebuild = Rebuild(cwd=target_cwd, thread_id=written_id, images=rebuild.images)
+                payload = rollout_lines(conversation, rebuild)
+                if payload is None:  # pragma: no cover - the header was read above
+                    yield ImportEvent(
+                        kind="error", conversation_id=cid, message="no session_meta header"
+                    )
+                    return
+                destination = destination.with_name(
+                    cx_paths.rollout_name(written_id, rollout_stamp(created))
+                )
+                yield ImportEvent(
+                    kind="warning",
+                    conversation_id=cid,
+                    message=rename_note(conversation_id, written_id),
+                )
 
         for note in REBUILD_NOTES:
             yield ImportEvent(kind="warning", conversation_id=cid, message=note)
@@ -498,7 +522,7 @@ class CodexAdapter(Adapter):
             return
 
         if options.backup and destination.exists():
-            backup = self._back_up(destination)
+            backup = back_up(destination, TOOL)
             yield ImportEvent(
                 kind="warning", conversation_id=cid, message=f"existing file backed up to {backup}"
             )
@@ -557,11 +581,3 @@ class CodexAdapter(Adapter):
             except OSError:
                 continue
         return found
-
-    @staticmethod
-    def _back_up(destination: Path) -> Path:
-        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-        backup = Path.home() / ".ferry" / "backups" / stamp / destination.name
-        backup.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(destination, backup)
-        return backup

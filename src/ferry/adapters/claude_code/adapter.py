@@ -49,9 +49,10 @@ from ferry.adapters.claude_code.writer import (
     session_lines,
     synthesize_records,
 )
+from ferry.adapters.conflict import reidentify, rename_note
 from ferry.adapters.dedup import compare_duplicate
 from ferry.adapters.formatcheck import FormatCheck
-from ferry.core import Bundle, Manifest, SourceMachine
+from ferry.core import Bundle, Manifest, SourceMachine, back_up
 from ferry.core.manifest import OSName
 from ferry.ucs import Conversation, Provenance, ToolName
 
@@ -397,6 +398,7 @@ class ClaudeCodeAdapter(Adapter):
         project = cc_paths.project_dir(target_cwd, self._env)
         destination = project / f"{conversation_id}.jsonl"
         sidecar_root = project / str(conversation_id) / SIDECAR_SUBDIR
+        written_id = conversation_id
 
         if destination.exists():
             if options.on_conflict == "skip":
@@ -405,7 +407,19 @@ class ClaudeCodeAdapter(Adapter):
                 )
                 return
             if options.on_conflict == "rename":
-                destination = self._free_name(destination)
+                # A new identity, not a new filename. Claude Code writes the
+                # id into every record as `sessionId`, so a renamed file would
+                # disagree with itself about which conversation it is -- and
+                # would share the spilled tool output of the one it was trying
+                # not to overwrite.
+                written_id = reidentify(conversation)
+                destination = project / f"{written_id}.jsonl"
+                sidecar_root = project / str(written_id) / SIDECAR_SUBDIR
+                yield ImportEvent(
+                    kind="warning",
+                    conversation_id=cid,
+                    message=rename_note(conversation_id, written_id),
+                )
 
         payload, notes = self._payload_for(bundle, conversation, target_cwd, sidecar_root)
         for note in notes:
@@ -430,7 +444,7 @@ class ClaudeCodeAdapter(Adapter):
             return
 
         if options.backup and destination.exists():
-            backup = self._back_up(destination)
+            backup = back_up(destination, TOOL)
             yield ImportEvent(
                 kind="warning", conversation_id=cid, message=f"existing file backed up to {backup}"
             )
@@ -508,23 +522,6 @@ class ClaudeCodeAdapter(Adapter):
             except OSError:
                 continue
         return found
-
-    @staticmethod
-    def _free_name(destination: Path) -> Path:
-        for suffix in range(1, 1000):
-            candidate = destination.with_name(f"{destination.stem}-{suffix}{destination.suffix}")
-            if not candidate.exists():
-                return candidate
-        raise OSError(f"no free filename beside {destination}")
-
-    @staticmethod
-    def _back_up(destination: Path) -> Path:
-        """Copy the file about to be overwritten into ``~/.ferry/backups``."""
-        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-        backup = Path.home() / ".ferry" / "backups" / stamp / destination.name
-        backup.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(destination, backup)
-        return backup
 
     @staticmethod
     def _write(destination: Path, payload: bytes) -> None:

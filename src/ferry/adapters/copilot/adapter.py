@@ -33,6 +33,7 @@ from ferry.adapters.base import (
     ImportOptions,
 )
 from ferry.adapters.census import Census, census
+from ferry.adapters.conflict import reidentify, rename_note
 from ferry.adapters.copilot import paths as cp_paths
 from ferry.adapters.copilot.deltas import replay_lines
 from ferry.adapters.copilot.reader import read_session
@@ -47,7 +48,7 @@ from ferry.adapters.copilot.writer import (
 )
 from ferry.adapters.dedup import compare_duplicate
 from ferry.adapters.formatcheck import FormatCheck
-from ferry.core import Bundle, Manifest, SourceMachine
+from ferry.core import Bundle, Manifest, SourceMachine, back_up
 from ferry.core.manifest import OSName
 from ferry.ucs import Conversation, ToolName
 
@@ -316,15 +317,24 @@ class CopilotAdapter(Adapter):
         yield ImportEvent(kind="started", message=f"{len(conversations)} conversations to write")
 
         written = 0
+        # The chat list is one SQLite file shared by every conversation in a
+        # workspace, so it is backed up the first time this run touches it
+        # rather than once per conversation.
+        backed_up: set[Path] = set()
         for conversation_id in conversations:
-            for event in self._import_one(bundle, conversation_id, options):
+            for event in self._import_one(bundle, conversation_id, options, backed_up):
                 if event.kind == "progress":
                     written += 1
                 yield event
-        yield ImportEvent(kind="done", message=f"{written} of {len(conversations)} imported")
+        verb = "would be written" if options.dry_run else "imported"
+        yield ImportEvent(kind="done", message=f"{written} of {len(conversations)} {verb}")
 
     def _import_one(
-        self, bundle: Bundle, conversation_id: UUID, options: ImportOptions
+        self,
+        bundle: Bundle,
+        conversation_id: UUID,
+        options: ImportOptions,
+        backed_up: set[Path] | None = None,
     ) -> Iterator[ImportEvent]:
         conversation = bundle.load_conversation(conversation_id)
         if conversation.source_tool != TOOL:
@@ -338,25 +348,67 @@ class CopilotAdapter(Adapter):
             )
             return
 
+        cid = str(conversation_id)
         destination, database, where = self._destination(conversation)
+        written_id = conversation_id
         transcript = destination / f"{conversation_id}.jsonl"
 
-        if transcript.exists() or str(conversation_id) in index_lists(database):
-            yield ImportEvent(
-                kind="skipped",
-                conversation_id=str(conversation_id),
-                message="already in Copilot Chat",
-            )
-            return
+        if transcript.exists() or cid in index_lists(database):
+            if options.on_conflict == "skip":
+                yield ImportEvent(
+                    kind="skipped", conversation_id=cid, message="already in Copilot Chat"
+                )
+                return
+            if options.on_conflict == "rename":
+                # The id is both the filename and the key in the chat list, so
+                # a copy has to be a new conversation rather than a new name.
+                written_id = reidentify(conversation)
+                transcript = destination / f"{written_id}.jsonl"
+                yield ImportEvent(
+                    kind="warning",
+                    conversation_id=cid,
+                    message=rename_note(conversation_id, written_id),
+                )
 
         try:
             line = snapshot_line(conversation)
             entry = index_entry(conversation)
         except ValueError as exc:
+            yield ImportEvent(kind="skipped", conversation_id=cid, message=str(exc))
+            return
+
+        if options.dry_run:
             yield ImportEvent(
-                kind="skipped", conversation_id=str(conversation_id), message=str(exc)
+                kind="progress",
+                conversation_id=cid,
+                message=f"would write {transcript.name} and list it in {where}",
             )
             return
+
+        # Both files this import can destroy, copied before either is touched.
+        # The chat list is the one whose loss costs most -- a transcript VS Code
+        # does not list is invisible -- and a backup that fails is a reason to
+        # write nothing at all rather than to carry on.
+        if options.backup:
+            for target, shared in ((database, True), (transcript, False)):
+                if not target.is_file() or (shared and target in (backed_up or set())):
+                    continue
+                try:
+                    saved = back_up(target, TOOL)
+                except OSError as exc:
+                    yield ImportEvent(
+                        kind="error",
+                        conversation_id=cid,
+                        message=f"could not back up {target.name}, so nothing was written: {exc}",
+                    )
+                    return
+                if shared and backed_up is not None:
+                    backed_up.add(target)
+                yield ImportEvent(
+                    kind="warning",
+                    conversation_id=cid,
+                    message=f"{target.name} backed up to {saved}",
+                )
 
         # The index goes first. A transcript listed but missing is an empty
         # chat; a transcript present but unlisted is invisible, and the user
@@ -364,7 +416,7 @@ class CopilotAdapter(Adapter):
         try:
             upsert_index_entry(database, entry)
         except SessionStoreLocked as exc:
-            yield ImportEvent(kind="error", conversation_id=str(conversation_id), message=str(exc))
+            yield ImportEvent(kind="error", conversation_id=cid, message=str(exc))
             return
 
         destination.mkdir(parents=True, exist_ok=True)
@@ -374,7 +426,7 @@ class CopilotAdapter(Adapter):
 
         yield ImportEvent(
             kind="progress",
-            conversation_id=str(conversation_id),
+            conversation_id=cid,
             message=f"{len(conversation.messages)} messages into {where}",
         )
 

@@ -274,14 +274,25 @@ class TestImport:
         assert "already in Antigravity" in again["skipped"][0]
 
     def test_overwrite_makes_a_backup_first(
-        self, source: dict[str, str], target: dict[str, str], tmp_path: Path
+        self, source: dict[str, str], target: dict[str, str], tmp_path: Path, monkeypatch
     ) -> None:
+        """Into ~/.ferry/backups, and **not** beside the original.
+
+        A `.bak` file left in Antigravity's own `conversations/` directory is a
+        file Antigravity may try to open, and it is invisible to anyone looking
+        where Ferry says backups live.
+        """
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+
         bundle_dir = self._bundle(source, tmp_path)
         adapter = AntigravityAdapter(target)
         run(adapter.import_(bundle_dir, ImportOptions()))
         run(adapter.import_(bundle_dir, ImportOptions(on_conflict="overwrite")))
-        backups = list(paths.conversations_dir(target).glob(f"{CONV}.db.*.bak"))
-        assert backups
+
+        assert list((home / ".ferry" / "backups").rglob(f"{CONV}.db"))
+        assert not list(paths.conversations_dir(target).glob("*.bak"))
 
     def test_dry_run_writes_nothing(
         self, source: dict[str, str], target: dict[str, str], tmp_path: Path
