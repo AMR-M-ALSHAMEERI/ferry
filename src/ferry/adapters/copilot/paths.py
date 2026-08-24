@@ -35,6 +35,7 @@ __all__ = [
     "session_files",
     "session_id_of",
     "user_dir",
+    "vscode_version",
     "vscode_fs_path",
     "workspace_file_key",
     "workspace_storage",
@@ -100,6 +101,57 @@ def empty_window_dir(env: os._Environ[str] | dict[str, str] | None = None) -> Pa
 def chat_images_dir(env: os._Environ[str] | dict[str, str] | None = None) -> Path:
     """The shared store for images pasted into any chat."""
     return workspace_storage(env) / CHAT_IMAGES_DIR
+
+
+def vscode_version(env: os._Environ[str] | dict[str, str] | None = None) -> str | None:
+    """The VS Code version that last wrote this user directory.
+
+    Read from ``globalStorage/state.vscdb`` rather than by locating the
+    install or running ``code --version``: the user directory is the one place
+    Ferry already knows how to find, on every platform, and a portable or
+    renamed install would defeat the alternatives.
+
+    Two keys carry it. ``abstractUpdateService/lastKnownVersion`` is a JSON
+    object and the more precise of the two; ``releaseNotes/lastVersion`` is a
+    bare string and survives on installs where updates are managed elsewhere.
+    """
+    import json
+    import sqlite3
+
+    database = global_storage(env) / "state.vscdb"
+    if not database.is_file():
+        return None
+    try:
+        connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return None
+    try:
+        rows = dict(
+            connection.execute(
+                "SELECT key, value FROM ItemTable WHERE key IN (?, ?)",
+                ("abstractUpdateService/lastKnownVersion", "releaseNotes/lastVersion"),
+            ).fetchall()
+        )
+    except sqlite3.Error:
+        return None
+    finally:
+        connection.close()
+
+    raw = rows.get("abstractUpdateService/lastKnownVersion")
+    if isinstance(raw, str | bytes):
+        try:
+            parsed = json.loads(raw)
+        except (TypeError, ValueError):
+            parsed = None
+        if isinstance(parsed, dict):
+            version = parsed.get("version")
+            if isinstance(version, str) and version:
+                return version
+
+    fallback = rows.get("releaseNotes/lastVersion")
+    if isinstance(fallback, bytes):
+        fallback = fallback.decode("utf-8", "replace")
+    return fallback if isinstance(fallback, str) and fallback else None
 
 
 def session_files(

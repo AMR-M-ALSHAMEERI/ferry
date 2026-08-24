@@ -14,7 +14,7 @@ from uuid import UUID
 import pytest
 
 from ferry.adapters.copilot import paths as cp
-from ferry.adapters.copilot.adapter import CopilotAdapter
+from ferry.adapters.copilot.adapter import TESTED_VERSION, CopilotAdapter
 from ferry.core import Bundle
 
 FIXTURES = Path(__file__).parent / "fixtures" / "copilot"
@@ -60,14 +60,39 @@ def test_detect_finds_the_sessions(store: Path) -> None:
     assert result.conversation_count_estimate == 4
 
 
-def test_detect_warns_that_the_format_is_undocumented(store: Path) -> None:
-    """Required by PLAN.md M5's exit criteria, and a caveat rather than a note:
-    everything Ferry knows about this format came off one machine, so the user
-    is told on every scan instead of once in detail they must go looking for."""
+def test_a_matching_vs_code_version_says_nothing(store: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """A warning shown on every scan of a version already verified is noise,
+    and a warning people have learned to scroll past is worse than none - it is
+    still there when it finally matters and they no longer read it."""
+    monkeypatch.setattr(cp, "vscode_version", lambda env=None: TESTED_VERSION)
+
     result = CopilotAdapter().detect()
 
-    assert any("undocumented" in caveat for caveat in result.caveats)
-    assert any("1.134.0" in caveat for caveat in result.caveats)
+    assert result.caveats == []
+    assert result.version == TESTED_VERSION
+
+
+def test_a_different_vs_code_version_is_warned_about(store: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """The case the warning exists for. This storage is undocumented, so a
+    release Ferry has never seen can change it without notice."""
+    monkeypatch.setattr(cp, "vscode_version", lambda env=None: "1.999.0")
+
+    result = CopilotAdapter().detect()
+
+    assert len(result.caveats) == 1
+    assert "1.999.0" in result.caveats[0]
+    assert TESTED_VERSION in result.caveats[0]
+    assert "undocumented" in result.caveats[0]
+
+
+def test_an_undetectable_vs_code_version_is_warned_about(store: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Not knowing is not the same as matching, and must not be treated as it."""
+    monkeypatch.setattr(cp, "vscode_version", lambda env=None: None)
+
+    result = CopilotAdapter().detect()
+
+    assert len(result.caveats) == 1
+    assert "could not determine" in result.caveats[0]
 
 
 def test_detect_reports_not_installed_when_vs_code_is_absent(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]

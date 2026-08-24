@@ -153,3 +153,52 @@ def test_a_windows_drive_letter_is_lowercased() -> None:
     spelling. Feeding it `C:` where VS Code used `c:` produces a different,
     entirely plausible-looking directory name."""
     assert cp.vscode_fs_path(Path("C:/Users/x")).startswith("c:")
+
+
+# --------------------------------------------------------------------------
+# the VS Code version
+# --------------------------------------------------------------------------
+
+
+def test_the_vs_code_version_is_read_from_the_user_directory(user_dir: Path) -> None:
+    """Read from data Ferry already finds, rather than by locating the install
+    or shelling out - a portable or renamed install defeats both."""
+    import json
+    import sqlite3
+
+    database = cp.global_storage() / "state.vscdb"
+    database.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(database)
+    with connection:
+        connection.execute("CREATE TABLE ItemTable (key TEXT UNIQUE, value BLOB)")
+        connection.execute(
+            "INSERT INTO ItemTable VALUES (?, ?)",
+            (
+                "abstractUpdateService/lastKnownVersion",
+                json.dumps({"version": "1.134.0", "commit": "abc"}),
+            ),
+        )
+    connection.close()
+
+    assert cp.vscode_version() == "1.134.0"
+
+
+def test_the_version_falls_back_to_the_release_notes_key(user_dir: Path) -> None:
+    """Installs whose updates are managed elsewhere keep only this one."""
+    import sqlite3
+
+    database = cp.global_storage() / "state.vscdb"
+    database.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(database)
+    with connection:
+        connection.execute("CREATE TABLE ItemTable (key TEXT UNIQUE, value BLOB)")
+        connection.execute(
+            "INSERT INTO ItemTable VALUES (?, ?)", ("releaseNotes/lastVersion", "1.120.3")
+        )
+    connection.close()
+
+    assert cp.vscode_version() == "1.120.3"
+
+
+def test_an_absent_database_yields_no_version(user_dir: Path) -> None:
+    assert cp.vscode_version() is None
