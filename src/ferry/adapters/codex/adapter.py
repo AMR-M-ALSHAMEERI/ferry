@@ -522,9 +522,14 @@ class CodexAdapter(Adapter):
             return
 
         if options.backup and destination.exists():
+            # A note, not a warning. Taking a backup is the safe path working,
+            # and marking it with the same icon as "this conversation lost its
+            # thinking blocks" teaches people to ignore both.
             backup = back_up(destination, TOOL)
             yield ImportEvent(
-                kind="warning", conversation_id=cid, message=f"existing file backed up to {backup}"
+                kind="note",
+                conversation_id=cid,
+                message=f"the copy already there was saved to {backup.parent}",
             )
 
         try:

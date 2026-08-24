@@ -449,10 +449,17 @@ class UI:
         return run_confirm(question, theme=self.theme, default=default)
 
     def path(self, question: str, *, default: str = "", hint: str = "") -> str | None:
-        """Ask for a filesystem path, with tab completion."""
+        """Ask for a filesystem path, with tab completion.
+
+        Returns ``None`` when the user backs out -- by escape, by ctrl-c, or by
+        pressing enter on an empty line. Every caller must treat that as "went
+        back", because an empty bundle list sends people to this prompt without
+        their asking and they need a way out of it.
+        """
         self._require_interactive(question, hint)
-        answer = questionary.path(question, default=default, qmark=self.theme.icons.info).ask()
-        return answer if isinstance(answer, str) else None
+        from ferry.cli.prompts import run_path
+
+        return run_path(question, theme=self.theme, default=default)
 
 
 def _default_theme_name() -> str:

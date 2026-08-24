@@ -32,7 +32,7 @@ from ferry.adapters.base import (
     ImportEvent,
     ImportOptions,
 )
-from ferry.adapters.census import Census, census
+from ferry.adapters.census import Census, census, count_of
 from ferry.adapters.conflict import reidentify, rename_note
 from ferry.adapters.copilot import paths as cp_paths
 from ferry.adapters.copilot.deltas import replay_lines
@@ -321,11 +321,26 @@ class CopilotAdapter(Adapter):
         # workspace, so it is backed up the first time this run touches it
         # rather than once per conversation.
         backed_up: set[Path] = set()
+        saved: list[Path] = []
         for conversation_id in conversations:
-            for event in self._import_one(bundle, conversation_id, options, backed_up):
+            for event in self._import_one(bundle, conversation_id, options, backed_up, saved):
                 if event.kind == "progress":
                     written += 1
                 yield event
+
+        # Said once, at the end, as a note. Six lines carrying the warning
+        # marker for something entirely routine is the fault of ledger #159
+        # reintroduced -- and a marker that appears on everything stops meaning
+        # anything. The directory is what someone needs; the filenames are in
+        # its manifest.
+        if saved:
+            yield ImportEvent(
+                kind="note",
+                message=(
+                    f"{count_of(len(saved), 'file')} copied to {saved[0].parent.parent} "
+                    "before anything was replaced"
+                ),
+            )
         verb = "would be written" if options.dry_run else "imported"
         yield ImportEvent(kind="done", message=f"{written} of {len(conversations)} {verb}")
 
@@ -335,6 +350,7 @@ class CopilotAdapter(Adapter):
         conversation_id: UUID,
         options: ImportOptions,
         backed_up: set[Path] | None = None,
+        saved_files: list[Path] | None = None,
     ) -> Iterator[ImportEvent]:
         conversation = bundle.load_conversation(conversation_id)
         if conversation.source_tool != TOOL:
@@ -389,6 +405,7 @@ class CopilotAdapter(Adapter):
         # The chat list is the one whose loss costs most -- a transcript VS Code
         # does not list is invisible -- and a backup that fails is a reason to
         # write nothing at all rather than to carry on.
+        saved_files = [] if saved_files is None else saved_files
         if options.backup:
             for target, shared in ((database, True), (transcript, False)):
                 if not target.is_file() or (shared and target in (backed_up or set())):
@@ -404,11 +421,7 @@ class CopilotAdapter(Adapter):
                     return
                 if shared and backed_up is not None:
                     backed_up.add(target)
-                yield ImportEvent(
-                    kind="warning",
-                    conversation_id=cid,
-                    message=f"{target.name} backed up to {saved}",
-                )
+                saved_files.append(saved)
 
         # The index goes first. A transcript listed but missing is an empty
         # chat; a transcript present but unlisted is invisible, and the user

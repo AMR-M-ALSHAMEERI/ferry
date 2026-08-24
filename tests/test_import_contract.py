@@ -177,3 +177,30 @@ def test_a_refusal_explains_itself(case: Case) -> None:
     for event in events:
         if event.kind == "skipped":
             assert event.message.strip(), f"{case.name} skipped without saying why"
+
+
+def test_a_backup_is_announced_once_and_as_a_note(
+    case: Case, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Taking a backup is the safe path working, not a thing to be warned about.
+
+    Importing four Copilot conversations printed **six warning lines**, one per
+    file copied, each carrying the same marker as "this conversation lost its
+    thinking blocks" and each repeating an absolute path long enough to wrap the
+    terminal. A marker that appears on everything stops meaning anything, which
+    is the fault of ledger #159 arriving by a different route.
+    """
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+
+    run(case, ImportOptions())
+    events = run(case, ImportOptions(on_conflict="overwrite"))
+
+    about_backups = [
+        event for event in events if "copied to" in event.message or "saved to" in event.message
+    ]
+    assert not [event for event in about_backups if event.kind == "warning"], (
+        f"{case.name} reported a routine backup as a warning"
+    )
+    assert len(about_backups) <= 1, f"{case.name} said the same thing {len(about_backups)} times"

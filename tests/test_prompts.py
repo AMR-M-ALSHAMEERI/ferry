@@ -713,3 +713,71 @@ class TestFilterDeadEnd:
 
         assert event.app.exited
         assert event.app.result is None
+
+
+class _FakeDocument:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
+class _FakeBuffer:
+    """Stands in for the prompt_toolkit buffer the path bindings read."""
+
+    def __init__(self, text: str, completing: bool = False) -> None:
+        self.document = _FakeDocument(text)
+        self.complete_state: object | None = object() if completing else None
+
+
+class _PathEvent(_FakeEvent):
+    """A key press with a buffer behind it."""
+
+    def __init__(self, text: str = "", completing: bool = False) -> None:
+        super().__init__()
+        self.current_buffer = _FakeBuffer(text, completing)
+
+
+class TestPathPromptKeys:
+    """Escape backs out of the "type a path" prompt.
+
+    It did not -- and an empty bundle list sends people to that prompt without
+    their asking, so the only way back to the menu was to type something and
+    hope. The cause was that this was questionary's prompt rather than Ferry's:
+    questionary builds its own key bindings and hands them to ``PromptSession``
+    as a constructor argument, leaving nowhere to add one afterwards. Every
+    other prompt in Ferry is hand-built, and this is why.
+    """
+
+    def _press_path(self, key: str, event: _PathEvent) -> _PathEvent:
+        from ferry.cli.prompts import path_bindings
+
+        _press(path_bindings(), key, event)
+        return event
+
+    def test_escape_backs_out(self) -> None:
+        event = self._press_path("escape", _PathEvent("C:/somewhere"))
+
+        assert event.app.exited is True
+        assert event.app.result is None
+
+    def test_control_c_backs_out(self) -> None:
+        event = self._press_path("c-c", _PathEvent("C:/somewhere"))
+
+        assert event.app.result is None
+
+    def test_enter_takes_what_was_typed(self) -> None:
+        event = self._press_path("enter", _PathEvent("  C:/somewhere  "))
+
+        assert event.app.result == "C:/somewhere"
+
+    def test_enter_on_an_empty_line_backs_out(self) -> None:
+        """An empty answer is not a path, and every caller reads None as "went back"."""
+        event = self._press_path("enter", _PathEvent("   "))
+
+        assert event.app.result is None
+
+    def test_the_first_enter_takes_the_completion_not_the_answer(self) -> None:
+        """Otherwise confirming a suggestion submits the half-typed path."""
+        event = self._press_path("enter", _PathEvent("C:/Users/De", completing=True))
+
+        assert event.app.exited is False
+        assert event.current_buffer.complete_state is None

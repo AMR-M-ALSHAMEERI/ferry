@@ -18,11 +18,14 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from prompt_toolkit.application import Application
+from prompt_toolkit.completion import PathCompleter
+from prompt_toolkit.document import Document
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import StyleAndTextTuples
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import HSplit, Layout, Window
 from prompt_toolkit.layout.controls import FormattedTextControl
+from prompt_toolkit.shortcuts import CompleteStyle, PromptSession
 
 from ferry.cli.motion import MENU_FRAME_SECONDS, Motion
 from ferry.cli.theme import ASCII_ICONS, Theme
@@ -33,7 +36,9 @@ __all__ = [
     "SelectorItem",
     "SelectorModel",
     "build_bindings",
+    "path_bindings",
     "run_confirm",
+    "run_path",
     "run_select",
 ]
 
@@ -454,6 +459,66 @@ def run_select(
         refresh_interval=MENU_FRAME_SECONDS if animated else 0.0,
     )
     return app.run()
+
+
+def path_bindings() -> KeyBindings:
+    """The keys for the path prompt, built apart so they can be tested.
+
+    **Escape cancels.** It did not, which is the whole reason this prompt is
+    Ferry's own rather than questionary's: questionary builds its own bindings
+    and passes them to ``PromptSession`` as a constructor argument, so there is
+    nowhere to add one afterwards. Someone who reached the "type a path" prompt
+    by accident -- which is exactly where an empty bundle list sends them --
+    had no way back to the menu except typing something and hoping.
+
+    Enter on an empty line cancels too, for the same reason: an empty answer is
+    not a path, and the caller reads ``None`` as "went back".
+    """
+    keys = KeyBindings()
+
+    @keys.add("escape", eager=True)
+    @keys.add("c-c")
+    def _cancel(event) -> None:  # type: ignore[no-untyped-def]
+        event.app.exit(result=None)
+
+    @keys.add("enter")
+    def _accept(event) -> None:  # type: ignore[no-untyped-def]
+        buffer = event.current_buffer
+        if buffer.complete_state is not None:
+            # First enter takes the completion, not the answer. Otherwise a
+            # half-typed path is accepted the moment someone confirms a
+            # suggestion.
+            buffer.complete_state = None
+            return
+        text = buffer.document.text.strip()
+        event.app.exit(result=text or None)
+
+    return keys
+
+
+def run_path(question: str, *, theme: Theme, default: str = "") -> str | None:
+    """Ask for a filesystem path, with tab completion.
+
+    The one prompt in Ferry that takes typing, because a folder that does not
+    exist yet cannot be offered as a choice. Everything else about it matches
+    the pickers: the same icon, the same styles, and escape goes back.
+
+    Returns:
+        The path, or ``None`` if the user backed out.
+    """
+    icon = theme.icons.info
+    completer = PathCompleter(expanduser=True)
+    session: PromptSession[str | None] = PromptSession(
+        [
+            (_style_for(theme, "ferry.dim"), f"  {icon} "),
+            (_style_for(theme, "ferry.text"), f"{question}  "),
+        ],
+        completer=completer,
+        complete_style=CompleteStyle.MULTI_COLUMN,
+        key_bindings=path_bindings(),
+    )
+    session.default_buffer.reset(Document(default))
+    return session.prompt()
 
 
 def run_confirm(
