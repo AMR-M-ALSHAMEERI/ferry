@@ -137,3 +137,21 @@ class TestJsonlHolds:
         path = tmp_path / "a.jsonl"
         path.write_text('\n\n{"type": "user"}\n', encoding="utf-8")
         assert jsonl_holds(path, lambda r: r.get("type") == "user")
+
+
+def test_an_empty_hidden_label_says_nothing_rather_than_saying_a_bare_number() -> None:
+    """An adapter with a better sentence phrases it itself.
+
+    Codex reported a note reading `"1  (of 6 rollouts)"` -- the count with the
+    label missing -- which is worse than no note at all.
+    """
+    counted = census(
+        [("a", Path("a")), ("b", Path("b"))],
+        lambda _id, _path: True,
+        hidden=lambda identifier, _path: identifier == "b",
+        hidden_label="",
+    )
+
+    assert counted.hidden == 1
+    assert counted.conversations == 1
+    assert counted.notes() == []

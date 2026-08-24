@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-__all__ = ["Census", "census", "jsonl_holds"]
+__all__ = ["Census", "census", "count_of", "jsonl_holds"]
 
 
 @dataclass(frozen=True)
@@ -52,6 +52,9 @@ class Census:
     subagent trajectory. Carried by an export, never counted as conversations."""
 
     hidden_label: str = "not shown by the app"
+    """How to describe the hidden ones. **Empty means say nothing here** -- an
+    adapter with a better sentence of its own phrases it instead, and a note
+    reading "1 " with the label missing is worse than no note at all."""
 
     def notes(self) -> list[str]:
         """Lines explaining any gap between the files and the count.
@@ -68,13 +71,25 @@ class Census:
                 f"{self.duplicates} duplicate {_plural(self.duplicates, 'copy', 'copies')} "
                 "of a conversation stored more than once"
             )
-        if self.hidden:
+        if self.hidden and self.hidden_label:
             lines.append(f"{self.hidden} {self.hidden_label}")
         return lines
 
 
 def _plural(count: int, one: str, many: str) -> str:
     return one if count == 1 else many
+
+
+def count_of(number: int, singular: str, plural: str | None = None) -> str:
+    """``"1 image"``, ``"22 images"``.
+
+    A one-line function because the alternative that keeps appearing is
+    "image(s)", and someone reading a count of their own conversations deserves
+    a sentence rather than a placeholder standing in for one. It lives beside
+    the census because every adapter that counts honestly then has to say the
+    number out loud.
+    """
+    return f"{number} {_plural(number, singular, plural or singular + 's')}"
 
 
 def census(

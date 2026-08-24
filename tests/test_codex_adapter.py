@@ -24,7 +24,7 @@ from ferry.adapters.codex.paths import (
     rollout_name,
     thread_id_of,
 )
-from ferry.adapters.codex.reader import read_rollout
+from ferry.adapters.codex.reader import parent_thread, read_rollout
 from ferry.adapters.codex.writer import Rebuild, rollout_stamp, session_meta_for
 from ferry.core import Bundle
 from ferry.ucs import Conversation, Message, TextBlock, Workspace
@@ -284,11 +284,72 @@ def test_detect_finds_the_rollouts(adapter: CodexAdapter) -> None:
     result = adapter.detect()
 
     assert result.installed is True
-    # Three rollouts, one holding only session metadata. A rollout always opens
-    # with records that say nothing about whether anyone spoke.
-    assert result.conversation_count_estimate == 2
+    # Three rollouts; one holds only session metadata and one is a subagent
+    # Codex never lists. A rollout always opens with records that say nothing
+    # about whether anyone spoke, and a subagent thread is indistinguishable
+    # from a conversation by anything except its header.
+    assert result.conversation_count_estimate == 1
     assert any("1 empty" in note for note in result.notes)
     assert result.version == "0.149.0-alpha.4.1"
+
+
+def test_a_subagent_thread_is_not_counted_as_a_conversation(adapter: CodexAdapter) -> None:
+    """Codex writes a subagent its own rollout and never offers it to resume.
+
+    On the developer's machine that was one file in six, so Ferry reported six
+    threads against Codex's five. The same gap as Antigravity's six-versus-two
+    -- found only because the human asked whether the other three adapters had
+    been checked against their own applications rather than against their files.
+    """
+    result = adapter.detect()
+
+    assert any("1 subagent thread" in note for note in result.notes)
+    # Named, not silently subtracted: an unexplained drop from three files to
+    # one conversation is its own kind of wrong.
+    assert not any(note.startswith("1 ") and note.strip() == "1" for note in result.notes)
+
+
+def test_a_subagent_is_recognised_by_its_header_not_by_a_parent_id(source: Path) -> None:
+    """The real subagent fixture carries no ``parent_thread_id`` at all.
+
+    Its parent is in ``session_id``, which on a subagent holds the spawning
+    thread rather than a copy of ``id``. Reading only ``parent_thread_id``
+    would have counted this one as a conversation.
+    """
+    subagent = next(source.rglob(f"*{EDGE_ID}.jsonl"))
+    top_level = next(source.rglob(f"*{BASIC_ID}.jsonl"))
+
+    assert parent_thread(subagent) == UUID(PARENT_ID)
+    assert parent_thread(top_level) is None
+
+
+def test_a_file_that_is_not_a_rollout_has_no_parent(tmp_path: Path) -> None:
+    absent = tmp_path / "gone.jsonl"
+    junk = tmp_path / "junk.jsonl"
+    junk.write_text("not json at all" + chr(10), encoding="utf-8")
+
+    assert parent_thread(absent) is None
+    assert parent_thread(junk) is None
+
+
+def test_export_names_a_subagent_and_counts_it_apart(adapter: CodexAdapter, tmp_path: Path) -> None:
+    """Both numbers, always.
+
+    The conversation count is the one the user can check against Codex; the
+    subagent count explains the extra file in the bundle before they notice it
+    and wonder what it is.
+    """
+    events = list(adapter.export(tmp_path / "bundle"))
+
+    done = next(event for event in events if event.kind == "done")
+    assert done.message == "1 of 1 conversations exported, plus 1 subagent thread they spawned"
+    assert any(
+        event.kind == "progress" and event.message.startswith("subagent of ") for event in events
+    )
+    # Carried, not dropped. The bundle still holds every file.
+    assert sorted(Bundle.open(tmp_path / "bundle").list_conversations()) == sorted(
+        [BASIC_ID, EDGE_ID]
+    )
 
 
 def test_detect_on_a_machine_without_codex(tmp_path: Path) -> None:

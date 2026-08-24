@@ -52,7 +52,7 @@ from ferry.adapters.base import (
     ImportEvent,
     ImportOptions,
 )
-from ferry.adapters.census import census
+from ferry.adapters.census import census, count_of
 from ferry.adapters.dedup import compare_duplicate
 from ferry.adapters.formatcheck import FormatCheck
 from ferry.core import Bundle, Manifest, SourceMachine
@@ -72,18 +72,8 @@ PROJECT_SIDECAR = "project.json"
 _OS_NAMES: dict[str, OSName] = {"Windows": "win32", "Darwin": "darwin", "Linux": "linux"}
 
 
-def _count(number: int, singular: str, plural: str | None = None) -> str:
-    """``"1 image"``, ``"22 images"``.
-
-    A one-line function because the alternative that keeps appearing is
-    "image(s)", and someone reading a count of their own conversations deserves
-    a sentence rather than a placeholder standing in for one.
-    """
-    return f"{number} {singular if number == 1 else (plural or singular + 's')}"
-
-
 def _trajectories(count: int) -> str:
-    return _count(count, "subagent trajectory", "subagent trajectories")
+    return count_of(count, "subagent trajectory", "subagent trajectories")
 
 
 def _os_name() -> OSName:
@@ -191,8 +181,8 @@ class _Tally:
             yield ExportEvent(
                 kind="note",
                 message=(
-                    f"{_count(self.images, 'image was', 'images were')} attached across "
-                    f"{_count(self.conversations_with_images, 'conversation')}. Antigravity "
+                    f"{count_of(self.images, 'image was', 'images were')} attached across "
+                    f"{count_of(self.conversations_with_images, 'conversation')}. Antigravity "
                     "does not record which message an upload belonged to, so they are "
                     "attached to the conversation rather than placed in it."
                 ),
@@ -201,7 +191,7 @@ class _Tally:
             yield ExportEvent(
                 kind="note",
                 message=(
-                    f"{_count(self.checkpoints, 'checkpoint step')} held snapshots of your "
+                    f"{count_of(self.checkpoints, 'checkpoint step')} held snapshots of your "
                     "files rather than conversation, and are not shown as messages. The "
                     "original databases in the bundle still carry them."
                 ),
@@ -212,7 +202,7 @@ class _Tally:
             yield ExportEvent(
                 kind="warning",
                 message=(
-                    f"{_count(self.conversations_with_unknown, 'conversation')} contain "
+                    f"{count_of(self.conversations_with_unknown, 'conversation')} contain "
                     f"{kinds} {listed}, which Ferry has no name for. Those steps were read "
                     "as assistant messages."
                 ),

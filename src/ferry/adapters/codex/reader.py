@@ -62,6 +62,7 @@ __all__ = [
     "OUTPUT_PAYLOADS",
     "PendingAttachment",
     "SessionRead",
+    "parent_thread",
     "read_rollout",
 ]
 
@@ -87,6 +88,65 @@ _EXTENSION_BY_MIME = {
     "image/gif": ".gif",
     "image/webp": ".webp",
 }
+
+
+_SUBAGENT_SOURCE = "subagent"
+
+
+def parent_thread(path: Path) -> UUID | None:
+    """The thread that spawned this one, or ``None`` if a person started it.
+
+    Codex writes a **subagent its own rollout file**, indistinguishable from a
+    conversation by its name, its size or its contents -- and never lists it.
+    On this machine that was one file in six, which is why Ferry reported six
+    threads where Codex offers five to resume. The same mistake as Antigravity's
+    six-versus-two, in a different tool, found only because the human asked
+    whether the other adapters had been checked against their own applications.
+
+    Three fields in ``session_meta`` agree when a thread is a subagent:
+    ``thread_source`` reads ``subagent``, ``source`` becomes an object naming
+    the kind of subagent instead of the string ``vscode``, and
+    ``parent_thread_id`` points at the thread that spawned it. Either of the
+    first two is taken as the answer, and the parent id is what gets returned;
+    requiring all three would make a single renamed field silently restore the
+    old count.
+
+    **Reads only the first line.** ``session_meta`` is always the opening
+    record, and one of these files is 53 MB.
+    """
+    try:
+        with path.open(encoding="utf-8", errors="replace") as handle:
+            first = handle.readline()
+    except OSError:
+        return None
+    try:
+        record = json.loads(first)
+    except ValueError:
+        return None
+    if not isinstance(record, dict) or record.get("type") != "session_meta":
+        return None
+    payload = record.get("payload")
+    if not isinstance(payload, dict):
+        return None
+
+    source = payload.get("source")
+    spawned = payload.get("thread_source") == _SUBAGENT_SOURCE or (
+        isinstance(source, dict) and _SUBAGENT_SOURCE in source
+    )
+    if not spawned:
+        return None
+
+    for key in ("parent_thread_id", "session_id"):
+        # `session_id` is the fallback because on a subagent it holds the
+        # parent's id rather than a second copy of `id` -- established at M4
+        # when overwriting it reparented a subagent to itself.
+        value = payload.get(key)
+        if isinstance(value, str) and value and value != payload.get("id"):
+            try:
+                return UUID(value)
+            except ValueError:
+                continue
+    return None
 
 
 @dataclass(frozen=True)

@@ -208,6 +208,31 @@ partial read. The session id must also be valid hex.
 `session_id` is **not** a second copy of `id`: on a subagent thread it holds the
 **parent** thread's id. Overwriting it reparents the subagent to itself.
 
+### Not every rollout is a conversation
+
+A **subagent gets its own rollout file**, in the same date tree, with the same
+name shape and the same records as a conversation somebody had. Codex never
+offers it to resume. On the reference machine that was **1 file of 6**, so a
+file count reported six threads where Codex lists five.
+
+Three fields in `session_meta` agree when a thread is a subagent:
+
+| Field | In a conversation | In a subagent |
+|---|---|---|
+| `thread_source` | `user` | `subagent` |
+| `source` | the string `vscode` | an object, e.g. `{"subagent": {"other": "guardian"}}` |
+| `parent_thread_id` | absent | the spawning thread's uuid |
+
+`parent_thread_id` is **not always present** — it was absent on the older of the
+two subagent headers examined, where the parent's id was in `session_id`
+instead. So the *decision* is made on `thread_source` or `source`, and the
+parent id is read from `parent_thread_id` first and `session_id` second.
+
+`$CODEX_HOME/session_index.jsonl` is Codex's own list — `id`, `thread_name`,
+`updated_at` — and held exactly the five non-subagent threads. It is used as
+**corroboration only**: it is a cache Codex maintains, while the header is the
+file describing itself.
+
 ### Images
 
 `input_image` blocks carry `image_url` as a **`data:image/png;base64,…` URI** —

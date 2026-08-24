@@ -31,10 +31,10 @@ from ferry.adapters.base import (
     ImportEvent,
     ImportOptions,
 )
-from ferry.adapters.census import census, jsonl_holds
+from ferry.adapters.census import census, count_of, jsonl_holds
 from ferry.adapters.claude_code.writer import remap_prefix
 from ferry.adapters.codex import paths as cx_paths
-from ferry.adapters.codex.reader import SessionRead, read_rollout
+from ferry.adapters.codex.reader import SessionRead, parent_thread, read_rollout
 from ferry.adapters.codex.writer import REBUILD_NOTES, Rebuild, rollout_lines, rollout_stamp
 from ferry.adapters.dedup import compare_duplicate
 from ferry.adapters.formatcheck import FormatCheck
@@ -55,6 +55,10 @@ _OS_NAMES: dict[str, OSName] = {"Windows": "win32", "Darwin": "darwin", "Linux":
 
 
 _MESSAGE_ROLES = frozenset({"user", "assistant"})
+
+
+def _threads(count: int) -> str:
+    return count_of(count, "subagent thread", "subagent threads")
 
 
 def _is_message(record: dict[str, object]) -> bool:
@@ -145,13 +149,24 @@ class CodexAdapter(Adapter):
         except OSError as exc:
             return DetectResult(installed=False, notes=[f"cannot read {sessions}: {exc}"])
 
+        # Count what Codex offers to resume, not what is on disk. A subagent
+        # gets its own rollout file that looks exactly like a conversation and
+        # is never listed -- the same gap Antigravity had, and the reason this
+        # adapter was re-checked against its own application rather than
+        # against its files.
         counted = census(
             [(path.stem, path) for path in rollouts],
             lambda _id, path: jsonl_holds(path, _is_message),
+            hidden=lambda _id, path: parent_thread(path) is not None,
+            hidden_label="",
         )
 
         total = sum(path.stat().st_size for path in rollouts)
         notes.append(f"{total / 1024 / 1024:.0f} MB of transcripts at {sessions}")
+        if counted.hidden:
+            notes.append(
+                f"{_threads(counted.hidden)}, carried with the conversations that spawned them"
+            )
         notes.extend(f"{line} (of {counted.files} rollouts)" for line in counted.notes()[:1])
         notes.extend(counted.notes()[1:])
         databases = cx_paths.state_databases(self._env)
@@ -213,20 +228,44 @@ class CodexAdapter(Adapter):
             return
 
         total = sum(path.stat().st_size for path in rollouts)
+        parents = {path: parent_thread(path) for path in rollouts}
+        # The denominator is the census, not the count of top-level files, so
+        # the export says the same number the scan screen said. An empty
+        # rollout is skipped either way; counting it here would have the two
+        # screens disagree about how many conversations the user has.
+        expected = census(
+            [(path.stem, path) for path in rollouts],
+            lambda _id, path: jsonl_holds(path, _is_message),
+            hidden=lambda _id, path: parents[path] is not None,
+            hidden_label="",
+        ).conversations
         yield ExportEvent(
             kind="started",
-            message=f"{len(rollouts)} sessions, {total / 1024 / 1024:.0f} MB to read",
+            message=f"{expected} conversations, {total / 1024 / 1024:.0f} MB to read",
+            total=len(rollouts),
         )
 
-        exported = 0
+        exported = subagents = 0
         for path in rollouts:
-            for event in self._export_one(bundle, path):
+            for event in self._export_one(bundle, path, parents[path]):
                 if event.kind == "progress":
-                    exported += 1
+                    if parents[path]:
+                        subagents += 1
+                    else:
+                        exported += 1
                 yield event
-        yield ExportEvent(kind="done", message=f"{exported} of {len(rollouts)} sessions exported")
 
-    def _export_one(self, bundle: Bundle, path: Path) -> Iterator[ExportEvent]:
+        # Both numbers, always. The conversation count is the one the user can
+        # check against Codex; the subagent count explains the extra files in
+        # the bundle before they notice them and wonder.
+        detail = f"{exported} of {expected} conversations exported"
+        if subagents:
+            detail += f", plus {_threads(subagents)} they spawned"
+        yield ExportEvent(kind="done", message=detail)
+
+    def _export_one(
+        self, bundle: Bundle, path: Path, parent: UUID | None = None
+    ) -> Iterator[ExportEvent]:
         conversation_id = cx_paths.thread_id_of(path)
         if conversation_id is None:
             yield ExportEvent(kind="skipped", message=f"{path.name}: not a rollout file")
@@ -290,6 +329,10 @@ class CodexAdapter(Adapter):
             detail += f", {len(found.attachments)} images"
         if pasted:
             detail += f", {pasted} pasted files"
+        if parent is not None:
+            # Named as what it is. Otherwise this line is indistinguishable
+            # from a conversation, which is how the miscount started.
+            detail = f"subagent of {str(parent)[:8]}: {detail}"
         yield ExportEvent(kind="progress", conversation_id=str(conversation_id), message=detail)
 
     def _pasted_files(self, bundle: Bundle, conversation_id: UUID, found: SessionRead) -> int:
