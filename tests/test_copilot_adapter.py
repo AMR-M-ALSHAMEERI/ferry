@@ -359,3 +359,57 @@ def test_import_reports_a_bundle_it_cannot_open(tmp_path: Path, target) -> None:
     events = list(CopilotAdapter(target).import_(tmp_path / "nothing", ImportOptions()))
 
     assert [e.kind for e in events] == ["error"]
+
+
+def test_a_duplicate_conversation_id_is_skipped_quietly_when_it_agrees(
+    store: Path, tmp_path: Path
+) -> None:
+    """The same session id really does appear under more than one workspace.
+    One conversation on the probe machine exists in two byte-different files
+    holding identical content, and skipping the second is correct."""
+    workspace_b = cp.workspace_storage() / "ffffffffffffffffffffffffffffffff" / "chatSessions"
+    workspace_b.mkdir(parents=True)
+    original = cp.workspace_storage() / WS_KEY / "chatSessions" / f"{IDS['basic']}.jsonl"
+    (workspace_b / f"{IDS['basic']}.jsonl").write_bytes(original.read_bytes())
+
+    events = list(CopilotAdapter().export(tmp_path / "bundle"))
+
+    skipped = [e for e in events if e.kind == "skipped" and e.conversation_id == str(IDS["basic"])]
+    assert len(skipped) == 1
+    assert skipped[0].message == "already in bundle"
+    assert not [e for e in events if e.kind == "warning" and "longer copy" in e.message]
+
+
+def test_a_longer_duplicate_is_reported_rather_than_swallowed(store: Path, tmp_path: Path) -> None:
+    """Skipping by id is only right while the two copies agree. If the one
+    being skipped holds more messages, the bundle keeps the shorter one and
+    turns are lost without a word."""
+    import json
+
+    long_dir = cp.workspace_storage() / "ffffffffffffffffffffffffffffffff" / "chatSessions"
+    long_dir.mkdir(parents=True)
+    original = cp.workspace_storage() / WS_KEY / "chatSessions" / f"{IDS['basic']}.jsonl"
+    extra = {
+        "kind": 2,
+        "k": ["requests"],
+        "v": [
+            {
+                "requestId": "r-extra",
+                "message": {"text": "one more question", "parts": []},
+                "response": [{"value": "and one more answer.", "supportHtml": False}],
+            }
+        ],
+    }
+    (long_dir / f"{IDS['basic']}.jsonl").write_text(
+        original.read_text(encoding="utf-8") + json.dumps(extra) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    events = list(CopilotAdapter().export(tmp_path / "bundle"))
+
+    warnings = [e for e in events if e.kind == "warning" and "longer copy" in e.message]
+    assert len(warnings) == 1
+    assert "not carried" in warnings[0].message
+    skipped = [e for e in events if e.kind == "skipped" and e.conversation_id == str(IDS["basic"])]
+    assert "longer copy exists" in skipped[0].message

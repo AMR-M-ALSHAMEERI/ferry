@@ -157,15 +157,49 @@ class CopilotAdapter(Adapter):
                 yield event
         yield ExportEvent(kind="done", message=f"{exported} of {len(sessions)} sessions exported")
 
+    def _skip_duplicate(
+        self, bundle: Bundle, key: str, path: Path, conversation_id: UUID
+    ) -> Iterator[ExportEvent]:
+        """Skip a conversation already in the bundle -- but check it first.
+
+        The same session id really does appear under more than one workspace:
+        one conversation on this machine exists in two, byte-different files
+        holding identical content. Skipping the second is right.
+
+        It is only right while the two agree. If the copy being skipped holds
+        **more** messages, the bundle has the shorter one and silently keeping
+        it would lose turns -- so that case is reported rather than swallowed.
+        Reading the file to find out is affordable here: ten real transcripts
+        totalled 1.65 MB.
+        """
+        message = "already in bundle"
+        try:
+            mine = read_session(path, key, self._env).conversation
+            theirs = bundle.load_conversation(conversation_id)
+        except (OSError, ValueError):
+            mine = theirs = None
+
+        if mine is not None and theirs is not None and len(mine.messages) > len(theirs.messages):
+            yield ExportEvent(
+                kind="warning",
+                conversation_id=str(conversation_id),
+                message=(
+                    f"{path.name} holds {len(mine.messages)} messages but the bundle already "
+                    f"has this conversation with {len(theirs.messages)}; the longer copy was "
+                    "not carried"
+                ),
+            )
+            message = "already in bundle (a longer copy exists - see warning)"
+
+        yield ExportEvent(kind="skipped", conversation_id=str(conversation_id), message=message)
+
     def _export_one(self, bundle: Bundle, key: str, path: Path) -> Iterator[ExportEvent]:
         conversation_id = cp_paths.session_id_of(path)
         if conversation_id is None:
             yield ExportEvent(kind="skipped", message=f"{path.name}: not a conversation file")
             return
         if bundle.has_conversation(conversation_id):
-            yield ExportEvent(
-                kind="skipped", conversation_id=str(conversation_id), message="already in bundle"
-            )
+            yield from self._skip_duplicate(bundle, key, path, conversation_id)
             return
 
         found = read_session(path, key, self._env)
