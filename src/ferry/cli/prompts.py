@@ -24,6 +24,7 @@ from prompt_toolkit.formatted_text import StyleAndTextTuples
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import HSplit, Layout, Window
 from prompt_toolkit.layout.controls import FormattedTextControl
+from prompt_toolkit.lexers import SimpleLexer
 from prompt_toolkit.shortcuts import CompleteStyle, PromptSession
 from prompt_toolkit.styles import Style
 
@@ -37,7 +38,9 @@ __all__ = [
     "SelectorModel",
     "build_bindings",
     "path_bindings",
+    "path_header",
     "path_hints",
+    "path_style",
     "run_confirm",
     "run_path",
     "run_select",
@@ -505,13 +508,61 @@ def path_hints(theme: Theme, *, has_default: bool) -> Fragments:
     screen that never said escape was available. A key that works and is not
     mentioned is a key nobody presses.
     """
-    dim = _style_for(theme, "ferry.dim")
+    dim = _style_for(theme, "dim")
     sep = theme.icons.separator
     keys = [f"tab completes  {sep}  enter accept"]
     if has_default:
         keys.append(f"{sep}  enter alone takes the suggestion")
     keys.append(f"{sep}  esc cancel")
     return [(dim, "  " + " ".join(keys))]
+
+
+def path_header(theme: Theme, question: str) -> Fragments:
+    """The prompt line itself, built apart so its styles can be checked.
+
+    They could not be, and were wrong: this asked :func:`_style_for` for
+    ``"ferry.dim"`` and ``"ferry.text"`` where it keys on ``"dim"`` and
+    ``"text"``. An unknown token returns an empty style rather than raising, so
+    the prompt rendered in the terminal's default and looked like a theme
+    choice rather than a mistake.
+    """
+    return [
+        (_style_for(theme, "dim"), f"  {theme.icons.info} "),
+        (_style_for(theme, "text"), f"{question}  "),
+    ]
+
+
+def path_style(theme: Theme) -> Style:
+    """Colours for the path prompt, taken from the theme like everything else.
+
+    The typed path is the **accent** -- amber under harbor -- for the same
+    reason the filter text is: it is the part the person is producing, and it
+    should be the thing their eye lands on. It was rendering in the terminal's
+    default, which under harbor made this the one prompt in Ferry that ignored
+    the theme entirely.
+
+    The token names matter and are easy to get wrong: :func:`_style_for` keys
+    on ``"accent"``, not ``"ferry.accent"``. Passing the prefixed name returns
+    an empty style, which is not an error and looks exactly like a theme with
+    no colours.
+    """
+    accent = _style_for(theme, "accent")
+    dim = _style_for(theme, "dim")
+    primary = _style_for(theme, "primary")
+    return Style.from_dict(
+        {
+            "answer": accent,
+            # The toolbar is a plain line under the prompt, not a reversed bar
+            # across the terminal -- prompt_toolkit's default would put a solid
+            # block where every other Ferry screen has a quiet hint.
+            "bottom-toolbar": f"noreverse {dim}".strip(),
+            "bottom-toolbar.text": f"noreverse {dim}".strip(),
+            "completion-menu.completion": dim,
+            "completion-menu.completion.current": f"reverse {accent}".strip(),
+            "scrollbar.background": dim,
+            "scrollbar.button": primary,
+        }
+    )
 
 
 def run_path(question: str, *, theme: Theme, default: str = "") -> str | None:
@@ -532,17 +583,14 @@ def run_path(question: str, *, theme: Theme, default: str = "") -> str | None:
     Returns:
         The path, or ``None`` if the user backed out.
     """
-    icon = theme.icons.info
     session: PromptSession[str | None] = PromptSession(
-        [
-            (_style_for(theme, "ferry.dim"), f"  {icon} "),
-            (_style_for(theme, "ferry.text"), f"{question}  "),
-        ],
+        path_header(theme, question),
         completer=PathCompleter(expanduser=True),
         complete_style=CompleteStyle.MULTI_COLUMN,
         key_bindings=path_bindings(),
+        lexer=SimpleLexer("class:answer"),
         bottom_toolbar=lambda: path_hints(theme, has_default=bool(default)),
-        style=Style.from_dict({"bottom-toolbar": "noreverse"}),
+        style=path_style(theme),
     )
     return session.prompt(default=default)
 

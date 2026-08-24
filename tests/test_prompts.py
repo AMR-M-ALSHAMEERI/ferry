@@ -837,3 +837,72 @@ def prompts_path_hints(*, has_default: bool):  # type: ignore[no-untyped-def]
     from ferry.cli.prompts import path_hints
 
     return path_hints(THEMES["compass"], has_default=has_default)
+
+
+class TestPathPromptTheme:
+    """The path prompt follows the theme like every other screen.
+
+    It did not. :func:`_style_for` keys on ``"dim"`` and ``"accent"``, and this
+    prompt asked it for ``"ferry.dim"`` and ``"ferry.text"``. An unknown token
+    returns an empty style rather than raising, so every part of this prompt
+    rendered in the terminal's default -- indistinguishable from a theme with
+    no colours, and the reason the typed path came out white under harbor.
+    """
+
+    @pytest.mark.parametrize("name", ["harbor", "compass", "classic"])
+    def test_the_typed_path_is_the_accent(self, name: str) -> None:
+        """The part the person is producing, so the part their eye lands on."""
+        from ferry.cli.prompts import path_style
+
+        theme = THEMES[name]
+        rules = dict(path_style(theme).style_rules)
+
+        assert rules["answer"], f"{name} left the typed path unstyled"
+        assert theme.accent.lstrip("#") in rules["answer"]
+
+    @pytest.mark.parametrize("name", ["harbor", "compass", "classic"])
+    def test_the_prompt_line_asks_for_tokens_that_exist(self, name: str) -> None:
+        """Compared against the resolver, not against "is it coloured".
+
+        ``classic`` sets ``text="default"`` on purpose -- the terminal's own
+        foreground -- so an empty style there is the theme being honoured, not
+        a token being missed. What must hold is that the prompt asks for the
+        names :func:`_style_for` actually knows.
+        """
+        from ferry.cli.prompts import path_header
+
+        theme = THEMES[name]
+        styles = [style for style, _ in path_header(theme, "Where?")]
+
+        assert styles == [_style_for(theme, "dim"), _style_for(theme, "text")]
+        assert styles[0], f"{name} rendered the prompt icon unstyled"
+
+    @pytest.mark.parametrize("name", ["harbor", "compass", "classic"])
+    def test_the_key_hints_are_styled(self, name: str) -> None:
+        from ferry.cli.prompts import path_hints
+
+        styles = [style for style, _ in path_hints(THEMES[name], has_default=True)]
+
+        assert all(styles), f"{name} rendered the key hints unstyled"
+
+    def test_mono_stays_uncoloured(self) -> None:
+        """An empty style is prompt_toolkit's "leave it alone"."""
+        from ferry.cli.prompts import path_header, path_hints, path_style
+
+        theme = THEMES["mono"]
+
+        assert dict(path_style(theme).style_rules)["answer"] == ""
+        assert all(style == "" for style, _ in path_header(theme, "Where?"))
+        assert all(style == "" for style, _ in path_hints(theme, has_default=False))
+
+    def test_the_toolbar_is_a_line_not_a_bar(self) -> None:
+        """prompt_toolkit reverses the bottom toolbar by default.
+
+        A solid block across the terminal where every other Ferry screen has a
+        quiet grey hint.
+        """
+        from ferry.cli.prompts import path_style
+
+        rules = dict(path_style(THEMES["harbor"]).style_rules)
+
+        assert "noreverse" in rules["bottom-toolbar"]
