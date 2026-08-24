@@ -86,6 +86,18 @@ def scan(ui: UI, adapters: list[Adapter] | None = None) -> list[tuple[Adapter, D
         )
         for adapter, result in results
     )
+
+    # Caveats are shown every run, not folded into the table. An adapter that
+    # reads a reverse-engineered format has to say so before the user relies
+    # on it, not in a note they would have to go looking for.
+    shown = False
+    for adapter, result in results:
+        for caveat in result.caveats:
+            ui.warn(f"{adapter.display_name}: {caveat}")
+            shown = True
+    if shown:
+        ui.blank()
+
     ui.blank()
     return results
 

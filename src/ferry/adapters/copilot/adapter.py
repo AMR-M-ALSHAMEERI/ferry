@@ -51,6 +51,16 @@ __all__ = ["TOOL", "CopilotAdapter"]
 
 TOOL: Final[ToolName] = "copilot"
 
+TESTED_AGAINST: Final = (
+    "storage is undocumented and may change with VS Code updates. Tested against VS Code 1.134.0."
+)
+"""Shown on every scan. Required by PLAN.md M5's exit criteria.
+
+Everything Ferry knows about this format was read off one machine and out of
+VS Code's own bundle. That is a fine basis for an adapter and a poor basis for
+silent confidence, so the user is told each time rather than once.
+"""
+
 _OS_NAMES: dict[str, OSName] = {"Windows": "win32", "Darwin": "darwin", "Linux": "linux"}
 
 
@@ -95,16 +105,12 @@ class CopilotAdapter(Adapter):
         empty = sum(1 for key, _ in sessions if not key)
         if empty:
             notes.append(f"{empty} started with no folder open")
-        notes.append(
-            "Copilot Chat storage is undocumented and may change with VS Code updates. "
-            "Tested against VS Code 1.134.0."
-        )
-
         return DetectResult(
             installed=True,
             data_paths=[user],
             conversation_count_estimate=len(sessions),
             notes=notes,
+            caveats=[TESTED_AGAINST],
         )
 
     # ---------- export ----------

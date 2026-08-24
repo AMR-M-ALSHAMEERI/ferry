@@ -45,6 +45,14 @@ class DetectResult:
     data_paths: list[Path] = field(default_factory=list)
     conversation_count_estimate: int = 0
     notes: list[str] = field(default_factory=list)
+    caveats: list[str] = field(default_factory=list)
+    """Things the user must be told before trusting this adapter.
+
+    Separate from ``notes`` because notes are detail shown on request, while a
+    caveat is shown every time. Copilot Chat's storage is reverse-engineered
+    and VS Code can change it in any release; a user has to know that before
+    they rely on the export, not after.
+    """
 
 
 @dataclass(frozen=True)

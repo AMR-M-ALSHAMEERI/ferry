@@ -61,12 +61,13 @@ def test_detect_finds_the_sessions(store: Path) -> None:
 
 
 def test_detect_warns_that_the_format_is_undocumented(store: Path) -> None:
-    """Required by PLAN.md M5: this storage is reverse-engineered and VS Code
-    can change it in any release."""
+    """Required by PLAN.md M5's exit criteria, and a caveat rather than a note:
+    everything Ferry knows about this format came off one machine, so the user
+    is told on every scan instead of once in detail they must go looking for."""
     result = CopilotAdapter().detect()
 
-    assert any("undocumented" in note for note in result.notes)
-    assert any("1.134.0" in note for note in result.notes)
+    assert any("undocumented" in caveat for caveat in result.caveats)
+    assert any("1.134.0" in caveat for caveat in result.caveats)
 
 
 def test_detect_reports_not_installed_when_vs_code_is_absent(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -183,11 +184,6 @@ def test_export_reports_an_error_when_there_is_nothing_to_read(
     events = list(CopilotAdapter().export(tmp_path / "bundle"))
 
     assert [e.kind for e in events] == ["error"]
-
-
-# --------------------------------------------------------------------------
-# import
-# --------------------------------------------------------------------------
 
 
 # --------------------------------------------------------------------------

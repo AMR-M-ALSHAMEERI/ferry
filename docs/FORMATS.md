@@ -232,3 +232,139 @@ that path is **untested**, because the picker cannot be driven headlessly.
 
 One rollout was **53 MB**; six sessions totalled **121 MB**. Public reports
 describe files an order of magnitude larger. Nothing may read one whole.
+
+---
+
+## GitHub Copilot Chat
+
+Verified against VS Code **1.134.0** on Windows, over 135 delta records in 10
+sessions.
+
+**Copilot Chat is built into VS Code, not a marketplace extension.** There is
+no extension version to pin — pin the VS Code version.
+
+### Where it lives
+
+```
+%APPDATA%\Code\User\                        macOS: ~/Library/Application Support/Code/User
+                                            Linux: ~/.config/Code/User
+    workspaceStorage\<key>\
+        chatSessions\<uuid>.jsonl             a conversation, folder open
+        state.vscdb                           this workspace's chat list
+        workspace.json                        which folder or .code-workspace
+    workspaceStorage\vscode-chat-images\
+        image-<epoch ms>.png                  shared across every workspace
+    globalStorage\
+        emptyWindowChatSessions\<uuid>.jsonl  a conversation, no folder open
+        state.vscdb                           the no-folder chat list
+        github.copilot-chat\session-store.db  Copilot CLI sessions — NOT read
+```
+
+`session-store.db` is a separate relational store belonging to Copilot CLI,
+with its own WAL. Ferry v0.1 does not read it.
+
+### The workspace key
+
+The directory name under `workspaceStorage` is a digest, and **for a folder it
+covers the folder's creation time as well as its path** — so it cannot be
+derived from the path alone. Read from VS Code's `main.js` and verified against
+four real directories.
+
+| Window | Key |
+|---|---|
+| Folder open | `md5(fsPath + stamp)` — stamp is `st_ino` on Linux, birth time in ms on macOS and Windows |
+| `.code-workspace` file | `md5(fsPath)`, lowercased except on Linux |
+| No folder open | `Date.now() + random` — not derivable, and never needs to be |
+
+`fsPath` uses backslashes and a **lowercase drive letter** on Windows.
+
+On Windows, `st_birthtime` does not exist before Python 3.12; `st_ctime` is the
+creation time there. On macOS `st_ctime` is the metadata-change time and must
+not be substituted.
+
+### The transcript is a log of edits, not a document
+
+Every line is a change to the conversation built so far.
+
+| `kind` | Meaning |
+|---|---|
+| 0 | Full snapshot — `v` replaces the document |
+| 1 | Set `v` at path `k` |
+| 2 | Append `v` to the list at path `k` |
+
+**A reader must replay the whole file.** On the probe machine *every* session
+had `requests: []` in its snapshot, with all real turns arriving as later
+appends. Reading only the snapshot returns a well-formed conversation
+containing no messages, and reports success.
+
+**A `kind: 2` record may also carry `i`.** That is not where the new items go —
+it is where the existing list is **cut** before they are added, because VS Code
+revises a response while it streams and re-sends the tail. Ignoring it does not
+lose data, it duplicates it: 44 blocks where the conversation held 34.
+
+Only kinds 0, 1 and 2 have been observed. `i` appeared in none of the first 18
+records examined and only showed up once a conversation used tools — assume the
+set is incomplete.
+
+### A turn
+
+```
+requestId, message {text, parts}, response[], modelId, timestamp,
+responseTimestamp, variableData, hiddenFromTranscript, agent, result,
+codeCitations, contentReferences, followups, modeInfo, modelState,
+outputBuffer, promptTokens, completionTokens, timeSpentWaiting, ...
+```
+
+`hiddenFromTranscript` marks a turn Copilot hides from its own display.
+
+### Response blocks — text has no discriminator
+
+| `kind` | Maps to |
+|---|---|
+| *(absent)* | **Assistant text.** A `MarkdownString`: has `value`, has no `kind`. |
+| `thinking` | Reasoning — but see below |
+| `toolInvocationSerialized` | Tool call (`toolId`, `toolCallId`, `toolSpecificData`) and its `resultDetails` |
+| `inlineReference` | A file or symbol named inside the prose |
+| `mcpServersStarting`, `autoModeResolution` | Interface narration, not conversation |
+
+**Three different key sets appear for the untagged text block** in real data,
+differing only in which support flags are present. Match on *"has `value`, has
+no `kind`"* — matching a key set drops the assistant's answer as soon as VS
+Code adds a flag.
+
+**Every `thinking` block observed was empty** — half `""`, half `[]`. Copilot
+writes the marker without the reasoning.
+
+### Images
+
+Pasted images are stored **inline in the transcript**, base64 in
+`variableData.variables[]` with `kind: "image"` and a `mimeType`. The copy in
+`vscode-chat-images\` is not needed to recover them.
+
+`kind: "file"` variables are *references* to files, holding a path and no
+content.
+
+### The chat list
+
+`state.vscdb` is `ItemTable(key TEXT UNIQUE ON CONFLICT REPLACE, value BLOB)`.
+The key `chat.ChatSessionStore.index` holds the list VS Code renders:
+
+```json
+{"version": 1, "entries": {"<uuid>": {
+    "sessionId", "title", "lastMessageDate", "timing": {"created"},
+    "initialLocation", "hasPendingEdits", "isEmpty", "isExternal",
+    "lastResponseState", "permissionLevel"}}}
+```
+
+**There are two of these.** `globalStorage\state.vscdb` lists the no-folder
+conversations; each workspace's own lists that workspace's. A transcript
+written without its entry is a conversation VS Code will never show.
+
+### Timestamps
+
+Epoch **milliseconds**, unlike Claude Code's ISO strings.
+
+### Size
+
+Ten sessions totalled **1.65 MB**; the largest replayed to 403 KB. Small enough
+that a bundle carries the whole replayed document.

@@ -505,3 +505,37 @@ def test_the_mono_banner_is_pure_ascii() -> None:
     ui, buf = _terminal_ui(MONO)
     ui.banner(animate=True)
     assert buf.getvalue().isascii()
+
+
+def test_a_scan_shows_every_adapter_caveat(capsys) -> None:  # type: ignore[no-untyped-def]
+    """A caveat is not a note. Notes are detail; a caveat is something the user
+    must know before they trust an export, so it is printed on every scan.
+    PLAN.md M5 requires it for Copilot Chat specifically.
+    """
+    from ferry.adapters.base import Adapter, DetectResult
+    from ferry.cli.menu import scan
+    from ferry.cli.theme import MONO, Capability
+    from ferry.cli.ui import UI
+
+    class _Caveated(Adapter):
+        name = "demo"
+        display_name = "Demo Tool"
+
+        def detect(self) -> DetectResult:
+            return DetectResult(installed=True, caveats=["the format is guesswork"])
+
+        def export(self, dest_bundle_dir):  # type: ignore[no-untyped-def]
+            yield from ()
+
+        def import_(self, bundle_dir, options):  # type: ignore[no-untyped-def]
+            yield from ()
+
+    ui = UI(MONO, capability=Capability.PLAIN)
+    buffer = io.StringIO()
+    ui.console.file = buffer
+    ui.console.width = 100
+
+    scan(ui, [_Caveated()])
+
+    assert "the format is guesswork" in buffer.getvalue()
+    assert "Demo Tool" in buffer.getvalue()
