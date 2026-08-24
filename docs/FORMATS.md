@@ -13,8 +13,8 @@ rather than a fact.
 |---|---|---|
 | Claude Code | Documented below | 2.1.229 – 2.1.237, Windows |
 | OpenAI Codex | Documented below | 0.149.0-alpha.4.1, Windows |
-| GitHub Copilot Chat | Not yet | — |
-| Google Antigravity | Not yet | — |
+| GitHub Copilot Chat | Documented below | VS Code 1.134.0, Windows |
+| Google Antigravity | Documented below | 2.8.1, Windows |
 
 ---
 
@@ -373,3 +373,170 @@ Epoch **milliseconds**, unlike Claude Code's ISO strings.
 
 Ten sessions totalled **1.65 MB**; the largest replayed to 403 KB. Small enough
 that a bundle carries the whole replayed document.
+
+---
+
+## Google Antigravity
+
+Verified against **2.8.1 on Windows**.
+
+The hardest of the four, and hard in a different way: nothing is hidden or
+encrypted, but nothing is text either.
+
+### Layout
+
+```
+~/.gemini/antigravity/conversations/<uuid>.db          one SQLite database per conversation
+~/.gemini/antigravity/brain/<uuid>/                    that conversation's working directory
+    .user_uploaded/media*.png                          images you attached
+    .system_generated/logs/transcript.jsonl            a plain-JSON log of the same conversation
+~/.gemini/config/projects/<project-uuid>.json          the folder a conversation belongs to
+```
+
+Same path on every operating system — there is no platform branch, unlike the
+other three tools.
+
+A conversation is **one database per conversation**, not one file holding many.
+Each `.db` is accompanied by `-wal` and `-shm` sidecars that are part of the
+same database; the newest messages of an open conversation live in the `-wal`,
+so anything that copies only the `.db` gets a conversation missing its most
+recent turns, and looks entirely successful doing it.
+
+Each `brain/<uuid>/` is also a git repository. It tracks the files the agent
+edited, not the conversation, so Ferry neither reads nor reproduces it.
+
+### Not every database is a conversation
+
+**This is the first thing to get right, because getting it wrong triples the
+count.**
+
+When the agent spawns a subagent, that subagent gets its **own database** in
+`conversations/`, with the same tables, the same step types and its own uuid.
+Antigravity never lists it: it is part of the conversation that spawned it. On
+the reference machine there were **6 databases for the 2 conversations the app
+shows** - three subagents under one, one under the other.
+
+Nothing in the database's own metadata distinguishes them. `trajectory_type`,
+`source` and `has_subtrajectory` are identical across all six, and
+`parent_references` is empty in every subagent.
+
+The link is in `trajectory_metadata_blob`, and two fields carry it from
+opposite directions:
+
+| Field | In a top-level conversation | In a subagent |
+|---|---|---|
+| 5 | absent | the parent's uuid |
+| 6 | the conversation's own uuid | the parent's uuid |
+
+Both agree on all six, so Ferry requires both and treats a disagreement as
+top-level — showing a subagent is a far smaller harm than hiding something the
+user wrote.
+
+Counting `INVOKE_SUBAGENT` (127) steps in the parent does **not** work: one
+parent has 2 such steps and 3 children.
+
+The subagent databases still have to be carried. The parent conversation refers
+to them, so restoring it without them leaves a conversation with pieces
+missing.
+
+### Protobuf inside SQLite
+
+The tables are ordinary; the columns are not. `steps`, `gen_metadata`,
+`executor_metadata` and `trajectory_metadata_blob` hold **protobuf blobs**, and
+that is where the conversation is. On the reference machine 7,716 of 7,716
+blobs parse. **Nothing is compressed** — 18 byte sequences resembling gzip or
+zlib headers, none of which decompressed.
+
+Every payload begins `08 XX`: protobuf field 1, a varint, holding the step type
+itself. That makes each blob self-identifying.
+
+`steps.step_payload` is a oneof in all but name. Field 5 carries metadata
+common to every step, and each step type puts its content at **its own field
+number** — so the field paths share no prefix:
+
+| Step type | Text at |
+|---|---|
+| USER_INPUT (14) | `19.2` — what you typed |
+| PLANNER_RESPONSE (15) | `20.1` and `20.8`, the same text twice |
+| RUN_COMMAND (21) | `56.21.1.1` |
+| SYSTEM_MESSAGE (101) | `114.4.3` |
+
+`steps.metadata` field `1.1` is the step's time in epoch **seconds** — present
+in every step of every conversation.
+
+### The step type enum, and the one value nobody can name
+
+`steps.step_type` is an undocumented integer. Seventeen of its values are
+established: 5 CODE_ACTION, 7 GREP_SEARCH, 8 VIEW_FILE, 9 LIST_DIRECTORY, 14
+USER_INPUT, 15 PLANNER_RESPONSE, 17 ERROR_MESSAGE, 21 RUN_COMMAND, 23
+CHECKPOINT, 31 READ_URL_CONTENT, 33 SEARCH_WEB, 91 GENERATE_IMAGE, 98
+CONVERSATION_HISTORY, 101 SYSTEM_MESSAGE, 127 INVOKE_SUBAGENT, 132 GENERIC,
+138 ASK_QUESTION.
+
+**Type 28 is not among them.** It occurs in the databases and never once in the
+transcript, so there is no evidence for what it is, and it is left unnamed
+rather than given a plausible one.
+
+### The transcript is a cross-check, not a source
+
+`brain/<uuid>/.system_generated/logs/transcript.jsonl` is plain JSON with
+`{type, source, status, step_index, created_at, content, tool_calls?,
+thinking?, truncated_fields?}`. Because it names its step types in words and
+`step_index` refers to `steps.idx`, it is how every field mapping above was
+established rather than guessed.
+
+Two things stop it being a substitute for the database:
+
+- **It is lossy.** 9.8% of its entries carry `truncated_fields`.
+- **Its `content` is a rendering, not the stored string** — routinely *longer*
+  than the field it came from. Only 3 of 118 user messages were 95% covered by
+  the stored text; the median was 57.7%.
+
+And `step_index` is **many-to-one**: one step can produce several transcript
+lines. Anything assuming one line per step will report conflicts that are not
+conflicts.
+
+So the database holds what was stored, the transcript holds how it was
+displayed, and neither alone reconstructs what the user saw.
+
+### Absolute paths, in four spellings
+
+Paths are embedded *inside* the blobs, at **at least fourteen distinct field
+paths**, three of them with over 900 occurrences. And the same path is written
+four different ways:
+
+```
+C:\Users\Dell\Project                    plain, backslashes
+C:/Users/Dell/Project                    plain, forward slashes
+file:///c:/Users/Dell/Project            URI, lowercase drive
+file:///c%3A%5CUsers%5CDell%5CProject    URI, percent-encoded, backslashes
+```
+
+The drive letter's case is inconsistent between them, within a single database.
+
+**A path cannot be replaced by a byte-level search and replace.** Every
+length-delimited field is preceded by its length and every enclosing message by
+its own, so changing a path's length leaves a chain of prefixes describing a
+message that no longer exists. The blob still opens, and decodes into nonsense.
+Rewriting requires decode, edit, re-encode.
+
+### Projects
+
+`trajectory_metadata_blob` field 18 names a project; `~/.gemini/config/
+projects/<id>.json` describes it. The folder is a `folderUri` in the
+percent-encoded spelling, under either `folderUri` directly or nested inside
+`gitFolder` when the folder is a git repository. A conversation whose project
+does not exist has nowhere to be filed.
+
+### Attachments
+
+`brain/<uuid>/.user_uploaded/`, as real files rather than base64 inside the
+transcript. Two filename spellings occur in roughly equal numbers —
+`media_<epoch_ms>.png` **and** `media__<epoch_ms>.png`, with two underscores.
+Nothing records which message an upload belonged to.
+
+### Size
+
+Six conversations totalled **31.9 MB** across 2,725 steps. The bulk is
+CHECKPOINT steps, which hold file snapshots rather than conversation and reach
+758 KB in a single blob.

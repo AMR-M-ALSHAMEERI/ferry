@@ -29,7 +29,20 @@ __all__ = [
     "list_adapters",
 ]
 
-EventKind = Literal["started", "progress", "skipped", "warning", "error", "done"]
+EventKind = Literal["started", "progress", "skipped", "note", "warning", "error", "done"]
+"""What an event is, which decides how loudly it is shown.
+
+``note`` and ``warning`` are separated because they were not, and everything
+came out looking alarming. A note is a fact about the format the user may want
+to know -- *"22 images were attached; Antigravity does not record which message
+they belonged to"*. A warning is something that may have cost them fidelity --
+*"this conversation contains a step type Ferry has no name for"*. Rendering the
+first as the second teaches people that the warning marker means nothing.
+
+Adapters should emit these **already aggregated**, once per export, rather than
+once per conversation. The same sentence repeated four times with different
+numbers in front of it is not four pieces of information.
+"""
 
 
 @dataclass(frozen=True)
@@ -63,6 +76,18 @@ class ExportEvent:
     conversation_id: str | None = None
     message: str = ""
 
+    total: int | None = None
+    """How many items this run will actually work through, on a ``started`` event.
+
+    The screen otherwise sizes its bar from ``detect()``, which counts
+    *conversations* -- and an adapter can have more work than that. Antigravity
+    carries a subagent trajectory for each conversation that spawned one, so
+    two conversations are six pieces of work, and the bar read "6/2".
+
+    The adapter knows; ``detect()`` guesses. Left ``None`` by adapters whose
+    work is one item per conversation.
+    """
+
 
 @dataclass(frozen=True)
 class ImportEvent:
@@ -71,6 +96,18 @@ class ImportEvent:
     kind: EventKind
     conversation_id: str | None = None
     message: str = ""
+
+    total: int | None = None
+    """How many items this run will actually work through, on a ``started`` event.
+
+    The screen otherwise sizes its bar from ``detect()``, which counts
+    *conversations* -- and an adapter can have more work than that. Antigravity
+    carries a subagent trajectory for each conversation that spawned one, so
+    two conversations are six pieces of work, and the bar read "6/2".
+
+    The adapter knows; ``detect()`` guesses. Left ``None`` by adapters whose
+    work is one item per conversation.
+    """
 
 
 @dataclass(frozen=True)

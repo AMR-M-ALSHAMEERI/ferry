@@ -14,7 +14,7 @@ from uuid import UUID
 import pytest
 
 from ferry.adapters.copilot import paths as cp
-from ferry.adapters.copilot.adapter import TESTED_VERSION, CopilotAdapter
+from ferry.adapters.copilot.adapter import CopilotAdapter
 from ferry.core import Bundle
 
 FIXTURES = Path(__file__).parent / "fixtures" / "copilot"
@@ -53,46 +53,53 @@ def store(tmp_path: Path, monkeypatch) -> Path:  # type: ignore[no-untyped-def]
 # --------------------------------------------------------------------------
 
 
-def test_detect_finds_the_sessions(store: Path) -> None:
+def test_detect_counts_conversations_not_session_files(store: Path) -> None:
+    """VS Code writes a session file whenever a chat panel opens.
+
+    On the machine this was written on that is 12 of 18 files, so counting
+    files reported more than three times as many conversations as VS Code
+    lists -- and the gap grows with use.
+    """
     result = CopilotAdapter().detect()
 
     assert result.installed
-    assert result.conversation_count_estimate == 4
+    assert result.conversation_count_estimate == 3
+    assert any("empty" in note for note in result.notes)
 
 
-def test_a_matching_vs_code_version_says_nothing(store: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    """A warning shown on every scan of a version already verified is noise,
-    and a warning people have learned to scroll past is worse than none - it is
-    still there when it finally matters and they no longer read it."""
-    monkeypatch.setattr(cp, "vscode_version", lambda env=None: TESTED_VERSION)
+def test_a_new_vs_code_version_says_nothing_if_the_format_is_unchanged(
+    store: Path,
+    monkeypatch,  # type: ignore[no-untyped-def]
+) -> None:
+    """VS Code updates monthly and almost never changes chat storage.
 
-    result = CopilotAdapter().detect()
-
-    assert result.caveats == []
-    assert result.version == TESTED_VERSION
-
-
-def test_a_different_vs_code_version_is_warned_about(store: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    """The case the warning exists for. This storage is undocumented, so a
-    release Ferry has never seen can change it without notice."""
+    A caveat tied to the version number would appear within weeks of release
+    and never leave, and people would learn to scroll past it -- so it would
+    still be there, unread, on the release that finally broke something. What
+    is checked is the format; see tests/test_formatcheck.py.
+    """
     monkeypatch.setattr(cp, "vscode_version", lambda env=None: "1.999.0")
 
     result = CopilotAdapter().detect()
 
-    assert len(result.caveats) == 1
-    assert "1.999.0" in result.caveats[0]
-    assert TESTED_VERSION in result.caveats[0]
-    assert "undocumented" in result.caveats[0]
+    assert result.caveats == []
+    assert result.version == "1.999.0"
 
 
-def test_an_undetectable_vs_code_version_is_warned_about(store: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    """Not knowing is not the same as matching, and must not be treated as it."""
+def test_an_undetectable_version_is_not_a_caveat_on_its_own(
+    store: Path,
+    monkeypatch,  # type: ignore[no-untyped-def]
+) -> None:
+    """Not knowing the version says nothing about the format.
+
+    Ferry can read the transcripts and find them exactly as expected without
+    ever learning what wrote them.
+    """
     monkeypatch.setattr(cp, "vscode_version", lambda env=None: None)
 
     result = CopilotAdapter().detect()
 
-    assert len(result.caveats) == 1
-    assert "could not determine" in result.caveats[0]
+    assert result.caveats == []
 
 
 def test_detect_reports_not_installed_when_vs_code_is_absent(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -183,9 +190,11 @@ def test_what_could_not_be_carried_is_reported(store: Path, tmp_path: Path) -> N
     for a release."""
     events = list(CopilotAdapter().export(tmp_path / "bundle"))
 
-    warnings = " ".join(e.message for e in events if e.kind == "warning")
-    assert "thinking (no text stored)" in warnings
-    assert "kind 7" in warnings
+    # Notes and warnings both count here: what matters is that it is said, and
+    # these are remarks about the format rather than fidelity losses.
+    said = " ".join(e.message for e in events if e.kind in ("note", "warning"))
+    assert "thinking (no text stored)" in said
+    assert "kind 7" in said
 
 
 def test_a_second_export_into_the_same_bundle_skips_what_is_there(

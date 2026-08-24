@@ -32,7 +32,9 @@ from ferry.adapters.base import (
     ImportEvent,
     ImportOptions,
 )
+from ferry.adapters.census import Census, census
 from ferry.adapters.copilot import paths as cp_paths
+from ferry.adapters.copilot.deltas import replay_lines
 from ferry.adapters.copilot.reader import read_session
 from ferry.adapters.copilot.writer import (
     SessionStoreLocked,
@@ -44,6 +46,7 @@ from ferry.adapters.copilot.writer import (
     vs_code_is_running,
 )
 from ferry.adapters.dedup import compare_duplicate
+from ferry.adapters.formatcheck import FormatCheck
 from ferry.core import Bundle, Manifest, SourceMachine
 from ferry.core.manifest import OSName
 from ferry.ucs import Conversation, ToolName
@@ -56,33 +59,49 @@ TESTED_VERSION: Final = "1.134.0"
 """The VS Code release this adapter was built and verified against."""
 
 
-def _version_caveat(found: str | None) -> list[str]:
-    """Whether the user needs warning about this VS Code version, and why.
-
-    Copilot Chat's storage is undocumented, so it can change in any release
-    with no notice. That is worth saying -- but saying it on every scan of a
-    version already verified is noise, and a warning a person has learned to
-    scroll past is worse than none: it is still there when it finally matters
-    and they no longer read it.
-
-    So it is said when it carries information: the running version is not the
-    one this adapter was checked against, or it could not be determined.
-    """
-    if found == TESTED_VERSION:
-        return []
-    if found is None:
-        return [
-            "could not determine your VS Code version. This adapter was verified "
-            f"against {TESTED_VERSION}, and the storage format is undocumented."
-        ]
-    return [
-        f"you are running VS Code {found}; this adapter was verified against "
-        f"{TESTED_VERSION}. The storage format is undocumented and can change "
-        "between releases - check the export holds what you expect."
-    ]
-
-
 _OS_NAMES: dict[str, OSName] = {"Windows": "win32", "Darwin": "darwin", "Linux": "linux"}
+
+
+def check_format(path: Path) -> FormatCheck:
+    """Whether VS Code still writes chat transcripts the way this adapter reads them.
+
+    A Copilot transcript is a **log of edits**, so the check has to replay it
+    rather than look at it, then confirm the replay still produces a list of
+    turns carrying the fields the reader looks for. If VS Code renamed
+    ``message`` or ``response``, every conversation would export with no text
+    and nothing anywhere would report an error.
+
+    **An unrecognised record type is deliberately not a finding here.** Ferry
+    already reports those during an export, naming the file and how many were
+    skipped, which is more use than a line on the scan screen. What belongs
+    here is only what would otherwise pass in silence.
+    """
+    findings: list[str] = []
+    try:
+        with path.open(encoding="utf-8", errors="replace") as handle:
+            replayed = replay_lines(handle)
+    except OSError:
+        return FormatCheck(checked=False)
+
+    turns = replayed.document.get("requests")
+    if not isinstance(turns, list):
+        return FormatCheck(
+            checked=True,
+            findings=[*findings, "the replayed transcript has no list of turns in it"],
+        )
+    if not turns:
+        return FormatCheck(checked=False)
+
+    recognisable = sum(
+        1 for turn in turns if isinstance(turn, dict) and ("message" in turn or "response" in turn)
+    )
+    if recognisable * 2 < len(turns):
+        findings.append(
+            f"{len(turns) - recognisable} of {len(turns)} turns carry neither a question "
+            "nor an answer where Ferry looks for them"
+        )
+
+    return FormatCheck(checked=True, findings=findings)
 
 
 class CopilotAdapter(Adapter):
@@ -118,23 +137,72 @@ class CopilotAdapter(Adapter):
                 notes=[f"{user} exists but holds no chat sessions yet"],
             )
 
+        counted = self._census(sessions)
         workspaces = {key for key, _ in sessions if key}
         total = sum(path.stat().st_size for _, path in sessions)
         notes.append(f"{total / 1024:.0f} KB of transcripts at {user}")
         if workspaces:
             notes.append(f"{len(workspaces)} workspaces")
-        empty = sum(1 for key, _ in sessions if not key)
-        if empty:
-            notes.append(f"{empty} started with no folder open")
+        no_folder = sum(1 for key, _ in sessions if not key)
+        if no_folder:
+            notes.append(f"{no_folder} started with no folder open")
+        notes.extend(f"{line} (of {counted.files} session files)" for line in counted.notes()[:1])
+        notes.extend(counted.notes()[1:])
         version = cp_paths.vscode_version(self._env)
+
+        # The newest transcript **that holds a conversation**. Most session
+        # files here are empty -- VS Code writes one whenever a chat panel
+        # opens -- and checking one of those reports "nothing to read" on a
+        # machine with plenty to read.
+        checked = FormatCheck()
+        for _key, path in sorted(sessions, key=lambda item: item[1].stat().st_mtime, reverse=True):
+            checked = check_format(path)
+            if checked.checked:
+                break
+
         return DetectResult(
             installed=True,
             version=version,
             data_paths=[user],
-            conversation_count_estimate=len(sessions),
+            conversation_count_estimate=counted.conversations,
             notes=notes,
-            caveats=_version_caveat(version),
+            caveats=checked.caveats(self.display_name, version),
         )
+
+    def _census(self, sessions: list[tuple[str, Path]]) -> Census:
+        """How many of these files VS Code would actually list.
+
+        Two things make that fewer than the number of files, and both grow
+        with use: **VS Code writes a session file whenever a chat panel
+        opens**, typed into or not, and a conversation open in two workspaces
+        is stored twice under one id. On the machine this was written on, 18
+        files are 5 conversations.
+
+        Replaying to find out is affordable -- 18 files in 60 ms -- because
+        these are small and a chat with messages is recognised in its first
+        record.
+        """
+        return census(
+            [(path.stem, path) for _key, path in sessions],
+            lambda _id, path: self._has_messages(path),
+        )
+
+    @staticmethod
+    def _has_messages(path: Path) -> bool:
+        """Whether a transcript replays to a conversation with turns in it.
+
+        It has to be replayed. A Copilot transcript is a log of edits, and
+        every real one on this machine has an **empty** message list in its
+        first record -- so the file's own opening says nothing about whether it
+        holds a conversation.
+        """
+        try:
+            with path.open(encoding="utf-8", errors="replace") as handle:
+                result = replay_lines(handle)
+        except OSError:
+            return True
+        turns = result.document.get("requests")
+        return isinstance(turns, list) and bool(turns)
 
     # ---------- export ----------
 
@@ -217,7 +285,7 @@ class CopilotAdapter(Adapter):
         yield ExportEvent(kind="progress", conversation_id=str(conversation_id), message=detail)
 
         for note in found.notes:
-            yield ExportEvent(kind="warning", conversation_id=str(conversation_id), message=note)
+            yield ExportEvent(kind="note", conversation_id=str(conversation_id), message=note)
 
     # ---------- import ----------
 

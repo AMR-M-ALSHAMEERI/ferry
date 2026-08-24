@@ -6,6 +6,7 @@ replaces one stub with the real thing, here -- importing the implementation from
 ``base`` itself would be a cycle, since every adapter imports ``base``.
 """
 
+from ferry.adapters.antigravity import AntigravityAdapter
 from ferry.adapters.base import (
     REGISTRY,
     Adapter,
@@ -23,10 +24,12 @@ from ferry.adapters.copilot import CopilotAdapter
 REGISTRY["claude-code"] = ClaudeCodeAdapter()
 REGISTRY["codex"] = CodexAdapter()
 REGISTRY["copilot"] = CopilotAdapter()
+REGISTRY["antigravity"] = AntigravityAdapter()
 
 __all__ = [
     "REGISTRY",
     "Adapter",
+    "AntigravityAdapter",
     "ClaudeCodeAdapter",
     "CodexAdapter",
     "CopilotAdapter",

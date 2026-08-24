@@ -35,6 +35,8 @@ ASSISTANT_HOME_VARS = (
     "CLAUDE_CONFIG_DIR",
     "CODEX_HOME",
     "FERRY_VSCODE_USER_DIR",
+    "FERRY_ANTIGRAVITY_DIR",
+    "FERRY_ANTIGRAVITY_INSTALL",
 )
 """Every environment variable that points an adapter at a real conversation store.
 

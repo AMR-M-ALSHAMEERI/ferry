@@ -325,7 +325,10 @@ def test_detect_finds_the_sessions_and_the_version(
     result = adapter.detect()
 
     assert result.installed is True
-    assert result.conversation_count_estimate == 3
+    # Three transcripts, one with no messages in it. The count is of
+    # conversations, not files -- see ferry.adapters.census.
+    assert result.conversation_count_estimate == 2
+    assert any("1 empty" in note for note in result.notes)
     assert result.version == "2.1.237"
     assert any("2 project directories" in note for note in result.notes)
 

@@ -26,7 +26,7 @@ from ferry.adapters.base import (
     ImportEvent,
     ImportOptions,
 )
-from ferry.cli.flows import _describe, find_bundles, run_export, run_import
+from ferry.cli.flows import _describe, _report, find_bundles, run_export, run_import
 from ferry.cli.theme import MONO, Capability
 from ferry.cli.ui import UI, NonInteractiveError
 
@@ -472,3 +472,82 @@ def test_warnings_are_printed_after_the_bar_not_under_it(tmp_path: Path) -> None
 
     assert "token counts are not carried" in ui.text
     assert "token counts are not carried" not in " ".join(ui.bar.labels)
+
+
+class TestExportMessageGrouping:
+    """Notes and warnings are different things and must not look the same.
+
+    They used to come out as one undifferentiated list with the warning marker
+    on every line, so a routine remark about the storage format looked like
+    something had gone wrong. A warning marker that appears on everything stops
+    meaning anything.
+    """
+
+    def _render(self, events: list[ExportEvent]) -> str:
+        ui = UI()
+        with ui.console.capture() as captured:
+            _report(ui, iter(events), "exported", label="Exporting", total=1)
+        return captured.get()
+
+    def test_notes_and_warnings_get_their_own_headings(self) -> None:
+        text = self._render(
+            [
+                ExportEvent(kind="started", message="1 to read"),
+                ExportEvent(kind="progress", message="12 messages"),
+                ExportEvent(kind="note", message="22 images were attached"),
+                ExportEvent(kind="warning", message="step type 28 has no name"),
+            ]
+        )
+        assert "Notes" in text
+        assert "Warnings" in text
+        assert text.index("Notes") < text.index("Warnings")
+
+    def test_a_heading_with_nothing_under_it_is_not_printed(self) -> None:
+        text = self._render(
+            [
+                ExportEvent(kind="started", message="1 to read"),
+                ExportEvent(kind="progress", message="12 messages"),
+            ]
+        )
+        assert "Notes" not in text
+        assert "Warnings" not in text
+
+    def test_a_repeated_message_is_said_once_with_a_count(self) -> None:
+        """Adapters emit rebuild warnings once per conversation."""
+        text = self._render(
+            [
+                ExportEvent(kind="started", message="3 to read"),
+                *[
+                    ExportEvent(kind="warning", message="tool output is not carried")
+                    for _ in range(3)
+                ],
+            ]
+        )
+        assert text.count("tool output is not carried") == 1
+        assert "(x3)" in text
+
+    def test_the_bar_is_sized_by_the_adapter_when_it_says_so(self) -> None:
+        """detect() counts conversations; an adapter can have more work than that.
+
+        Antigravity writes a subagent trajectory for each conversation that
+        spawned one, so two conversations are six writes and the bar read 6/2.
+        """
+        text = self._render(
+            [
+                ExportEvent(kind="started", message="2 conversations", total=6),
+                *[ExportEvent(kind="progress", message="done") for _ in range(6)],
+            ]
+        )
+        assert "6/6" in text or "(6/6)" in text
+
+    def test_the_adapters_own_closing_line_is_the_summary(self) -> None:
+        """It knows things the screen cannot derive from counting events."""
+        text = self._render(
+            [
+                ExportEvent(kind="started", message="2 conversations", total=6),
+                *[ExportEvent(kind="progress", message="done") for _ in range(6)],
+                ExportEvent(kind="done", message="2 conversations exported, plus 4 subagents"),
+            ]
+        )
+        assert "2 conversations exported, plus 4 subagents" in text
+        assert "6 exported" not in text

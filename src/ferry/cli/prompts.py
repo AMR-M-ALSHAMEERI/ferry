@@ -27,7 +27,15 @@ from prompt_toolkit.layout.controls import FormattedTextControl
 from ferry.cli.motion import MENU_FRAME_SECONDS, Motion
 from ferry.cli.theme import ASCII_ICONS, Theme
 
-__all__ = ["Fragment", "Fragments", "SelectorItem", "SelectorModel", "run_confirm", "run_select"]
+__all__ = [
+    "Fragment",
+    "Fragments",
+    "SelectorItem",
+    "SelectorModel",
+    "build_bindings",
+    "run_confirm",
+    "run_select",
+]
 
 Fragment = tuple[str, str]
 """One prompt_toolkit ``(style, text)`` pair."""
@@ -282,15 +290,112 @@ def _render(
         out += preview(highlighted)
 
     out += [("", "\n")]
+    # The footer names what the keys do *here*, because what escape does
+    # depends on where you are: with a filter in force it clears the filter,
+    # and only then does it leave the screen.
     if model.filtering:
         out += [(accent, "  / "), (text, model.filter), (primary, "_")]
-        out += [(dim, f"    enter apply  {sep}  esc cancel filter\n")]
+        if model.visible:
+            out += [(dim, f"    enter apply  {sep}  esc cancel filter\n")]
+        else:
+            out += [(dim, f"    backspace to edit  {sep}  esc cancel filter\n")]
+    elif model.filter:
+        keys = f"up/down move  {sep}  enter select  {sep}  esc clear filter"
+        out += [(dim, f"  {keys}\n")]
     else:
         keys = f"up/down move  {sep}  enter select  {sep}  esc cancel"
         if allow_filter:
             keys = f"up/down move  {sep}  enter select  {sep}  / filter  {sep}  esc cancel"
         out += [(dim, f"  {keys}\n")]
     return out
+
+
+def build_bindings(model: SelectorModel, *, allow_filter: bool = True) -> KeyBindings:
+    """The picker's keys, built against a model so they can be tested.
+
+    Lifted out of :func:`run_select` because the behaviour that matters most
+    here -- what enter and escape do when a filter matches nothing -- was
+    unreachable by any test while it lived inside a function that also builds
+    an application and takes over the terminal. The bug it now guards against
+    quit Ferry outright.
+    """
+    kb = KeyBindings()
+
+    @kb.add("up")
+    @kb.add("c-p")
+    def _up(event: object) -> None:
+        model.move(-1)
+
+    @kb.add("down")
+    @kb.add("c-n")
+    def _down(event: object) -> None:
+        model.move(1)
+
+    @kb.add("enter")
+    def _accept(event) -> None:  # type: ignore[no-untyped-def]
+        """Take the highlighted item -- and never take "nothing" for an answer.
+
+        A filter matching nothing leaves no item highlighted. Exiting with
+        ``None`` there would be read by the caller as a cancel, so typing a
+        word that happens to match no option and pressing enter **quit Ferry**.
+        Nobody asked to leave; they mistyped.
+
+        So an empty list keeps the filter open instead, where backspace still
+        works and the text is still visible to correct.
+        """
+        if model.filtering:
+            if not model.visible:
+                return
+            model.stop_filtering(clear=False)
+            return
+        chosen = model.current
+        if chosen is None:
+            # Not filtering, nothing highlighted: a filter is hiding
+            # everything. Clear it rather than cancelling out of the screen.
+            model.set_filter("")
+            return
+        event.app.exit(result=chosen.value)
+
+    @kb.add("escape", eager=True)
+    @kb.add("c-c")
+    def _cancel(event) -> None:  # type: ignore[no-untyped-def]
+        """Back out one level at a time, which is what escape is expected to do.
+
+        A filter can be *applied* without filter mode being open -- press
+        enter on a filter and the text stays in force. Escape used to cancel
+        the whole screen from there, which on the main menu means quitting
+        Ferry with no warning. It now clears the filter first; escape again
+        leaves.
+        """
+        if model.filtering:
+            model.stop_filtering()
+            return
+        if model.filter:
+            model.set_filter("")
+            return
+        event.app.exit(result=None)
+
+    if allow_filter:
+        not_filtering = Condition(lambda: not model.filtering)
+
+        @kb.add("/", filter=not_filtering)
+        def _slash(event: object) -> None:
+            model.start_filtering()
+
+        @kb.add("backspace")
+        def _backspace(event: object) -> None:
+            if model.filtering:
+                model.set_filter(model.filter[:-1])
+
+        @kb.add("<any>")
+        def _typed(event) -> None:  # type: ignore[no-untyped-def]
+            if not model.filtering:
+                return
+            char = event.data
+            if char and char.isprintable():
+                model.set_filter(model.filter + char)
+
+    return kb
 
 
 def run_select(
@@ -331,53 +436,7 @@ def run_select(
             return 0
         return int((time.monotonic() - started) / MENU_FRAME_SECONDS)
 
-    kb = KeyBindings()
-
-    @kb.add("up")
-    @kb.add("c-p")
-    def _up(event: object) -> None:
-        model.move(-1)
-
-    @kb.add("down")
-    @kb.add("c-n")
-    def _down(event: object) -> None:
-        model.move(1)
-
-    @kb.add("enter")
-    def _accept(event) -> None:  # type: ignore[no-untyped-def]
-        if model.filtering:
-            model.stop_filtering(clear=False)
-            return
-        chosen = model.current
-        event.app.exit(result=chosen.value if chosen else None)
-
-    @kb.add("escape", eager=True)
-    @kb.add("c-c")
-    def _cancel(event) -> None:  # type: ignore[no-untyped-def]
-        if model.filtering:
-            model.stop_filtering()
-            return
-        event.app.exit(result=None)
-
-    if allow_filter:
-        not_filtering = Condition(lambda: not model.filtering)
-
-        @kb.add("/", filter=not_filtering)
-        def _slash(event: object) -> None:
-            model.start_filtering()
-
-        @kb.add("backspace")
-        def _backspace(event: object) -> None:
-            if model.filtering:
-                model.set_filter(model.filter[:-1])
-
-        @kb.add("<any>")
-        def _typed(event) -> None:  # type: ignore[no-untyped-def]
-            if not model.filtering:
-                return
-            char = event.data
-            if char and char.isprintable():
-                model.set_filter(model.filter + char)
+    kb = build_bindings(model, allow_filter=allow_filter)
 
     control = FormattedTextControl(
         lambda: _render(model, theme, title, preview, allow_filter, tick(), current),

@@ -13,7 +13,7 @@ import json
 import pytest
 
 from ferry.cli.brand import TAGLINE, build_wordmark
-from ferry.cli.prompts import SelectorItem, SelectorModel, _style_for
+from ferry.cli.prompts import SelectorItem, SelectorModel, _style_for, build_bindings
 from ferry.cli.theme import (
     ASCII_ICONS,
     HARBOR,
@@ -596,3 +596,120 @@ def test_no_theme_reuses_one_colour_for_two_meanings() -> None:
             if va == vb
         ]
         assert clashes == [], f"{name}: {clashes}"
+
+
+class _FakeApp:
+    """Stands in for the prompt_toolkit application the bindings exit."""
+
+    def __init__(self) -> None:
+        self.exited = False
+        self.result: object = "not set"
+
+    def exit(self, result: object = None) -> None:
+        self.exited = True
+        self.result = result
+
+
+class _FakeEvent:
+    def __init__(self, data: str = "") -> None:
+        self.app = _FakeApp()
+        self.data = data
+
+
+_KEY_ALIASES = {"enter": "c-m"}
+"""prompt_toolkit stores "enter" as the control character it really is."""
+
+
+def _press(bindings, key: str, event: _FakeEvent) -> None:
+    """Invoke the handler bound to a key, as prompt_toolkit would."""
+    wanted = _KEY_ALIASES.get(key, key)
+    for binding in bindings.bindings:
+        if any(getattr(k, "value", k) == wanted for k in binding.keys):
+            binding.handler(event)
+            return
+    raise AssertionError(f"nothing bound to {key!r}")
+
+
+class TestFilterDeadEnd:
+    """Typing a word that matches nothing must not throw the user out.
+
+    On the main menu, a picker returning ``None`` is read as "quit", so both of
+    these used to end Ferry outright: a mistyped filter followed by enter, and
+    a mistyped filter followed by escape. Neither is a request to leave.
+    """
+
+    def _filtered_to_nothing(self) -> SelectorModel:
+        model = SelectorModel(ITEMS)
+        model.start_filtering()
+        model.set_filter("zzzz")
+        assert model.visible == []
+        return model
+
+    def test_enter_on_a_filter_matching_nothing_stays_put(self) -> None:
+        model = self._filtered_to_nothing()
+        bindings = build_bindings(model)
+        event = _FakeEvent()
+
+        _press(bindings, "enter", event)
+
+        assert not event.app.exited
+        assert model.filtering, "the filter stays open so backspace still works"
+
+    def test_enter_with_a_filter_in_force_and_nothing_shown_clears_it(self) -> None:
+        """Enter applies a filter without closing it; the list can then be empty."""
+        model = self._filtered_to_nothing()
+        model.stop_filtering(clear=False)
+        bindings = build_bindings(model)
+        event = _FakeEvent()
+
+        _press(bindings, "enter", event)
+
+        assert not event.app.exited
+        assert model.filter == ""
+        assert model.visible == list(ITEMS)
+
+    def test_escape_clears_the_filter_before_it_cancels(self) -> None:
+        model = self._filtered_to_nothing()
+        model.stop_filtering(clear=False)
+        bindings = build_bindings(model)
+
+        first = _FakeEvent()
+        _press(bindings, "escape", first)
+        assert not first.app.exited
+        assert model.filter == ""
+
+        second = _FakeEvent()
+        _press(bindings, "escape", second)
+        assert second.app.exited
+        assert second.app.result is None
+
+    def test_escape_while_typing_a_filter_only_closes_the_filter(self) -> None:
+        model = self._filtered_to_nothing()
+        bindings = build_bindings(model)
+        event = _FakeEvent()
+
+        _press(bindings, "escape", event)
+
+        assert not event.app.exited
+        assert not model.filtering
+        assert model.filter == ""
+
+    def test_enter_still_chooses_when_something_is_highlighted(self) -> None:
+        model = SelectorModel(ITEMS)
+        bindings = build_bindings(model)
+        event = _FakeEvent()
+
+        _press(bindings, "enter", event)
+
+        assert event.app.exited
+        assert event.app.result == ITEMS[0].value
+
+    def test_escape_still_cancels_an_unfiltered_list(self) -> None:
+        model = SelectorModel(ITEMS)
+        bindings = build_bindings(model)
+        event = _FakeEvent()
+
+        _press(bindings, "escape", event)
+
+        assert event.app.exited
+        assert event.app.result is None

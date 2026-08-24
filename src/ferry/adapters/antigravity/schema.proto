@@ -1,0 +1,138 @@
+// Antigravity 2.8.1 conversation storage, as far as it has been established.
+//
+// READ THIS BEFORE USING THE FILE.
+//
+// This is DOCUMENTATION, not a build input. Nothing generates code from it and
+// Ferry does not depend on `protobuf` or `protoc`. The adapter reads and
+// rewrites these messages with a raw wire-format codec
+// (`ferry/adapters/antigravity/wire.py`) that preserves the original bytes of
+// every field it does not touch.
+//
+// That is a deliberate choice, and this file is the reason for it: **it is
+// incomplete and cannot be completed.** Google publishes no schema. Every
+// field below was identified by joining the plain-JSON transcript at
+// brain/<uuid>/.system_generated/logs/transcript.jsonl to steps.idx through
+// step_index, and the fields nobody identified are simply not here. Generating
+// a decoder from an incomplete schema means round-tripping a user's history
+// through code that has no representation for most of it.
+//
+// Numbers in comments are how many real steps agreed with the mapping.
+//
+// The message names are Ferry's. Field names are Ferry's. Only the field
+// NUMBERS and wire types are Antigravity's, and they are the only part any
+// code depends on.
+
+syntax = "proto3";
+
+package ferry.antigravity;
+
+// steps.step_type. Derived from the transcript, which names these in words.
+//
+// Type 28 occurs 12 times in the databases and never once in the transcript.
+// It is absent below rather than given a plausible name: a wrong name here
+// would be indistinguishable from a right one everywhere else.
+enum StepType {
+  STEP_TYPE_UNSPECIFIED = 0;
+  CODE_ACTION = 5;            // 193
+  GREP_SEARCH = 7;            // 2
+  VIEW_FILE = 8;              // 115
+  LIST_DIRECTORY = 9;         // 75
+  USER_INPUT = 14;            // 147
+  PLANNER_RESPONSE = 15;      // 1251
+  ERROR_MESSAGE = 17;         // 26
+  RUN_COMMAND = 21;           // 529
+  CHECKPOINT = 23;            // 26  file snapshots, not conversation
+  READ_URL_CONTENT = 31;      // 1
+  SEARCH_WEB = 33;            // 15
+  GENERATE_IMAGE = 91;        // 1
+  CONVERSATION_HISTORY = 98;  // 22
+  SYSTEM_MESSAGE = 101;       // 161
+  INVOKE_SUBAGENT = 127;      // 3
+  GENERIC = 132;              // 124
+  ASK_QUESTION = 138;         // 5
+}
+
+// steps.metadata
+//
+// Field 1.1 is the step's time in epoch seconds. Present in 2,725 of 2,725
+// steps, and agreeing with the transcript's created_at in 2,687 of 2,692
+// comparable ones; the five that differ are about a minute apart.
+message StepMetadata {
+  message Timing {
+    int64 created_at = 1;
+  }
+  Timing timing = 1;
+}
+
+// steps.step_payload
+//
+// A oneof in all but name. Field 5 carries metadata common to every step, and
+// each step type puts its content at its own field number -- which is why the
+// field paths below share no prefix.
+//
+// Only the fields carrying text are given here. Every payload also holds
+// structure Ferry has not identified, and that structure survives an import
+// because the codec never re-encodes what it was not asked to change.
+message StepPayload {
+  StepMetadata common = 5;
+
+  message GrepSearch    { message Query  { string text = 3; } Query query = 4; }        // 13.4.3
+  message ViewFile      { string path = 1; }                                            // 14.1
+  message ListDirectory { message Entry  { string path = 1; } Entry entry = 3; }        // 15.3.1
+
+  // 19.2 is what the user typed. 19.3.1 matches more steps because it is the
+  // fuller rendering, context included; Ferry takes 19.2, because the message
+  // a user wrote is what belongs in their history.
+  message UserInput     { string text = 2; }                                            // 19.2
+
+  // The same text appears at both 20.1 and 20.8 in all 406 steps that have any.
+  message PlannerResponse { string text = 1; string text_again = 8; }                   // 20.1, 20.8
+
+  GrepSearch grep_search        = 13;
+  ViewFile view_file            = 14;
+  ListDirectory list_directory  = 15;
+  UserInput user_input          = 19;
+  PlannerResponse planner       = 20;
+  // 24  ERROR_MESSAGE      text at 24.3.9, 24.3.2
+  // 30  CHECKPOINT         text at 30.19, 30.14.1; also the densest source of paths
+  // 42  SEARCH_WEB         text at 42.1
+  // 56  RUN_COMMAND        text at 56.21.1.1
+  // 104 GENERATE_IMAGE     text at 104.1
+  // 114 SYSTEM_MESSAGE     text at 114.4.3, 114.1
+  // 140 GENERIC            text at 140.1.2, 140.2.1
+  // 143 INVOKE_SUBAGENT    text at 143.10.1
+}
+
+// trajectory_metadata_blob.data
+//
+// Field 18 names the project the conversation belongs to, matching a file in
+// ~/.gemini/config/projects/<id>.json. True for 6 of 6 conversations on the
+// probe machine, and the reason an imported conversation can be filed where
+// the user expects rather than appearing loose.
+message TrajectoryMetadata {
+  message Timing {
+    int64 created_at = 1;
+  }
+  Timing timing    = 2;   // 2.1, epoch seconds
+  string project_id = 18;
+}
+
+// Where absolute paths live.
+//
+// The plan recorded six path-bearing COLUMNS. Scanning every decoded string
+// finds at least fourteen distinct FIELD PATHS, three of them with 900+
+// occurrences, and that count is a floor rather than a total:
+//
+//   steps.metadata#4.3                 steps.step_payload#28.2
+//   steps.step_payload#30.18.1         steps.step_payload#10.2.1.8
+//   steps.step_payload#30.26.4.1       steps.step_payload#10.1.2.2.5
+//   steps.step_payload#30.26.4.2.2.1   steps.step_payload#10.1.2.2.6
+//   steps.step_payload#30.26.4.3.4     steps.step_payload#147.1.21.1.2
+//   steps.step_payload#30.26.4.3.5.1   steps.step_payload#56.21.1.2
+//   steps.step_payload#30.14.3         steps.step_payload#133.2.1.2
+//   steps.task_details#2               steps.step_payload#133.2.6
+//
+// Ferry does not use this list to decide what to rewrite. It matches on the
+// text of every string in every blob, precisely because the list above cannot
+// be shown to be complete -- a field nobody saw would otherwise keep a path to
+// a directory that does not exist on the machine the conversation was moved to.

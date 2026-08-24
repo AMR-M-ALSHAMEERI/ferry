@@ -37,8 +37,9 @@ from ferry.adapters.base import (
     ImportEvent,
     ImportOptions,
 )
+from ferry.adapters.census import census, jsonl_holds
 from ferry.adapters.claude_code import paths as cc_paths
-from ferry.adapters.claude_code.reader import read_session
+from ferry.adapters.claude_code.reader import MESSAGE_TYPES, read_session
 from ferry.adapters.claude_code.writer import (
     SYNTHESIS_NOTES,
     Remap,
@@ -49,6 +50,7 @@ from ferry.adapters.claude_code.writer import (
     synthesize_records,
 )
 from ferry.adapters.dedup import compare_duplicate
+from ferry.adapters.formatcheck import FormatCheck
 from ferry.core import Bundle, Manifest, SourceMachine
 from ferry.core.manifest import OSName
 from ferry.ucs import Conversation, Provenance, ToolName
@@ -74,6 +76,63 @@ _OS_NAMES: dict[str, OSName] = {"Windows": "win32", "Darwin": "darwin", "Linux":
 
 def _os_name() -> OSName:
     return _OS_NAMES.get(platform.system(), "linux")
+
+
+def _is_message(record: dict[str, object]) -> bool:
+    """Whether a transcript record is a turn somebody would see.
+
+    A transcript can hold nothing but a summary or session metadata, and that
+    is not a conversation. Checked one record at a time and stopped at the
+    first hit, because a real transcript runs to megabytes and this runs every
+    time Ferry starts.
+    """
+    return record.get("type") in MESSAGE_TYPES
+
+
+SAMPLE_RECORDS: Final = 200
+"""How many transcript records the format check reads before deciding."""
+
+
+def check_format(path: Path) -> FormatCheck:
+    """Whether Claude Code still writes transcripts the way this adapter reads them.
+
+    Looks for message records that still carry a ``message`` object with
+    content in it. If that shape changed, conversations would export with their
+    turns present and empty, which no other check would notice.
+    """
+    seen = intact = 0
+    try:
+        with path.open(encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line or seen >= SAMPLE_RECORDS:
+                    if seen >= SAMPLE_RECORDS:
+                        break
+                    continue
+                try:
+                    record = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(record, dict) or record.get("type") not in MESSAGE_TYPES:
+                    continue
+                seen += 1
+                message = record.get("message")
+                if isinstance(message, dict) and message.get("content") is not None:
+                    intact += 1
+    except OSError:
+        return FormatCheck(checked=False)
+
+    if not seen:
+        return FormatCheck(checked=False)
+    if intact * 2 < seen:
+        return FormatCheck(
+            checked=True,
+            findings=[
+                f"{seen - intact} of {seen} sampled turns have no message content where "
+                "Ferry looks for it"
+            ],
+        )
+    return FormatCheck(checked=True)
 
 
 class ClaudeCodeAdapter(Adapter):
@@ -114,16 +173,31 @@ class ClaudeCodeAdapter(Adapter):
             except OSError as exc:
                 notes.append(f"cannot read {project.name}: {exc}")
 
+        counted = census(
+            [(path.stem, path) for path in sessions],
+            lambda _id, path: jsonl_holds(path, _is_message),
+        )
+
         notes.append(f"{len(project_dirs)} project directories at {projects}")
+        notes.extend(f"{line} (of {counted.files} transcripts)" for line in counted.notes()[:1])
+        notes.extend(counted.notes()[1:])
         if self._env is None and not (Path.home() / ".claude.json").is_file():
             notes.append("~/.claude.json not found; per-project settings will not be carried")
 
+        version = self._version_from(sessions)
+        checked = (
+            check_format(max(sessions, key=lambda path: path.stat().st_mtime))
+            if sessions
+            else FormatCheck()
+        )
+
         return DetectResult(
             installed=bool(sessions),
-            version=self._version_from(sessions),
+            version=version,
             data_paths=[projects],
-            conversation_count_estimate=len(sessions),
+            conversation_count_estimate=counted.conversations,
             notes=notes,
+            caveats=checked.caveats(self.display_name, version) if sessions else [],
         )
 
     @staticmethod

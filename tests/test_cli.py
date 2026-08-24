@@ -52,6 +52,7 @@ def test_get_adapter_raises_on_unknown_name() -> None:
 
 def test_the_implemented_slots_hold_real_adapters_now() -> None:
     """M3 and M4 each replaced a stub. Registration lives in ``ferry.adapters``."""
+    from ferry.adapters.antigravity import AntigravityAdapter
     from ferry.adapters.claude_code import ClaudeCodeAdapter
     from ferry.adapters.codex import CodexAdapter
     from ferry.adapters.copilot import CopilotAdapter
@@ -59,19 +60,19 @@ def test_the_implemented_slots_hold_real_adapters_now() -> None:
     assert isinstance(get_adapter("claude-code"), ClaudeCodeAdapter)
     assert isinstance(get_adapter("codex"), CodexAdapter)
     assert isinstance(get_adapter("copilot"), CopilotAdapter)
+    assert isinstance(get_adapter("antigravity"), AntigravityAdapter)
 
 
-def test_adapters_still_waiting_report_not_installed_with_a_reason() -> None:
-    """Stubs must be honest — no invented conversation counts."""
+def test_no_adapter_is_a_stub_any_more() -> None:
+    """Every tool in the registry has a real implementation as of M6.
+
+    This assertion used to name the adapters still waiting, and was updated at
+    each milestone. There are none left, so what it now guards is the opposite:
+    a stub reappearing in the registry would mean a tool silently reporting
+    itself as not installed on a machine that has it.
+    """
     pending = [a for a in list_adapters() if isinstance(a, NotImplementedAdapter)]
-    assert [a.name for a in pending] == ["antigravity"]
-
-    for adapter in pending:
-        result = adapter.detect()
-        assert result.installed is False
-        assert result.conversation_count_estimate == 0
-        assert result.notes, f"{adapter.name} gave no reason"
-        assert "not yet implemented" in result.notes[0]
+    assert pending == []
 
 
 def test_export_and_import_reach_a_real_adapter() -> None:

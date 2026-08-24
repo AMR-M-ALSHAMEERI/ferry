@@ -14,6 +14,7 @@ is warned before it exports something enormous.
 from __future__ import annotations
 
 import hashlib
+import json
 import platform
 import shutil
 from collections.abc import Iterator
@@ -30,11 +31,13 @@ from ferry.adapters.base import (
     ImportEvent,
     ImportOptions,
 )
+from ferry.adapters.census import census, jsonl_holds
 from ferry.adapters.claude_code.writer import remap_prefix
 from ferry.adapters.codex import paths as cx_paths
 from ferry.adapters.codex.reader import SessionRead, read_rollout
 from ferry.adapters.codex.writer import REBUILD_NOTES, Rebuild, rollout_lines, rollout_stamp
 from ferry.adapters.dedup import compare_duplicate
+from ferry.adapters.formatcheck import FormatCheck
 from ferry.core import Bundle, Manifest, SourceMachine
 from ferry.core.manifest import OSName
 from ferry.ucs import Attachment, Conversation, Provenance, ToolName
@@ -49,6 +52,67 @@ LARGE_SESSION_BYTES: Final = 100 * 1024 * 1024
 """Warn above this. PLAN.md §5 M4 asks for a size guard; this is its threshold."""
 
 _OS_NAMES: dict[str, OSName] = {"Windows": "win32", "Darwin": "darwin", "Linux": "linux"}
+
+
+_MESSAGE_ROLES = frozenset({"user", "assistant"})
+
+
+def _is_message(record: dict[str, object]) -> bool:
+    """Whether a rollout record is a turn somebody would see.
+
+    A rollout always opens with ``session_meta`` and ``turn_context``, which
+    say nothing about whether anyone spoke. The turns themselves are
+    ``response_item`` records whose payload carries a role.
+    """
+    payload = record.get("payload")
+    return isinstance(payload, dict) and payload.get("role") in _MESSAGE_ROLES
+
+
+SAMPLE_RECORDS: Final = 200
+"""How many rollout records the format check reads before deciding."""
+
+
+def check_format(path: Path) -> FormatCheck:
+    """Whether Codex still writes rollouts the way this adapter reads them.
+
+    A rollout's turns are ``payload`` objects carrying a role and content. If
+    either moved, every conversation would export as a series of empty turns
+    and look perfectly successful doing it.
+    """
+    seen = intact = 0
+    try:
+        with path.open(encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                if seen >= SAMPLE_RECORDS:
+                    break
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(record, dict):
+                    continue
+                payload = record.get("payload")
+                if not isinstance(payload, dict) or payload.get("role") not in _MESSAGE_ROLES:
+                    continue
+                seen += 1
+                if payload.get("content") is not None:
+                    intact += 1
+    except OSError:
+        return FormatCheck(checked=False)
+
+    if not seen:
+        return FormatCheck(checked=False)
+    if intact * 2 < seen:
+        return FormatCheck(
+            checked=True,
+            findings=[
+                f"{seen - intact} of {seen} sampled turns have no content where Ferry looks for it"
+            ],
+        )
+    return FormatCheck(checked=True)
 
 
 class CodexAdapter(Adapter):
@@ -81,18 +145,33 @@ class CodexAdapter(Adapter):
         except OSError as exc:
             return DetectResult(installed=False, notes=[f"cannot read {sessions}: {exc}"])
 
+        counted = census(
+            [(path.stem, path) for path in rollouts],
+            lambda _id, path: jsonl_holds(path, _is_message),
+        )
+
         total = sum(path.stat().st_size for path in rollouts)
         notes.append(f"{total / 1024 / 1024:.0f} MB of transcripts at {sessions}")
+        notes.extend(f"{line} (of {counted.files} rollouts)" for line in counted.notes()[:1])
+        notes.extend(counted.notes()[1:])
         databases = cx_paths.state_databases(self._env)
         if databases:
             notes.append(f"state database: {databases[-1].name}")
 
+        version = self._version_from(rollouts)
+        checked = (
+            check_format(max(rollouts, key=lambda path: path.stat().st_mtime))
+            if rollouts
+            else FormatCheck()
+        )
+
         return DetectResult(
             installed=bool(rollouts),
-            version=self._version_from(rollouts),
+            version=version,
             data_paths=[sessions],
-            conversation_count_estimate=len(rollouts),
+            conversation_count_estimate=counted.conversations,
             notes=notes,
+            caveats=checked.caveats(self.display_name, version) if rollouts else [],
         )
 
     @staticmethod

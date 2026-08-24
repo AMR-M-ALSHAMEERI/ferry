@@ -20,7 +20,7 @@ omission.
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -38,7 +38,7 @@ from ferry.core.bundle import MANIFEST_NAME
 __all__ = ["Scanned", "find_bundles", "run_export", "run_import"]
 
 _MAX_SHOWN_WARNINGS = 8
-"""Warnings printed in full before the rest are counted rather than listed."""
+"""Messages printed in full, per group, before the rest are counted."""
 
 _TYPE_A_PATH = "\n type a path"
 """Sentinel choice value.
@@ -180,6 +180,46 @@ def _shorten(text: str) -> str:
     return text[: _MAX_LABEL - 3].rstrip() + "..."
 
 
+def _with(
+    first: ExportEvent | ImportEvent | None,
+    rest: Iterator[ExportEvent | ImportEvent],
+) -> Iterator[ExportEvent | ImportEvent]:
+    """The event that was read early, followed by the others."""
+    if first is not None:
+        yield first
+    yield from rest
+
+
+def _print_group(
+    ui: UI,
+    heading: str,
+    messages: list[str],
+    write: Callable[[str], None],
+) -> None:
+    """One block of messages under its own heading, or nothing at all.
+
+    Silent when there is nothing to say -- an empty "Warnings" heading reads
+    like something is missing.
+    """
+    if not messages:
+        return
+
+    # The same sentence repeated once per conversation is one piece of
+    # information. Adapters that describe what a rebuild costs emit it for
+    # every conversation they rebuild; the user needs to read it once.
+    repeats: Counter[str] = Counter(messages)
+    unique = list(dict.fromkeys(messages))
+
+    ui.blank()
+    ui.info(heading)
+    shown = unique[:_MAX_SHOWN_WARNINGS]
+    for message in shown:
+        count = repeats[message]
+        write(f"{message} (x{count})" if count > 1 else message)
+    if len(unique) > len(shown):
+        write(f"... and {len(unique) - len(shown)} more")
+
+
 def _report(
     ui: UI,
     events: Iterator[ExportEvent | ImportEvent],
@@ -199,17 +239,32 @@ def _report(
     the work runs; :meth:`UI.progress` raises its own total rather than sitting
     full while work continues.
 
-    Warnings and errors are collected and printed *after* the bar rather than
-    during it. A warning scrolling past under a live bar is a warning nobody
+    Notes, warnings and errors are collected and printed *after* the bar rather
+    than during it. A message scrolling past under a live bar is one nobody
     reads, and the whole point of showing them is that they are read.
+
+    They are then printed **grouped by severity, under headings**. Before that
+    they came out as one undifferentiated list, every line carrying the warning
+    marker, which made a routine remark about the storage format look like
+    something had gone wrong.
     """
     kinds: Counter[str] = Counter()
+    notes: list[str] = []
     warnings: list[str] = []
     errors: list[str] = []
+    summary_line = ""
     handled = 0
 
+    # The first event is read before the bar is drawn, because a ``started``
+    # event may carry the real amount of work. Sizing the bar from detect()
+    # alone made it read "6/2" for an Antigravity export: two conversations,
+    # but six things to write.
+    opening = next(events, None)
+    if opening is not None and opening.total:
+        total = opening.total
+
     with ui.progress(label, total) as bar:
-        for event in events:
+        for event in _with(opening, events):
             kinds[event.kind] += 1
             if event.kind == "started":
                 bar.describe(_shorten(event.message))
@@ -219,24 +274,28 @@ def _report(
                 bar.describe(_shorten(event.message))
             elif event.kind == "skipped":
                 bar.advance()
+            elif event.kind == "note":
+                notes.append(event.message)
             elif event.kind == "warning":
                 warnings.append(event.message)
             elif event.kind == "error":
                 errors.append(event.message)
+            elif event.kind == "done":
+                summary_line = event.message
 
     ui.blank()
     for message in errors:
         ui.error(message)
 
-    shown = warnings[:_MAX_SHOWN_WARNINGS]
-    for message in shown:
-        ui.warn(message)
-    if len(warnings) > len(shown):
-        ui.warn(f"... and {len(warnings) - len(shown)} more")
+    _print_group(ui, "Notes", notes, ui.detail)
+    _print_group(ui, "Warnings", warnings, ui.warn)
 
+    # The adapter's own closing line wins when it wrote one. It knows things
+    # the screen cannot work out from counting events -- that four of six
+    # writes were subagent trajectories rather than conversations, say.
     skipped = kinds.get("skipped", 0)
-    summary = f"{handled} {noun}"
-    if skipped:
+    summary = summary_line or f"{handled} {noun}"
+    if skipped and not summary_line:
         summary += f", {skipped} skipped"
     if errors:
         ui.error(f"{summary}, {len(errors)} failed")

@@ -284,7 +284,10 @@ def test_detect_finds_the_rollouts(adapter: CodexAdapter) -> None:
     result = adapter.detect()
 
     assert result.installed is True
-    assert result.conversation_count_estimate == 3
+    # Three rollouts, one holding only session metadata. A rollout always opens
+    # with records that say nothing about whether anyone spoke.
+    assert result.conversation_count_estimate == 2
+    assert any("1 empty" in note for note in result.notes)
     assert result.version == "0.149.0-alpha.4.1"
 
 
