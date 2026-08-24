@@ -239,3 +239,51 @@ def test_a_title_falls_back_to_what_the_user_typed(tmp_path: Path) -> None:
 
     assert found.conversation is not None
     assert found.conversation.title == "What does this do?"
+
+
+def test_a_tool_call_with_no_structured_result_still_records_its_outcome() -> None:
+    """Half of real tool invocations carry no `resultDetails` -- they record the
+    outcome only as the line Copilot showed when the call finished. Reading
+    `resultDetails` alone left half the tool calls looking as if they never
+    returned, which is the first thing a person notices reading a migration."""
+    from ferry.adapters.copilot.reader import _tool_blocks
+
+    blocks = _tool_blocks(
+        {
+            "kind": "toolInvocationSerialized",
+            "toolId": "copilot_readFile",
+            "toolCallId": "call-9",
+            "pastTenseMessage": {"value": "Read 3 files", "supportHtml": False},
+            "isComplete": True,
+        }
+    )
+
+    assert [b.type for b in blocks] == ["tool_use", "tool_result"]
+    assert blocks[1].output == "Read 3 files"
+    assert blocks[1].tool_use_id == "call-9"
+
+
+def test_a_structured_result_is_preferred_over_the_display_line() -> None:
+    from ferry.adapters.copilot.reader import _tool_blocks
+
+    blocks = _tool_blocks(
+        {
+            "kind": "toolInvocationSerialized",
+            "toolId": "t",
+            "toolCallId": "call-1",
+            "resultDetails": {"lines": 12},
+            "pastTenseMessage": {"value": "Read it"},
+        }
+    )
+
+    assert blocks[1].output == {"lines": 12}
+
+
+def test_a_tool_call_that_recorded_no_outcome_at_all_yields_only_the_call() -> None:
+    """Some invocations carry neither. Inventing a result would be worse than
+    showing a call that did not report back."""
+    from ferry.adapters.copilot.reader import _tool_blocks
+
+    blocks = _tool_blocks({"kind": "toolInvocationSerialized", "toolId": "t", "toolCallId": "c"})
+
+    assert [b.type for b in blocks] == ["tool_use"]

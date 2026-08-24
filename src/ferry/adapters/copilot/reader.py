@@ -118,11 +118,18 @@ def _thinking_text(value: Any) -> str:
 
 
 def _tool_blocks(block: dict[str, Any]) -> list[ContentBlock]:
-    """A tool invocation as a call, and its result when one is recorded.
+    """A tool invocation as a call, and its outcome.
 
-    ``toolCallId`` links the two. Copilot records the result inside the same
-    block rather than as a separate one, so both come from here -- and a call
-    that never completed yields only the call, which is what happened.
+    ``toolCallId`` links the two. Copilot records the outcome inside the same
+    block rather than as a separate one, so both come from here.
+
+    **Only half of real tool invocations carry ``resultDetails``** -- 52 of 104
+    on this machine. The rest record the outcome only as ``pastTenseMessage``,
+    the line Copilot showed the user when the call finished ("Read 3 files").
+    Reading `resultDetails` alone left half the tool calls looking as though
+    they never returned, which is both wrong and exactly what a person would
+    notice first when reading a migrated conversation. Found by working through
+    the acceptance checklist rather than by any test.
     """
     call_id = block.get("toolCallId")
     name = block.get("toolId")
@@ -134,10 +141,28 @@ def _tool_blocks(block: dict[str, Any]) -> list[ContentBlock]:
             input=specific if isinstance(specific, dict) else {},
         )
     ]
+    if not isinstance(call_id, str):
+        return out
+
     details = block.get("resultDetails")
-    if details is not None and isinstance(call_id, str):
+    if details is not None:
         out.append(ToolResultBlock(tool_use_id=call_id, output=details))
+        return out
+
+    outcome = _markdown_value(block.get("pastTenseMessage"))
+    if outcome:
+        out.append(ToolResultBlock(tool_use_id=call_id, output=outcome))
     return out
+
+
+def _markdown_value(value: Any) -> str:
+    """The text of a ``MarkdownString`` field, wherever one is expected."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        text = value.get("value")
+        return text if isinstance(text, str) else ""
+    return ""
 
 
 def _response_blocks(

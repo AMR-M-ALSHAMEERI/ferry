@@ -338,8 +338,13 @@ writes the marker without the reasoning.
 ### Images
 
 Pasted images are stored **inline in the transcript**, base64 in
-`variableData.variables[]` with `kind: "image"` and a `mimeType`. The copy in
-`vscode-chat-images\` is not needed to recover them.
+`variableData.variables[]` with `kind: "image"` and a `mimeType`.
+
+**The transcript is the authoritative copy, not `vscode-chat-images\`.** That
+directory is transient: it held two PNGs during this work and VS Code had
+removed it entirely a few hours later, while both images remained fully
+recoverable from the transcripts. An adapter that read the directory would have
+started returning nothing, with no error.
 
 `kind: "file"` variables are *references* to files, holding a path and no
 content.

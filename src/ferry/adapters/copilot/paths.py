@@ -55,9 +55,15 @@ EMPTY_WINDOW_DIR = "emptyWindowChatSessions"
 CHAT_IMAGES_DIR = "vscode-chat-images"
 """Images pasted into any chat.
 
-Sits *beside* the workspace keys rather than inside one, so it is shared
-across every workspace. An import must not assume it belongs to the
-conversation that brought it.
+Sits *beside* the workspace keys rather than inside one, so it is shared across
+every workspace.
+
+**Ferry does not read images from here, and should not start.** This directory
+is transient: it held two PNGs during M5 and VS Code had deleted it a few hours
+later, while both images were still fully recoverable from the transcripts,
+where they are stored base64-encoded. Reading the directory would have begun
+silently returning nothing. The name is kept because the self-check fingerprints
+it when it exists.
 """
 
 
