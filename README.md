@@ -86,6 +86,11 @@ as a conversation you had.
   is not on this one, Ferry asks where those folders live now rather than
   restoring paths that point nowhere.
 - Close the target IDE before importing.
+- **Inspect** shows you what is in a bundle without importing it — every
+  conversation, its size, and the folders it expects to find. Deleting lives on
+  that same screen, because you delete something after looking at it. Deleting
+  one conversation keeps a copy in `~/.ferry/backups` first; deleting a whole
+  bundle does not, and says so.
 
 See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for contributing, and
 [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) (added at M7) once issues

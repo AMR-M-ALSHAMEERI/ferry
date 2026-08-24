@@ -19,6 +19,7 @@ import json
 import os
 import shutil
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID
 
@@ -31,6 +32,30 @@ MANIFEST_NAME = "manifest.json"
 CONVERSATIONS_DIR = "conversations"
 ATTACHMENTS_DIR = "attachments"
 SOURCE_RAW_DIR = "source_raw"
+
+
+@dataclass(frozen=True)
+class Removal:
+    """What a delete took away.
+
+    Returned rather than printed so the caller can say it in its own words, and
+    so a test can assert on the numbers instead of on a sentence.
+    """
+
+    conversations: int = 0
+    files: int = 0
+    bytes_freed: int = 0
+    backup: Path | None = None
+    """Where the copy went, when one was taken. ``None`` means the caller asked
+    for no backup -- never that one was attempted and failed."""
+
+
+def _tree_files(path: Path) -> list[Path]:
+    if path.is_file():
+        return [path]
+    if not path.is_dir():
+        return []
+    return sorted(child for child in path.rglob("*") if child.is_file())
 
 
 class BundleError(Exception):
@@ -258,6 +283,104 @@ class Bundle:
             return []
         return sorted(p for p in directory.rglob("*") if p.is_file())
 
+    # ---------- deleting ----------
+
+    def conversation_files(self, conversation_id: UUID) -> list[Path]:
+        """Every file that belongs to one conversation.
+
+        **A conversation is not one file.** Removing the UCS document and
+        leaving ``attachments/<uuid>/`` and ``source_raw/<uuid>.bin`` behind
+        produces a bundle that still validates while carrying orphaned
+        megabytes -- for an Antigravity conversation, the original database,
+        which is most of its size.
+        """
+        return [
+            *_tree_files(self.conversation_path(conversation_id)),
+            *_tree_files(self.root / ATTACHMENTS_DIR / str(conversation_id)),
+            *_tree_files(self.source_raw_path(conversation_id)),
+            *_tree_files(self.source_raw_sidecar_dir(conversation_id)),
+        ]
+
+    def delete_conversation(self, conversation_id: UUID, *, backup: bool = True) -> Removal:
+        """Remove one conversation and everything belonging to it.
+
+        Args:
+            conversation_id: Which one.
+            backup: Copy it into ``~/.ferry/backups`` first. On by default, and
+                the reasoning is not the same as for an import. An import
+                overwrites something that also exists in the source tool; a
+                bundle **is** the backup, so deleting from one is the only
+                operation in Ferry after which the data is simply gone.
+
+        Returns:
+            What was removed.
+
+        Raises:
+            BundleError: If the conversation is not in this bundle, or if a
+                backup was asked for and could not be taken. **The delete does
+                not proceed in that case** -- a backup that failed is a reason
+                to stop, not a step to skip.
+        """
+        if not self.has_conversation(conversation_id):
+            raise BundleError(f"conversation {conversation_id} not in bundle")
+
+        doomed = self.conversation_files(conversation_id)
+        freed = sum(_size_of(path) for path in doomed)
+
+        stored: Path | None = None
+        if backup:
+            from ferry.core.backup import back_up
+
+            label = f"bundle-{self.root.name}"
+            try:
+                for path in doomed:
+                    stored = back_up(path, label)
+            except OSError as exc:
+                raise BundleError(
+                    f"could not back up {conversation_id} before deleting it, "
+                    f"so nothing was removed: {exc}"
+                ) from exc
+
+        # The manifest goes last. Until it is rewritten the bundle still claims
+        # this conversation, which `validate()` reports as a count mismatch --
+        # a visible, repairable state. The alternative order leaves a bundle
+        # that looks correct while the files are already gone.
+        for path in doomed:
+            path.unlink(missing_ok=True)
+        for directory in (
+            self.root / ATTACHMENTS_DIR / str(conversation_id),
+            self.source_raw_sidecar_dir(conversation_id),
+        ):
+            _remove_empty_tree(directory)
+
+        remaining = [self.load_tool(cid) for cid in self.list_conversations()]
+        self.manifest.conversation_count = len(remaining)
+        self.manifest.tools_included = [
+            tool for tool in self.manifest.tools_included if tool in set(remaining)
+        ]
+        self._write_manifest()
+
+        return Removal(
+            conversations=1,
+            files=len(doomed),
+            bytes_freed=freed,
+            backup=stored.parent if stored else None,
+        )
+
+    def load_tool(self, conversation_id: UUID) -> str | None:
+        """The tool a conversation came from, without loading the whole thing.
+
+        Used when rewriting ``tools_included`` after a delete. Loading every
+        remaining conversation through the models to answer one question would
+        make deleting from a 121 MB bundle cost as much as importing it.
+        """
+        try:
+            raw = json.loads(self.conversation_path(conversation_id).read_bytes())
+        except (OSError, ValueError):
+            return None
+        tool = raw.get("source_tool") if isinstance(raw, dict) else None
+        return tool if isinstance(tool, str) else None
+
     # ---------- reading ----------
 
     def list_conversations(self) -> list[UUID]:
@@ -397,3 +520,73 @@ class Bundle:
 def json_roundtrip_equal(a: Conversation, b: Conversation) -> bool:
     """True when two conversations serialise identically. Used by round-trip tests."""
     return bool(json.loads(a.model_dump_json()) == json.loads(b.model_dump_json()))
+
+
+def _size_of(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
+
+
+def _remove_empty_tree(directory: Path) -> None:
+    """Drop a directory once nothing is left in it.
+
+    Only when empty. A directory still holding files belongs to something this
+    delete did not cover, and removing it would take that with it.
+    """
+    if not directory.is_dir():
+        return
+    for child in sorted(directory.rglob("*"), reverse=True):
+        if child.is_dir() and not any(child.iterdir()):
+            child.rmdir()
+    if not any(directory.iterdir()):
+        directory.rmdir()
+
+
+def delete_bundle(root: Path, *, backup: bool = False) -> Removal:
+    """Remove a whole bundle directory.
+
+    **Refuses anything that is not a bundle.** This is the only function in
+    Ferry that deletes a directory tree it did not create, and the check that
+    ``manifest.json`` is present is what stands between a mistyped path and
+    someone's Documents folder.
+
+    Args:
+        root: The bundle directory.
+        backup: Copy every file into ``~/.ferry/backups`` first. **Off by
+            default here**, unlike deleting a single conversation: a whole
+            bundle is routinely gigabytes, and copying it to delete it is not
+            a backup so much as a rename the user did not ask for. The caller
+            asks.
+
+    Raises:
+        BundleError: If ``root`` is not a bundle, or a requested backup failed.
+    """
+    if not (root / MANIFEST_NAME).is_file():
+        raise BundleError(f"{root} is not a bundle - refusing to delete it")
+
+    files = _tree_files(root)
+    freed = sum(_size_of(path) for path in files)
+    conversations = len(Bundle.open(root).list_conversations())
+
+    stored: Path | None = None
+    if backup:
+        from ferry.core.backup import back_up
+
+        label = f"bundle-{root.name}"
+        try:
+            for path in files:
+                stored = back_up(path, label)
+        except OSError as exc:
+            raise BundleError(
+                f"could not back {root.name} up before deleting it, so nothing was removed: {exc}"
+            ) from exc
+
+    shutil.rmtree(root)
+    return Removal(
+        conversations=conversations,
+        files=len(files),
+        bytes_freed=freed,
+        backup=stored.parent if stored else None,
+    )

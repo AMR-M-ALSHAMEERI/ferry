@@ -9,7 +9,7 @@ are all real, so later milestones fill in behaviour behind a finished interface.
 from __future__ import annotations
 
 from ferry.adapters.base import Adapter, DetectResult, list_adapters
-from ferry.cli.flows import run_export, run_import
+from ferry.cli.flows import run_export, run_import, run_inspect
 from ferry.cli.motion import MENU_MOTION
 from ferry.cli.theme import IconSet
 from ferry.cli.ui import UI, NonInteractiveError, _DetectionRow
@@ -33,12 +33,11 @@ keyed by the same value.
 """
 
 _MILESTONE_FOR_ACTION: dict[str, str] = {
-    "inspect": "M7",
     "compact": "M7",
 }
 """Actions that genuinely do not exist yet, and when they arrive."""
 
-_WIRED = frozenset({"export", "import"})
+_WIRED = frozenset({"export", "import", "inspect"})
 """Actions that reach a real adapter.
 
 These were stubs reporting "arrives at M3" long after M3 and M4 had shipped --
@@ -172,7 +171,12 @@ def run_menu(ui: UI) -> int:
             # Re-scanned rather than reused: the user may have installed or
             # removed a tool since the menu opened, and acting on a stale answer
             # is how an export silently misses a whole assistant.
-            if action == "export":
+            if action == "inspect":
+                # No scan: this screen reads a bundle, not the machine. Asking
+                # four adapters where their data lives to open a folder the
+                # user already chose is a delay with nothing behind it.
+                run_inspect(ui)
+            elif action == "export":
                 run_export(ui, scan(ui))
             else:
                 run_import(ui, scan(ui))

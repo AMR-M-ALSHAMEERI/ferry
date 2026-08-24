@@ -27,7 +27,14 @@ from ferry.adapters.base import (
     ImportEvent,
     ImportOptions,
 )
-from ferry.cli.flows import _describe, _report, find_bundles, run_export, run_import
+from ferry.cli.flows import (
+    _describe,
+    _report,
+    find_bundles,
+    run_export,
+    run_import,
+    run_inspect,
+)
 from ferry.cli.theme import MONO, Capability
 from ferry.cli.ui import UI, NonInteractiveError
 
@@ -686,3 +693,131 @@ class TestImportOptionsScreen:
         run_import(ui, scanned(adapter))
 
         assert adapter.options[-1].path_remap == ()
+
+
+# --------------------------------------------------------------------------
+# inspect
+# --------------------------------------------------------------------------
+
+
+class TestInspect:
+    """Looking inside a bundle, and deleting from it.
+
+    Deleting lives on this screen because it is the same act: you remove
+    something after looking at it, never before. So these tests care about two
+    things -- that the screen says enough for the decision, and that it does
+    nothing at all until it has been asked twice.
+    """
+
+    def test_it_says_what_is_in_the_bundle(self, bundle_dir: Path) -> None:
+        ui = _Answers(path=str(bundle_dir), actions=["done"])
+
+        run_inspect(ui)
+
+        assert "1 conversation" in ui.text
+        assert "claude-code" in ui.text
+
+    def test_it_lists_the_folders_the_conversations_were_recorded_in(
+        self, bundle_dir: Path, conversation
+    ) -> None:
+        """The list the import screen cannot afford to compute.
+
+        Someone restoring onto another machine needs to see which folders a
+        bundle expects before being asked where those folders now live.
+        """
+        ui = _Answers(path=str(bundle_dir), actions=["done"])
+
+        run_inspect(ui)
+
+        assert conversation.workspace.original_path in ui.text
+
+    def test_looking_changes_nothing(self, bundle_dir: Path) -> None:
+        before = {
+            path: path.read_bytes() for path in sorted(bundle_dir.rglob("*")) if path.is_file()
+        }
+        ui = _Answers(path=str(bundle_dir), actions=["done"])
+
+        run_inspect(ui)
+
+        after = {
+            path: path.read_bytes() for path in sorted(bundle_dir.rglob("*")) if path.is_file()
+        }
+        assert after == before
+
+    def test_a_bundle_that_cannot_be_opened_is_reported_not_raised(self, tmp_path: Path) -> None:
+        empty = tmp_path / "not-a-bundle"
+        empty.mkdir()
+        ui = _Answers(path=str(empty), actions=["done"])
+
+        run_inspect(ui)
+
+        assert "not a bundle" in ui.text
+
+    def test_deleting_a_conversation_names_what_is_lost(
+        self, bundle_dir: Path, tmp_path: Path, monkeypatch
+    ) -> None:
+        """Not a yes or no about "it".
+
+        This is the one action in Ferry after which the data is simply gone --
+        a bundle is the backup -- so the question has to say what is going.
+        """
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+        ui = _Answers(path=str(bundle_dir), actions=["one", "done"], confirm=False)
+
+        run_inspect(ui)
+
+        assert "Deleting:" in ui.text
+        assert "Nothing was deleted" in ui.text
+
+    def test_declining_deletes_nothing(self, bundle_dir: Path, tmp_path: Path, monkeypatch) -> None:
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+        before = sorted(p.name for p in bundle_dir.rglob("*") if p.is_file())
+        ui = _Answers(path=str(bundle_dir), actions=["one", "done"], confirm=False)
+
+        run_inspect(ui)
+
+        assert sorted(p.name for p in bundle_dir.rglob("*") if p.is_file()) == before
+
+    def test_confirming_removes_the_conversation_and_keeps_a_copy(
+        self, bundle_dir: Path, tmp_path: Path, monkeypatch
+    ) -> None:
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+        ui = _Answers(path=str(bundle_dir), actions=["one", "done"], confirm=True)
+
+        run_inspect(ui)
+
+        assert list((bundle_dir / "conversations").glob("*.json")) == []
+        assert "Deleted" in ui.text
+        assert list((home / ".ferry" / "backups").rglob("*.json"))
+
+    def test_declining_to_delete_the_bundle_leaves_it(self, bundle_dir: Path) -> None:
+        ui = _Answers(path=str(bundle_dir), actions=["all", "done"], confirm=False)
+
+        run_inspect(ui)
+
+        assert bundle_dir.is_dir()
+        assert "Nothing was deleted" in ui.text
+
+    def test_confirming_removes_the_whole_bundle(self, bundle_dir: Path) -> None:
+        ui = _Answers(path=str(bundle_dir), actions=["all"], confirm=True)
+
+        run_inspect(ui)
+
+        assert not bundle_dir.exists()
+        assert "Deleted" in ui.text
+
+    def test_a_broken_bundle_can_still_be_looked_at(self, bundle_dir: Path) -> None:
+        """The bundle you cannot read is the one you need this screen for."""
+        document = next((bundle_dir / "conversations").glob("*.json"))
+        document.write_text("{ not json", encoding="utf-8")
+        ui = _Answers(path=str(bundle_dir), actions=["done"])
+
+        run_inspect(ui)
+
+        assert "cannot be read" in ui.text

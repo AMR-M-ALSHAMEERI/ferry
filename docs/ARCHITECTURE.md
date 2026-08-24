@@ -117,6 +117,43 @@ Implementation: `src/ferry/core/bundle.py`, `src/ferry/core/manifest.py`.
 - **`has_conversation()`** lets an adapter skip already-written files when
   resuming an interrupted export.
 
+### Looking inside a bundle, and deleting from it
+
+`ferry.core.summary.summarise()` describes a bundle without importing it: what
+each conversation is, when it happened, how much of the bundle it accounts for,
+and **which folders the conversations were recorded in** — the list the import
+screen cannot afford to compute, since answering it means opening every
+conversation file and one Codex conversation is 53 MB.
+
+It reads with `json.loads`, deliberately **not** through the UCS models. A
+53 MB conversation validated through pydantic builds tens of thousands of
+objects to answer six questions, and a conversation that *fails* validation
+still has to appear in the list — a bundle you cannot read is precisely the one
+you need to look at, and possibly the one you want to delete.
+
+**A count here is a count of the bundle, not of the tool.** A Codex bundle
+holding five conversations and one subagent thread reports six, because six
+conversation documents is what it holds. The scan screen reports what the
+application lists; this screen reports what the file contains. Both are true
+and they are answers to different questions.
+
+**Deleting** (`Bundle.delete_conversation`, `delete_bundle`) is the only thing
+Ferry does after which the data is simply gone — every other write leaves the
+source tool holding the original. Three properties follow:
+
+- **A conversation is not one file.** The document, `attachments/<uuid>/`,
+  `source_raw/<uuid>.bin` and its sidecars go together, and the manifest count
+  and `tools_included` move with them. Removing the document alone leaves a
+  bundle that still validates while carrying orphaned megabytes — for an
+  Antigravity conversation, the original database, which is most of its size.
+- **A copy is kept first when deleting one conversation**, and a failed backup
+  aborts the delete rather than being skipped. Deleting a *whole* bundle
+  defaults the other way: a bundle is routinely gigabytes, and copying one in
+  order to delete it is a rename the user did not ask for.
+- **`delete_bundle` refuses any directory without a `manifest.json`.** It is
+  the only place Ferry removes a tree it did not create, and that check is what
+  stands between a mistyped path and someone's Documents folder.
+
 ## Adapter contract
 
 Every adapter implements three methods (see PLAN.md §4 for the full signature):

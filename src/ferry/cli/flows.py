@@ -6,10 +6,10 @@ interface, and the menu still told anyone who picked Export that it would
 nothing more: it picks a tool, picks a place, runs the adapter and renders the
 events it yields.
 
-It deliberately does **not** add features. Dry-run, conflict resolution,
-encryption and ``ferry inspect`` are M7; the adapters already accept the
-options, and this screen simply uses the safe defaults. The one thing it must
-get right is that a person can see what is about to happen and stop it.
+The one thing it must get right is that a person can see what is about to
+happen and stop it. That is why the import screen offers a preview before it
+offers to write, and why the inspect screen shows a bundle in full before it
+offers to delete anything from it.
 
 Every event an adapter yields is shown. An adapter that reports 12 warnings
 about what it could not carry is telling the user something they need, and a
@@ -33,11 +33,13 @@ from ferry.adapters.base import (
     ImportOptions,
     OnConflict,
 )
+from ferry.adapters.census import count_of
 from ferry.cli.ui import UI, NonInteractiveError
-from ferry.core import Bundle, BundleError
+from ferry.core import Bundle, BundleError, BundleSummary, delete_bundle, summarise
 from ferry.core.bundle import MANIFEST_NAME
+from ferry.core.summary import ConversationSummary
 
-__all__ = ["Scanned", "find_bundles", "run_export", "run_import"]
+__all__ = ["Scanned", "find_bundles", "run_export", "run_import", "run_inspect"]
 
 _MAX_SHOWN_WARNINGS = 8
 """Messages printed in full, per group, before the rest are counted."""
@@ -48,6 +50,9 @@ _TYPE_A_PATH = "\n type a path"
 It holds a newline. Every other value in the list is ``str(absolute_path)``,
 and no path can contain one, so this cannot be mistaken for a real directory.
 """
+
+_MAX_LISTED_FOLDERS = 10
+"""Enough to see the shape of a bundle without turning the screen into a list."""
 
 _MAX_LISTED_BUNDLES = 12
 """Enough to cover a working directory; past that the list stops being a list."""
@@ -133,7 +138,7 @@ def _describe(path: Path) -> str:
     )
 
 
-def _choose_bundle(ui: UI) -> Path | None:
+def _choose_bundle(ui: UI, question: str = "Which bundle should be imported?") -> Path | None:
     """Pick a bundle by arrow key, falling back to typing a path.
 
     The first version of this screen asked for a path outright. With no
@@ -149,7 +154,7 @@ def _choose_bundle(ui: UI) -> Path | None:
     listed = bundles[:_MAX_LISTED_BUNDLES]
     choices = [(str(p), _describe(p)) for p in listed]
     choices.append((_TYPE_A_PATH, "Somewhere else - type the path"))
-    chosen = ui.select("Which bundle should be imported?", choices, hint="use --bundle")
+    chosen = ui.select(question, choices, hint="use --bundle")
     if chosen is None:
         return None
     if chosen == _TYPE_A_PATH:
@@ -544,3 +549,238 @@ def run_import(ui: UI, adapters: Scanned) -> None:
         label="Importing",
         total=count,
     )
+
+
+# --------------------------------------------------------------------------
+# inspect
+# --------------------------------------------------------------------------
+
+
+def _megabytes(count: int) -> str:
+    """A size someone can read at a glance, never a bare byte count.
+
+    Under a megabyte reports as "under 1 MB" rather than in kilobytes. These
+    numbers sit in a column beside multi-gigabyte databases, and mixing units
+    down one column makes them harder to compare, not easier.
+    """
+    if count < 1024 * 1024:
+        return "under 1 MB"
+    return f"{count / 1024 / 1024:,.1f} MB"
+
+
+def _when(summary: ConversationSummary) -> str:
+    moment = summary.updated_at or summary.created_at
+    return f"{moment:%d %b %Y}" if moment else "undated"
+
+
+_MAX_TITLE = 48
+"""How much of a conversation title fits before the facts about it.
+
+Titles are whatever the tool made of the first message, and Codex routinely
+makes that the entire paragraph. Trimming the **line** put the title first and
+pushed the message count, the date and the size off the end -- so every row
+read as a wall of prose with none of the information needed to choose between
+them. The title is the variable part, so the title is what gets cut.
+"""
+
+
+def _conversation_line(summary: ConversationSummary) -> str:
+    name = _clip(summary.name, _MAX_TITLE)
+    if summary.unreadable:
+        return f"{name}  -  cannot be read: {_clip(summary.unreadable, 40)}"
+    parts = [count_of(summary.messages, "message"), _when(summary)]
+    if summary.attachments:
+        parts.append(count_of(summary.attachments, "attachment"))
+    if summary.has_source_raw:
+        parts.append("original kept")
+    parts.append(_megabytes(summary.bytes_on_disk))
+    return f"{name:<{_MAX_TITLE}}  {', '.join(parts)}"
+
+
+def _clip(text: str, limit: int) -> str:
+    """Trim to ``limit`` *including* the ellipsis.
+
+    Trimming to the limit and then appending three dots produces a string
+    longer than the limit it was meant to keep -- the same fault :func:`_shorten`
+    was written to avoid for the progress bar.
+    """
+    flat = " ".join(text.split())
+    return flat if len(flat) <= limit else flat[: limit - 3].rstrip() + "..."
+
+
+def _show(ui: UI, summary: BundleSummary) -> None:
+    """Print the whole bundle: what it holds, where it came from, what is wrong."""
+    manifest = summary.manifest
+    ui.blank()
+    ui.info(f"{summary.root.name}  -  {_megabytes(summary.bytes_on_disk)} on disk")
+    ui.detail(f"made {manifest.created_at:%d %b %Y at %H:%M} by {manifest.created_by}")
+    machine = manifest.source_machine
+    ui.detail(
+        f"from {machine.hostname or 'an unnamed machine'} ({machine.os}), "
+        f"home folder {machine.user_home}"
+    )
+    if manifest.encrypted:
+        ui.detail(f"encrypted with {manifest.encryption_algo or 'an unrecorded algorithm'}")
+
+    ui.blank()
+    if not summary.conversations:
+        ui.info("No conversations in this bundle.")
+    else:
+        by_tool = ", ".join(
+            f"{count} from {tool}" for tool, count in sorted(summary.by_tool.items())
+        )
+        ui.info(f"{count_of(len(summary.conversations), 'conversation')}: {by_tool}")
+        for conversation in summary.conversations:
+            ui.detail(_conversation_line(conversation))
+
+    folders = summary.folders
+    if folders:
+        ui.blank()
+        # The list the import screen cannot afford to compute. Someone
+        # restoring onto another machine needs to see which folders a bundle
+        # expects before being asked where those folders now live.
+        ui.info(count_of(len(folders), "folder") + " these conversations were recorded in:")
+        for folder in folders[:_MAX_LISTED_FOLDERS]:
+            ui.detail(folder)
+        if len(folders) > _MAX_LISTED_FOLDERS:
+            ui.detail(f"... and {len(folders) - _MAX_LISTED_FOLDERS} more")
+
+    if summary.problems:
+        ui.blank()
+        ui.warn(count_of(len(summary.problems), "problem") + " with this bundle:")
+        for problem in summary.problems[:_MAX_SHOWN_WARNINGS]:
+            ui.detail(problem)
+        if len(summary.problems) > _MAX_SHOWN_WARNINGS:
+            ui.detail(f"... and {len(summary.problems) - _MAX_SHOWN_WARNINGS} more")
+    ui.blank()
+
+
+def run_inspect(ui: UI) -> None:
+    """Look inside a bundle, and delete from it if that is what you came to do.
+
+    Deleting lives on this screen rather than one of its own because it is the
+    same act: you remove something after looking at it, never before. A
+    standalone delete menu item would be a screen whose first job is to
+    describe what you are about to lose -- which is this screen.
+    """
+    try:
+        picked = _choose_bundle(ui, "Which bundle would you like to look inside?")
+    except NonInteractiveError as exc:
+        ui.error(str(exc))
+        return
+    if picked is None:
+        return
+
+    while True:
+        try:
+            bundle = Bundle.open(picked)
+        except BundleError as exc:
+            ui.error(str(exc))
+            ui.blank()
+            return
+
+        with ui.scanning(f"Reading {picked.name}"):
+            summary = summarise(bundle)
+        _show(ui, summary)
+
+        choices = [("done", "Done")]
+        if summary.conversations:
+            choices.append(("one", "Delete one conversation from this bundle"))
+        choices.append(("all", "Delete this whole bundle"))
+        try:
+            action = ui.select("Anything else?", choices, hint="inspect is read-only")
+        except NonInteractiveError as exc:
+            ui.error(str(exc))
+            return
+
+        if action is None or action == "done":
+            return
+        if action == "all":
+            if _delete_bundle(ui, summary):
+                return
+            continue
+        _delete_conversation(ui, bundle, summary)
+
+
+def _delete_conversation(ui: UI, bundle: Bundle, summary: BundleSummary) -> None:
+    """Pick one conversation and remove it, its attachments and its original file."""
+    try:
+        chosen = ui.select(
+            "Which conversation should go?",
+            [
+                (str(conversation.id), _conversation_line(conversation))
+                for conversation in summary.conversations
+            ],
+            hint="inspect is read-only",
+        )
+        if chosen is None:
+            return
+        doomed = next(c for c in summary.conversations if str(c.id) == chosen)
+
+        # Named, not counted. This is the one action in Ferry after which the
+        # data is simply gone -- a bundle *is* the backup -- so the question
+        # says what is being lost instead of asking for a yes about "it".
+        ui.blank()
+        ui.warn(f"Deleting: {doomed.name}")
+        ui.detail(
+            f"{count_of(doomed.messages, 'message')}, {_when(doomed)}, "
+            f"{_megabytes(doomed.bytes_on_disk)}, from {doomed.tool or 'an unknown tool'}"
+        )
+        ui.detail(
+            f"{count_of(len(bundle.conversation_files(doomed.id)), 'file')} will be removed: "
+            "the conversation, its attachments and the original file it came from"
+        )
+        ui.info("A copy goes to ~/.ferry/backups first.")
+        if not ui.confirm("Delete it?", default=False, hint="inspect is read-only"):
+            ui.info("Nothing was deleted.")
+            ui.blank()
+            return
+    except NonInteractiveError as exc:
+        ui.error(str(exc))
+        return
+
+    try:
+        removed = bundle.delete_conversation(doomed.id)
+    except BundleError as exc:
+        ui.error(str(exc))
+        ui.blank()
+        return
+
+    ui.success(
+        f"Deleted {doomed.name} - {count_of(removed.files, 'file')}, "
+        f"{_megabytes(removed.bytes_freed)} freed"
+    )
+    if removed.backup:
+        ui.detail(f"copy kept at {removed.backup}")
+    ui.blank()
+
+
+def _delete_bundle(ui: UI, summary: BundleSummary) -> bool:
+    """Remove a whole bundle. Returns ``True`` when it is gone."""
+    try:
+        ui.blank()
+        ui.warn(f"Deleting the whole bundle: {summary.root}")
+        ui.detail(
+            f"{count_of(len(summary.conversations), 'conversation')}, "
+            f"{_megabytes(summary.bytes_on_disk)}, made "
+            f"{summary.manifest.created_at:%d %b %Y}"
+        )
+        ui.detail("Nothing puts this back. A bundle is the backup.")
+        if not ui.confirm("Delete it?", default=False, hint="inspect is read-only"):
+            ui.info("Nothing was deleted.")
+            ui.blank()
+            return False
+    except NonInteractiveError as exc:
+        ui.error(str(exc))
+        return False
+
+    try:
+        removed = delete_bundle(summary.root)
+    except (BundleError, OSError) as exc:
+        ui.error(str(exc))
+        ui.blank()
+        return False
+
+    ui.success(f"Deleted {summary.root.name} - {_megabytes(removed.bytes_freed)} freed")
+    ui.blank()
+    return True

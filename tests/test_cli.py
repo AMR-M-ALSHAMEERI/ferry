@@ -78,14 +78,18 @@ def test_no_adapter_is_a_stub_any_more() -> None:
 def test_export_and_import_reach_a_real_adapter() -> None:
     """They were stubs saying "arrives at M3" long after M3 and M4 had shipped.
 
-    The assertion that replaced that message is now itself obsolete: the two
+    The assertion that replaced that message is now itself obsolete: the
     actions no longer print anything, they run. What must stay true is that
-    neither is treated as unbuilt.
+    none of them is treated as unbuilt -- and that every menu item is either
+    wired or honestly named as unbuilt, with nothing falling between.
     """
-    from ferry.cli.menu import _MILESTONE_FOR_ACTION, _WIRED
+    from ferry.cli.menu import _MILESTONE_FOR_ACTION, _WIRED, MENU_ITEMS
 
-    assert _WIRED == {"export", "import"}
+    assert _WIRED == {"export", "import", "inspect"}
     assert not (_WIRED & set(_MILESTONE_FOR_ACTION))
+
+    accounted = _WIRED | set(_MILESTONE_FOR_ACTION) | {"theme", "quit"}
+    assert {action for action, _ in MENU_ITEMS} <= accounted
 
 
 def test_an_action_that_really_is_unbuilt_still_names_its_milestone() -> None:
