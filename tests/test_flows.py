@@ -1151,3 +1151,80 @@ class TestWrongPassphraseAsksAgain:
 
         assert ui.secrets_asked == 1
         assert "did not open it" not in ui.text
+
+
+class TestTheOpeningSpinnerStops:
+    """ "Opening" kept spinning long after the bundle was open.
+
+    The spinner and the unsealed copy were opened as one ``with``, so the
+    spinner stayed alive across the ``yield`` -- underneath the import screen,
+    underneath the conflict question, underneath the whole inspect listing.
+    They need different lifetimes: the spinner ends when the work it describes
+    ends, the unsealed copy lives until the caller is finished with it.
+    """
+
+    def _sealed(self, tmp_path: Path, conversation) -> Path:  # type: ignore[no-untyped-def]
+        from ferry.core import Bundle, Manifest, SourceMachine
+        from ferry.core.sealed import seal_bundle
+
+        root = tmp_path / "plain-bundle"
+        bundle = Bundle.create(
+            root,
+            Manifest(
+                created_at=datetime(2026, 8, 1, tzinfo=UTC),
+                created_by="ferry test",
+                source_machine=SourceMachine(os="win32", user_home=str(Path.home())),
+            ),
+        )
+        bundle.add_conversation(conversation)
+        return seal_bundle(root, PHRASE).path
+
+    def test_the_spinner_is_closed_before_the_caller_sees_the_bundle(
+        self, tmp_path: Path, conversation
+    ) -> None:  # type: ignore[no-untyped-def]
+        from ferry.cli.flows import _opened
+
+        archive = self._sealed(tmp_path, conversation)
+        ui = _Spied(secrets=[PHRASE])
+
+        with _opened(ui, archive) as root:
+            assert root is not None
+            spinning_while_the_caller_works = ui.spinning
+            assert (root / "manifest.json").is_file(), "the bundle must really be open"
+
+        assert not spinning_while_the_caller_works, (
+            'the "Opening" spinner was still running while the caller did its work'
+        )
+        assert ui.spun == ["Opening"], "the unsealing itself should still show a spinner"
+
+    def test_the_unsealed_copy_outlives_the_spinner(self, tmp_path: Path, conversation) -> None:  # type: ignore[no-untyped-def]
+        """The other half. Ending the spinner early must not end the bundle."""
+        from ferry.cli.flows import _opened
+
+        archive = self._sealed(tmp_path, conversation)
+        ui = _Spied(secrets=[PHRASE])
+
+        with _opened(ui, archive) as root:
+            assert root is not None
+            inside = root
+            assert list(root.glob("conversations/*.json"))
+
+        assert not inside.exists(), "the unsealed copy must be cleaned up on the way out"
+
+
+class _Spied(_Answers):
+    """Records which spinners ran, and whether one is running right now."""
+
+    def __init__(self, **kwargs: object) -> None:
+        super().__init__(**kwargs)  # type: ignore[arg-type]
+        self.spun: list[str] = []
+        self.spinning = False
+
+    @contextmanager
+    def scanning(self, label: str):  # type: ignore[no-untyped-def]
+        self.spun.append(label)
+        self.spinning = True
+        try:
+            yield
+        finally:
+            self.spinning = False

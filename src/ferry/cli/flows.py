@@ -22,7 +22,7 @@ from __future__ import annotations
 import shutil
 from collections import Counter
 from collections.abc import Callable, Iterator, Sequence
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final, cast
@@ -580,7 +580,16 @@ def _opened(ui: UI, picked: Path) -> Iterator[Path | None]:
             return
 
         try:
-            with ui.scanning("Opening"), unsealed(picked, passphrase) as bundle:
+            # The spinner covers the unsealing and **stops there**. Written as
+            # one `with` alongside `unsealed`, it stayed alive across the
+            # `yield` -- so "Opening" kept spinning underneath the import
+            # screen, the conflict question and the whole inspect listing,
+            # long after the bundle was open. The two need different
+            # lifetimes: the spinner ends when the work it describes ends, the
+            # unsealed copy lives until the caller is finished with it.
+            with ExitStack() as opened:
+                with ui.scanning("Opening"):
+                    bundle = opened.enter_context(unsealed(picked, passphrase))
                 yield bundle.root
             return
         except WrongPassphrase:
