@@ -29,6 +29,10 @@ coverage.xml
 # ===== Ferry-specific: DATA SAFETY =====
 # Never commit real conversation data or bundles
 *.zip
+# A sealed bundle. It is encrypted, but it is still every conversation
+# you have had, and the default export destination is the working
+# directory -- one already landed in the repo root while testing.
+*.ferry
 *.tar.gz
 *.pb
 *.jsonl

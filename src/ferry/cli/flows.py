@@ -25,7 +25,7 @@ from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import Final, cast
 
 from ferry.adapters.base import (
     Adapter,
@@ -518,6 +518,41 @@ def _offer_to_seal(ui: UI, target: Path) -> None:
     ui.blank()
 
 
+PASSPHRASE_TRIES: Final = 3
+"""Attempts before the screen gives up.
+
+Three because a mistyped passphrase is the ordinary case and sending someone
+back to the main menu over one slip is hostile -- but a prompt that never stops
+asking is a prompt nobody can leave. Escape gets out at any point and does not
+spend an attempt.
+
+There is no lockout and no delay beyond deriving the key, which already costs
+about a quarter of a second. That is the rate limit, and it applies to someone
+with the file and a script exactly as it applies here.
+"""
+
+
+def _passphrase_refused(ui: UI, attempt: int) -> None:
+    """Say a passphrase did not work, without claiming to know why.
+
+    Ferry cannot tell a mistyped passphrase from an altered file -- the
+    authentication tag fails identically for both, deliberately. So the first
+    tries say the plain thing, and the last one names **both** possibilities
+    rather than sending someone to hunt for a passphrase that was right all
+    along.
+    """
+    left = PASSPHRASE_TRIES - attempt
+    if left > 0:
+        ui.error(f"That did not open it. {count_of(left, 'try', 'tries')} left.")
+        return
+    ui.error("That did not open it.")
+    ui.detail(
+        "Either the passphrase is not the right one, or the file has been "
+        "altered since it was sealed. Ferry cannot tell those apart."
+    )
+    ui.blank()
+
+
 @contextmanager
 def _opened(ui: UI, picked: Path) -> Iterator[Path | None]:
     """Yield a directory holding the bundle, unsealing it first if it is sealed.
@@ -530,27 +565,33 @@ def _opened(ui: UI, picked: Path) -> Iterator[Path | None]:
         yield picked
         return
 
-    try:
-        passphrase = ui.secret(f"Passphrase for {picked.name}", hint="use --passphrase")
-    except NonInteractiveError as exc:
-        ui.error(str(exc))
-        yield None
-        return
-    if not passphrase:
-        yield None
-        return
+    for attempt in range(1, PASSPHRASE_TRIES + 1):
+        try:
+            passphrase = ui.secret(f"Passphrase for {picked.name}", hint="use --passphrase")
+        except NonInteractiveError as exc:
+            ui.error(str(exc))
+            yield None
+            return
+        if not passphrase:
+            # Escape, or an empty line. Backing out is not a failed attempt and
+            # must not be spent as one -- the way out of this prompt has to work
+            # on the first press, every time.
+            yield None
+            return
 
-    try:
-        with ui.scanning("Opening"), unsealed(picked, passphrase) as bundle:
-            yield bundle.root
-    except WrongPassphrase:
-        ui.error("That passphrase did not open it.")
-        ui.blank()
-        yield None
-    except (BundleError, OSError) as exc:
-        ui.error(str(exc))
-        ui.blank()
-        yield None
+        try:
+            with ui.scanning("Opening"), unsealed(picked, passphrase) as bundle:
+                yield bundle.root
+            return
+        except WrongPassphrase:
+            _passphrase_refused(ui, attempt)
+        except (BundleError, OSError) as exc:
+            ui.error(str(exc))
+            ui.blank()
+            yield None
+            return
+
+    yield None
 
 
 def run_export(ui: UI, adapters: Scanned) -> None:

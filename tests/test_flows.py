@@ -1071,3 +1071,83 @@ class _RealExport(Adapter):
 
     def import_(self, bundle_dir: Path, options: ImportOptions) -> Iterator[ImportEvent]:
         yield ImportEvent(kind="done", message="nothing")
+
+
+class TestWrongPassphraseAsksAgain:
+    """One slip must not send someone back to the main menu.
+
+    The first version asked once and gave up, which is the wrong shape for the
+    single most mistyped thing in any interface. It now asks again, up to three
+    times -- and escape still leaves on the first press, because a prompt you
+    cannot get out of is worse than one that gives up too early.
+    """
+
+    def _sealed(self, tmp_path: Path, conversation) -> Path:  # type: ignore[no-untyped-def]
+        from ferry.core import Bundle, Manifest, SourceMachine
+        from ferry.core.sealed import seal_bundle
+
+        root = tmp_path / "plain-bundle"
+        bundle = Bundle.create(
+            root,
+            Manifest(
+                created_at=datetime(2026, 8, 1, tzinfo=UTC),
+                created_by="ferry test",
+                source_machine=SourceMachine(os="win32", user_home=str(Path.home())),
+            ),
+        )
+        bundle.add_conversation(conversation)
+        return seal_bundle(root, PHRASE).path
+
+    def test_a_mistyped_passphrase_is_asked_again(self, tmp_path: Path, conversation) -> None:  # type: ignore[no-untyped-def]
+        archive = self._sealed(tmp_path, conversation)
+        ui = _Answers(path=str(archive), actions=["done"], secrets=["wrong", PHRASE])
+
+        run_inspect(ui)
+
+        assert ui.secrets_asked == 2
+        assert "did not open it" in ui.text
+        assert "1 conversation" in ui.text, "the second attempt must actually open it"
+
+    def test_the_tries_remaining_are_named(self, tmp_path: Path, conversation) -> None:  # type: ignore[no-untyped-def]
+        """So the third attempt is not a surprise."""
+        archive = self._sealed(tmp_path, conversation)
+        ui = _Answers(path=str(archive), actions=["done"], secrets=["a", "b", PHRASE])
+
+        run_inspect(ui)
+
+        assert "2 tries left" in ui.text
+        assert "1 try left" in ui.text
+
+    def test_it_gives_up_after_three(self, tmp_path: Path, conversation) -> None:  # type: ignore[no-untyped-def]
+        """A prompt that never stops asking is a prompt nobody can leave."""
+        archive = self._sealed(tmp_path, conversation)
+        ui = _Answers(path=str(archive), actions=["done"], secrets=["a", "b", "c", PHRASE])
+
+        run_inspect(ui)
+
+        assert ui.secrets_asked == 3
+
+    def test_the_last_refusal_names_both_causes(self, tmp_path: Path, conversation) -> None:  # type: ignore[no-untyped-def]
+        """Ferry cannot tell a wrong passphrase from an altered file.
+
+        The tag fails identically for both, deliberately. Saying only "wrong
+        passphrase" would send someone hunting for a passphrase that was right
+        all along.
+        """
+        archive = self._sealed(tmp_path, conversation)
+        ui = _Answers(path=str(archive), actions=["done"], secrets=["a", "b", "c"])
+
+        run_inspect(ui)
+
+        assert "has been altered" in ui.text
+        assert "cannot tell those apart" in ui.text
+
+    def test_escape_leaves_on_the_first_press(self, tmp_path: Path, conversation) -> None:  # type: ignore[no-untyped-def]
+        """Backing out is not a failed attempt and must not be spent as one."""
+        archive = self._sealed(tmp_path, conversation)
+        ui = _Answers(path=str(archive), actions=["done"], secrets=[])
+
+        run_inspect(ui)
+
+        assert ui.secrets_asked == 1
+        assert "did not open it" not in ui.text
