@@ -18,6 +18,9 @@ dependencies = [
     "rich>=13",
     "httpx>=0.27",
     "pyperclip>=1.9",
+    # Bundle encryption (M7). AES-256-GCM and scrypt both come from here, so
+    # Ferry implements no cryptography of its own beyond framing.
+    "cryptography>=42",
 ]
 
 [project.optional-dependencies]
