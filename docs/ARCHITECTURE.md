@@ -154,6 +154,53 @@ source tool holding the original. Three properties follow:
   the only place Ferry removes a tree it did not create, and that check is what
   stands between a mistyped path and someone's Documents folder.
 
+### Sealed bundles
+
+A **sealed bundle** is a single `.ferry` file: the packed bundle, encrypted
+whole with AES-256-GCM under a key derived from a passphrase by scrypt.
+Nothing about it is readable without that passphrase — not the conversation
+count, not which tools it came from, not the date it was made.
+
+Implementation: `src/ferry/core/crypto.py` (framing) and
+`src/ferry/core/sealed.py` (what gets sealed, and when).
+
+**Why sealing rather than encrypting each file as it is written.** Encrypting
+in place would mean every read and write path learning about keys: four
+adapters, `validate()`, `inspect`, the attachment checksums. Nine places, all
+of them recently stabilised, and a mistake in any of them is *silent* — files
+that look encrypted and can never be opened again. Sealing puts encryption in
+one auditable place that either works or visibly does not.
+
+**What that costs, and it is stated in the UI too.** The unencrypted bundle
+exists on disk while it is being made, and again under `~/.ferry/open` while
+Ferry reads a sealed one. Both are deleted. On most filesystems the blocks are
+not overwritten, so a forensic tool could recover them until that space is
+reused. **Sealing protects a bundle you carry or store; it does not protect
+the machine that made it.**
+
+**The framing, because AES-GCM alone does not give these:**
+
+- **A frame cannot be moved.** Its number is part of its nonce.
+- **The end is authenticated.** Each 1 MiB frame says whether it is the last,
+  and that flag is covered by the tag. Without it, cutting a file *between*
+  frames leaves every remaining frame intact and decryption simply stops at
+  EOF — handing back two thirds of a conversation as though it were whole.
+- **A failure leaves nothing.** Output is renamed into place only once the
+  last frame authenticates. Half a plaintext is worse than none, because it
+  reads as content.
+
+**Operational rules the flow enforces:**
+
+- The passphrase is asked twice. There is no recovery.
+- The sealed file is opened again with the same passphrase **before** the
+  unencrypted bundle can be deleted, and deleting it is a separate question.
+- A sealed bundle is opened **read-only** by `inspect`. Deleting from inside
+  one would mean unseal, edit, reseal — three chances to lose the only copy.
+- Ferry never stores a passphrase, and never puts one in a log or an error.
+
+Measured on the reference machine: a 36.2 MB Antigravity bundle seals to
+11.7 MB in 1.8 s and opens in 1.8 s; key derivation is 0.26 s, once per bundle.
+
 ## Adapter contract
 
 Every adapter implements three methods (see PLAN.md §4 for the full signature):

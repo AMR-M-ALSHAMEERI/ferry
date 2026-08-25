@@ -86,6 +86,12 @@ as a conversation you had.
   is not on this one, Ferry asks where those folders live now rather than
   restoring paths that point nowhere.
 - Close the target IDE before importing.
+- **Encryption is optional and irreversible if you lose the passphrase.** After
+  an export, Ferry offers to seal the bundle into a single `.ferry` file
+  (AES-256-GCM, passphrase stretched with scrypt). It asks twice, checks the
+  sealed file opens before offering to remove the unencrypted copy, and never
+  stores the passphrase anywhere. Sealing protects a bundle you carry or store
+  — not the machine that made it.
 - **Inspect** shows you what is in a bundle without importing it — every
   conversation, its size, and the folders it expects to find. Deleting lives on
   that same screen, because you delete something after looking at it. Deleting

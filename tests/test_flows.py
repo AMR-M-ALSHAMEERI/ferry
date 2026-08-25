@@ -37,6 +37,7 @@ from ferry.cli.flows import (
 )
 from ferry.cli.theme import MONO, Capability
 from ferry.cli.ui import UI, NonInteractiveError
+from ferry.core.sealed import is_sealed, opens_with
 
 
 class _Recorder(Adapter):
@@ -78,6 +79,7 @@ class _Answers(UI):
         path: str | None = None,
         confirm: bool | None = True,
         actions: Sequence[str] | None = None,
+        secrets: Sequence[str] | None = None,
     ) -> None:
         super().__init__(MONO, capability=Capability.PLAIN)
         # The real console, redirected -- not a replacement. A bare rich Console
@@ -93,9 +95,14 @@ class _Answers(UI):
         # sit on. Falls back to the first choice, which every screen makes the
         # safe one.
         self._actions = list(actions or [])
+        # Taken in order and never reused, so a test can give two different
+        # passphrases and check that a mismatch is caught.
+        self._secrets = list(secrets or [])
+        self.secrets_asked = 0
         self.asked = 0
         self.questions: list[str] = []
         self.asked_to_confirm = 0
+        self.confirmed: list[str] = []
 
     def select(self, question, choices, **kwargs):  # type: ignore[no-untyped-def]
         self.questions.append(question)
@@ -111,8 +118,16 @@ class _Answers(UI):
     def path(self, question, *, default="", hint=""):  # type: ignore[no-untyped-def]
         return self._path
 
+    def secret(self, question, *, hint=""):  # type: ignore[no-untyped-def]
+        self.secrets_asked += 1
+        return self._secrets.pop(0) if self._secrets else None
+
     def confirm(self, question, *, default, hint=""):  # type: ignore[no-untyped-def]
         self.asked_to_confirm += 1
+        # Recorded, because a question is asked through prompt_toolkit and
+        # never reaches the console buffer -- asserting on `ui.text` for a
+        # question tests the fake, not the flow.
+        self.confirmed.append(question)
         return self._confirm
 
     @property
@@ -821,3 +836,238 @@ class TestInspect:
         run_inspect(ui)
 
         assert "cannot be read" in ui.text
+
+
+# --------------------------------------------------------------------------
+# sealing
+# --------------------------------------------------------------------------
+
+
+PHRASE = "a passphrase nobody else knows"
+
+
+class TestSealing:
+    """Encrypting a bundle into one file, from the screens that offer it.
+
+    The property every one of these is really about: **a backup tool must not
+    be able to destroy a backup.** The plaintext is only removed after the
+    sealed file has been opened again, and only if asked.
+    """
+
+    def _export(self, ui, adapter, tmp_path: Path) -> Path:  # type: ignore[no-untyped-def]
+        run_export(ui, scanned(adapter))
+        return Path(ui._path)
+
+    def test_export_offers_to_seal_and_takes_no_for_an_answer(
+        self, tmp_path: Path, conversation
+    ) -> None:
+        adapter = _RealExport([conversation])
+        ui = _Answers(path=str(tmp_path / "bundle"), confirm=False)
+
+        run_export(ui, scanned(adapter))
+
+        assert any("Encrypt this bundle" in question for question in ui.confirmed)
+        assert not list(tmp_path.glob("*.ferry"))
+        assert (tmp_path / "bundle" / "manifest.json").is_file()
+
+    def test_a_mismatched_passphrase_seals_nothing(self, tmp_path: Path, conversation) -> None:
+        """There is no recovery, so it is confirmed rather than trusted.
+
+        A passphrase mistyped once and never noticed produces a file nobody can
+        open, and the person finds out on the day they need it.
+        """
+        adapter = _RealExport([conversation])
+        ui = _Answers(
+            path=str(tmp_path / "bundle"), confirm=True, secrets=[PHRASE, "something else"]
+        )
+
+        run_export(ui, scanned(adapter))
+
+        assert "did not match" in ui.text
+        assert not list(tmp_path.glob("*.ferry"))
+
+    def test_backing_out_of_the_passphrase_leaves_it_unencrypted(
+        self, tmp_path: Path, conversation
+    ) -> None:
+        adapter = _RealExport([conversation])
+        ui = _Answers(path=str(tmp_path / "bundle"), confirm=True, secrets=[])
+
+        run_export(ui, scanned(adapter))
+
+        assert "Left unencrypted" in ui.text
+        assert not list(tmp_path.glob("*.ferry"))
+
+    def test_sealing_says_what_is_at_stake_before_asking(
+        self, tmp_path: Path, conversation
+    ) -> None:
+        adapter = _RealExport([conversation])
+        ui = _Answers(path=str(tmp_path / "bundle"), confirm=True, secrets=[PHRASE, PHRASE])
+
+        run_export(ui, scanned(adapter))
+
+        assert "no way to recover" in ui.text
+        assert "Lose it and the backup is gone" in ui.text
+
+    def test_a_sealed_file_is_written_and_checked_before_anything_is_removed(
+        self, tmp_path: Path, conversation
+    ) -> None:
+        adapter = _RealExport([conversation])
+        # confirm=True answers "seal it" and then "delete the plaintext".
+        ui = _Answers(path=str(tmp_path / "bundle"), confirm=True, secrets=[PHRASE, PHRASE])
+
+        run_export(ui, scanned(adapter))
+
+        sealed = list(tmp_path.glob("*.ferry"))
+        assert len(sealed) == 1
+        assert is_sealed(sealed[0])
+        assert opens_with(sealed[0], PHRASE)
+        assert "Sealed:" in ui.text
+
+    def test_the_unencrypted_copy_is_kept_unless_asked(self, tmp_path: Path, conversation) -> None:
+        adapter = _RealExport([conversation])
+        ui = _KeepPlaintext(path=str(tmp_path / "bundle"), secrets=[PHRASE, PHRASE])
+
+        run_export(ui, scanned(adapter))
+
+        assert list(tmp_path.glob("*.ferry"))
+        assert (tmp_path / "bundle" / "manifest.json").is_file()
+        assert "still at" in ui.text
+
+    def test_a_sealed_bundle_appears_in_the_picker(self, tmp_path: Path, conversation) -> None:
+        """Encrypting a bundle must not hide it from Ferry.
+
+        The picker walks directories, and a sealed bundle is a file.
+        """
+        adapter = _RealExport([conversation])
+        ui = _KeepPlaintext(path=str(tmp_path / "bundle"), secrets=[PHRASE, PHRASE])
+        run_export(ui, scanned(adapter))
+        sealed = next(iter(tmp_path.glob("*.ferry")))
+
+        found = find_bundles([tmp_path])
+
+        assert sealed in found
+        assert "sealed" in _describe(sealed)
+
+    def test_inspecting_a_sealed_bundle_asks_for_the_passphrase_and_opens_it(
+        self, tmp_path: Path, conversation
+    ) -> None:
+        adapter = _RealExport([conversation])
+        seeded = _KeepPlaintext(path=str(tmp_path / "bundle"), secrets=[PHRASE, PHRASE])
+        run_export(seeded, scanned(adapter))
+        sealed = next(iter(tmp_path.glob("*.ferry")))
+
+        ui = _Answers(path=str(sealed), actions=["done"], secrets=[PHRASE])
+        run_inspect(ui)
+
+        assert ui.secrets_asked == 1
+        assert "1 conversation" in ui.text
+
+    def test_a_wrong_passphrase_says_so_and_shows_nothing(
+        self, tmp_path: Path, conversation
+    ) -> None:
+        adapter = _RealExport([conversation])
+        seeded = _KeepPlaintext(path=str(tmp_path / "bundle"), secrets=[PHRASE, PHRASE])
+        run_export(seeded, scanned(adapter))
+        sealed = next(iter(tmp_path.glob("*.ferry")))
+
+        ui = _Answers(path=str(sealed), actions=["done"], secrets=["wrong"])
+        run_inspect(ui)
+
+        assert "did not open" in ui.text
+        assert "conversation" not in ui.text.split("did not open")[-1]
+
+    def test_a_sealed_bundle_is_opened_read_only(self, tmp_path: Path, conversation) -> None:
+        """Deleting from inside one would mean unseal, edit, reseal.
+
+        Three chances to lose the only copy of something, on a screen whose job
+        is to let you look.
+        """
+        adapter = _RealExport([conversation])
+        seeded = _KeepPlaintext(path=str(tmp_path / "bundle"), secrets=[PHRASE, PHRASE])
+        run_export(seeded, scanned(adapter))
+        sealed = next(iter(tmp_path.glob("*.ferry")))
+
+        ui = _Recorded(path=str(sealed), actions=["done"], secrets=[PHRASE])
+        run_inspect(ui)
+
+        offered = {value for question, choices in ui.offered for value, _ in choices}
+        assert "one" not in offered
+        assert "all" not in offered
+        assert "read-only" in ui.text
+
+    def test_the_unsealed_copy_does_not_survive_the_screen(
+        self, tmp_path: Path, conversation, monkeypatch
+    ) -> None:
+        """An unencrypted copy left lying about defeats the whole feature."""
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+
+        adapter = _RealExport([conversation])
+        seeded = _KeepPlaintext(path=str(tmp_path / "bundle"), secrets=[PHRASE, PHRASE])
+        run_export(seeded, scanned(adapter))
+        sealed = next(iter(tmp_path.glob("*.ferry")))
+
+        ui = _Answers(path=str(sealed), actions=["done"], secrets=[PHRASE])
+        run_inspect(ui)
+
+        left = list((home / ".ferry" / "open").rglob("manifest.json"))
+        assert left == []
+
+
+class _KeepPlaintext(_Answers):
+    """Says yes to sealing and no to deleting the unencrypted copy."""
+
+    def __init__(self, **kwargs) -> None:  # type: ignore[no-untyped-def]
+        super().__init__(**kwargs)
+        self._answers = [True, False]
+
+    def confirm(self, question, *, default, hint=""):  # type: ignore[no-untyped-def]
+        self.asked_to_confirm += 1
+        return self._answers.pop(0) if self._answers else False
+
+
+class _Recorded(_Answers):
+    """Remembers which choices it was offered."""
+
+    def __init__(self, **kwargs) -> None:  # type: ignore[no-untyped-def]
+        super().__init__(**kwargs)
+        self.offered: list[tuple[str, list[tuple[str, str]]]] = []
+
+    def select(self, question, choices, **kwargs):  # type: ignore[no-untyped-def]
+        self.offered.append((question, list(choices)))
+        return super().select(question, choices, **kwargs)
+
+
+class _RealExport(Adapter):
+    """An adapter that writes a genuine bundle, so sealing has something to seal."""
+
+    name = "claude-code"
+    display_name = "Claude Code"
+
+    def __init__(self, conversations: Sequence[object]) -> None:
+        self._conversations = list(conversations)
+
+    def detect(self) -> DetectResult:
+        return DetectResult(installed=True, conversation_count_estimate=len(self._conversations))
+
+    def export(self, dest_bundle_dir: Path) -> Iterator[ExportEvent]:
+        from ferry.core import Bundle, Manifest, SourceMachine
+
+        bundle = Bundle.create(
+            dest_bundle_dir,
+            Manifest(
+                created_at=datetime(2026, 8, 1, tzinfo=UTC),
+                created_by="ferry test",
+                source_machine=SourceMachine(os="linux", user_home="/home/sample"),
+            ),
+            force=True,
+        )
+        yield ExportEvent(kind="started", message="1 conversation")
+        for conversation in self._conversations:
+            bundle.add_conversation(conversation)  # type: ignore[arg-type]
+            yield ExportEvent(kind="progress", message="written")
+        yield ExportEvent(kind="done", message=f"{len(self._conversations)} exported")
+
+    def import_(self, bundle_dir: Path, options: ImportOptions) -> Iterator[ImportEvent]:
+        yield ImportEvent(kind="done", message="nothing")

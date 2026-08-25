@@ -448,6 +448,18 @@ class UI:
 
         return run_confirm(question, theme=self.theme, default=default)
 
+    def secret(self, question: str, *, hint: str = "") -> str | None:
+        """Ask for a passphrase. Nothing is echoed, and nothing is remembered.
+
+        Ferry never stores a bundle passphrase, never puts one in a log or an
+        error message, and has nowhere to recover one from. Returns ``None``
+        when the user backs out or types nothing.
+        """
+        self._require_interactive(question, hint)
+        from ferry.cli.prompts import run_secret
+
+        return run_secret(question, theme=self.theme)
+
     def path(self, question: str, *, default: str = "", hint: str = "") -> str | None:
         """Ask for a filesystem path, with tab completion.
 

@@ -1,21 +1,24 @@
-"""Encrypting the files inside a bundle, per PLAN.md §5 M7.
+"""Encrypting a stream of bytes, per PLAN.md §5 M7.
 
-Two decisions shape everything here, and both were choices with real costs.
+This module knows about files and keys and nothing about bundles. What gets
+encrypted, and when, is :mod:`ferry.core.sealed`.
 
-**File by file, not one encrypted archive.** Encrypting the packed zip would
-hide the filenames as well as the contents, which sounds strictly better until
-you ask what it costs: an export could no longer resume, ``inspect`` could not
-say anything about a bundle without decrypting all of it, and a 121 MB bundle
-would have to be decrypted whole to read one conversation. What is actually
-leaked by the alternative is a count of files whose names are UUIDs and whose
-sizes are approximate. The threat this is for is a lost backup drive, not an
-adversary who must not learn how many conversations you have. So the manifest
-stays readable and the conversations do not.
+**Chunked, not one-shot.** ``AESGCM.encrypt`` takes the whole plaintext, and a
+sealed bundle on the reference machine is 121 MB. Everything else in Ferry
+streams for exactly that reason, so this does too: 1 MiB frames, each with its
+own nonce and tag, and memory that stays flat however large the input.
 
-**Chunked, not one-shot.** ``AESGCM.encrypt`` takes the whole plaintext, and
-one Codex conversation on the reference machine is 53 MB. Everything else in
-Ferry streams for exactly that reason, so this does too: 1 MiB frames, each
-with its own nonce and tag.
+Three properties the framing has to provide, because AES-GCM alone does not:
+
+* **A frame cannot be moved.** Its number is part of its nonce, so a frame
+  decrypted at the wrong position fails.
+* **The end is authenticated.** Each frame says whether it is the last, and
+  that flag is covered by the tag. Without it, cutting a file **between**
+  frames leaves every remaining frame intact and decryption simply stops at
+  EOF -- handing back two thirds of a conversation as though it were whole.
+* **A failure leaves nothing.** Output goes to a temporary file and is renamed
+  only once the last frame authenticates. Half a plaintext is worse than none,
+  because it reads as content.
 
 The framing is the only thing invented here. AES-256-GCM and scrypt both come
 from ``cryptography``; Ferry writes no cryptographic primitive of its own.

@@ -19,8 +19,10 @@ omission.
 
 from __future__ import annotations
 
+import shutil
 from collections import Counter
 from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
@@ -37,6 +39,14 @@ from ferry.adapters.census import count_of
 from ferry.cli.ui import UI, NonInteractiveError
 from ferry.core import Bundle, BundleError, BundleSummary, delete_bundle, summarise
 from ferry.core.bundle import MANIFEST_NAME
+from ferry.core.crypto import WrongPassphrase
+from ferry.core.sealed import (
+    SEALED_SUFFIX,
+    is_sealed,
+    opens_with,
+    seal_bundle,
+    unsealed,
+)
 from ferry.core.summary import ConversationSummary
 
 __all__ = ["Scanned", "find_bundles", "run_export", "run_import", "run_inspect"]
@@ -121,11 +131,33 @@ def find_bundles(roots: Sequence[Path] | None = None) -> list[Path]:
             seen.add(resolved)
             if (candidate / MANIFEST_NAME).is_file():
                 found.append(candidate)
+        # Sealed bundles are files, not directories, so the directory walk
+        # above cannot see them. A bundle someone encrypted must still appear
+        # in the picker, or encrypting one hides it from Ferry.
+        try:
+            for candidate in sorted(root.glob(f"*{SEALED_SUFFIX}")):
+                resolved = candidate.resolve()
+                if resolved not in seen and candidate.is_file() and is_sealed(candidate):
+                    seen.add(resolved)
+                    found.append(candidate)
+        except OSError:
+            continue
     return found
 
 
 def _describe(path: Path) -> str:
-    """A one-line label: what is in this bundle, and where it is."""
+    """A one-line label: what is in this bundle, and where it is.
+
+    A sealed bundle can only be described by its size and date -- everything
+    else about it is encrypted, which is the point.
+    """
+    if path.is_file():
+        if not is_sealed(path):
+            return f"{path.name}  -  not a bundle"
+        made = datetime.fromtimestamp(path.stat().st_mtime, UTC)
+        return (
+            f"{path.name}  -  sealed, {path.stat().st_size / 1024 / 1024:.1f} MB, {made:%d %b %Y}"
+        )
     try:
         manifest = Bundle.open(path).manifest
     except BundleError:
@@ -399,6 +431,128 @@ def _path_remap(ui: UI, bundle: Bundle) -> tuple[tuple[str, str], ...] | None:
     return ((recorded, str(Path(typed).expanduser())),)
 
 
+# --------------------------------------------------------------------------
+# sealing
+# --------------------------------------------------------------------------
+
+
+def _ask_new_passphrase(ui: UI) -> str | None:
+    """Ask for a passphrase twice, and say what is at stake before asking once.
+
+    Confirmed rather than trusted because there is no recovery: a passphrase
+    mistyped once and never noticed produces a file nobody can ever open, and
+    the person finds out on the day they need it.
+    """
+    ui.blank()
+    ui.warn("There is no way to recover a sealed bundle without its passphrase.")
+    ui.info("Not by Ferry, not by anyone. Lose it and the backup is gone.")
+    ui.detail("Sealing protects the bundle you carry or store, not the machine it was made on.")
+
+    first = ui.secret("Passphrase", hint="use --passphrase")
+    if not first:
+        return None
+    again = ui.secret("Again, to be sure", hint="use --passphrase")
+    if not again:
+        return None
+    if first != again:
+        ui.error("Those did not match. Nothing was sealed.")
+        ui.blank()
+        return None
+    return first
+
+
+def _offer_to_seal(ui: UI, target: Path) -> None:
+    """After an export: encrypt the bundle into one file, if asked.
+
+    The plaintext bundle is only removed **after** the sealed file has been
+    opened again with the same passphrase. Deleting first and verifying later
+    is how a backup tool destroys a backup.
+    """
+    try:
+        if not ui.confirm(
+            "Encrypt this bundle into a single file?", default=False, hint="use --encrypt"
+        ):
+            return
+        passphrase = _ask_new_passphrase(ui)
+        if passphrase is None:
+            ui.info("Left unencrypted.")
+            ui.blank()
+            return
+    except NonInteractiveError as exc:
+        ui.error(str(exc))
+        return
+
+    try:
+        with ui.scanning("Sealing"):
+            sealed = seal_bundle(target, passphrase)
+    except (BundleError, OSError) as exc:
+        ui.error(f"could not seal the bundle: {exc}")
+        ui.blank()
+        return
+
+    with ui.scanning("Checking it opens"):
+        confirmed = opens_with(sealed.path, passphrase)
+    if not confirmed:
+        # Should be impossible, and is checked anyway: this is the one place
+        # where being wrong costs the user everything.
+        ui.error(
+            "The sealed file did not open with that passphrase. Your bundle was left as it is."
+        )
+        ui.blank()
+        return
+
+    ui.success(f"Sealed: {sealed.path}  ({sealed.bytes_written / 1024 / 1024:.1f} MB)")
+
+    try:
+        remove = ui.confirm("Delete the unencrypted copy?", default=False, hint="use --replace")
+    except NonInteractiveError:
+        remove = False
+    if remove:
+        try:
+            shutil.rmtree(target)
+            ui.info(f"Removed {target.name}. The sealed file is now the only copy.")
+        except OSError as exc:
+            ui.error(f"could not remove {target}: {exc}")
+    else:
+        ui.detail(f"The unencrypted bundle is still at {target}")
+    ui.blank()
+
+
+@contextmanager
+def _opened(ui: UI, picked: Path) -> Iterator[Path | None]:
+    """Yield a directory holding the bundle, unsealing it first if it is sealed.
+
+    Yields ``None`` when the user backed out of the passphrase or it was wrong,
+    so every caller has one shape to handle. The unsealed copy is removed on
+    the way out, including when the caller raises.
+    """
+    if not is_sealed(picked):
+        yield picked
+        return
+
+    try:
+        passphrase = ui.secret(f"Passphrase for {picked.name}", hint="use --passphrase")
+    except NonInteractiveError as exc:
+        ui.error(str(exc))
+        yield None
+        return
+    if not passphrase:
+        yield None
+        return
+
+    try:
+        with ui.scanning("Opening"), unsealed(picked, passphrase) as bundle:
+            yield bundle.root
+    except WrongPassphrase:
+        ui.error("That passphrase did not open it.")
+        ui.blank()
+        yield None
+    except (BundleError, OSError) as exc:
+        ui.error(str(exc))
+        ui.blank()
+        yield None
+
+
 def run_export(ui: UI, adapters: Scanned) -> None:
     """Pick a tool, pick a destination, export."""
     available = _installed(adapters)
@@ -455,6 +609,7 @@ def run_export(ui: UI, adapters: Scanned) -> None:
     )
     ui.info(f"Bundle: {target}")
     ui.blank()
+    _offer_to_seal(ui, target)
 
 
 def run_import(ui: UI, adapters: Scanned) -> None:
@@ -469,8 +624,22 @@ def run_import(ui: UI, adapters: Scanned) -> None:
         picked = _choose_bundle(ui)
         if picked is None:
             return
-        bundle_dir = picked
+    except NonInteractiveError as exc:
+        ui.error(str(exc))
+        return
 
+    # A sealed bundle is opened into a temporary folder that exists only for
+    # as long as this import does, so everything below reads an ordinary
+    # bundle and knows nothing about encryption.
+    with _opened(ui, picked) as bundle_dir:
+        if bundle_dir is None:
+            return
+        _import_from(ui, available, bundle_dir)
+
+
+def _import_from(ui: UI, available: list[Adapter], bundle_dir: Path) -> None:
+    """Everything after a bundle has been chosen and, if sealed, opened."""
+    try:
         try:
             bundle = Bundle.open(bundle_dir)
         except BundleError as exc:
@@ -671,6 +840,20 @@ def run_inspect(ui: UI) -> None:
     if picked is None:
         return
 
+    sealed = is_sealed(picked)
+    with _opened(ui, picked) as opened:
+        if opened is None:
+            return
+        if sealed:
+            # Deleting from inside a sealed bundle would mean unsealing,
+            # editing and resealing -- three chances to lose the only copy of
+            # something, for a screen whose job is to let you look.
+            ui.detail("Opened read-only. To change a sealed bundle, unseal it first.")
+        _inspect_at(ui, opened, read_only=sealed)
+
+
+def _inspect_at(ui: UI, picked: Path, *, read_only: bool = False) -> None:
+    """The inspect screen, on a directory that is already a plain bundle."""
     while True:
         try:
             bundle = Bundle.open(picked)
@@ -684,9 +867,10 @@ def run_inspect(ui: UI) -> None:
         _show(ui, summary)
 
         choices = [("done", "Done")]
-        if summary.conversations:
-            choices.append(("one", "Delete one conversation from this bundle"))
-        choices.append(("all", "Delete this whole bundle"))
+        if not read_only:
+            if summary.conversations:
+                choices.append(("one", "Delete one conversation from this bundle"))
+            choices.append(("all", "Delete this whole bundle"))
         try:
             action = ui.select("Anything else?", choices, hint="inspect is read-only")
         except NonInteractiveError as exc:

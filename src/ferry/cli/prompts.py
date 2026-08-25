@@ -41,8 +41,11 @@ __all__ = [
     "path_header",
     "path_hints",
     "path_style",
+    "secret_bindings",
+    "secret_hints",
     "run_confirm",
     "run_path",
+    "run_secret",
     "run_select",
 ]
 
@@ -593,6 +596,58 @@ def run_path(question: str, *, theme: Theme, default: str = "") -> str | None:
         style=path_style(theme),
     )
     return session.prompt(default=default)
+
+
+def secret_bindings() -> KeyBindings:
+    """The keys for the passphrase prompt.
+
+    The same shape as :func:`path_bindings` and for the same reason: escape has
+    to back out. A passphrase prompt someone cannot leave is worse than most,
+    because they reached it while trying to protect something and now cannot
+    stop.
+
+    There is no completion here, so enter always means enter.
+    """
+    keys = KeyBindings()
+
+    @keys.add("escape", eager=True)
+    @keys.add("c-c")
+    def _cancel(event) -> None:  # type: ignore[no-untyped-def]
+        event.app.exit(result=None)
+
+    @keys.add("enter")
+    def _accept(event) -> None:  # type: ignore[no-untyped-def]
+        # Not stripped. Leading and trailing spaces are part of a passphrase,
+        # and silently trimming them produces a bundle that will not open with
+        # what the person believes they typed.
+        text = event.current_buffer.document.text
+        event.app.exit(result=text or None)
+
+    return keys
+
+
+def secret_hints(theme: Theme) -> Fragments:
+    """The key line under the passphrase prompt."""
+    sep = theme.icons.separator
+    return [(_style_for(theme, "dim"), f"  nothing is shown as you type  {sep}  esc cancel")]
+
+
+def run_secret(question: str, *, theme: Theme) -> str | None:
+    """Ask for a passphrase without echoing it.
+
+    Returns:
+        The passphrase, or ``None`` if the user backed out or entered nothing.
+        An empty passphrase is deliberately the same as backing out: it is not
+        encryption, it is a rename.
+    """
+    session: PromptSession[str | None] = PromptSession(
+        path_header(theme, question),
+        is_password=True,
+        key_bindings=secret_bindings(),
+        bottom_toolbar=lambda: secret_hints(theme),
+        style=path_style(theme),
+    )
+    return session.prompt()
 
 
 def run_confirm(
