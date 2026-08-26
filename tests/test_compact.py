@@ -592,3 +592,30 @@ class TestQuotingAcrossAGap:
 
         for quotation in quotations(compact(item, length="full")):
             assert " ".join(quotation.split()).removesuffix("...") in source
+
+
+class TestNotClaimingMoreThanTheToolRecorded:
+    def test_antigravity_says_its_file_list_is_reads_only(self) -> None:
+        """Antigravity records what it viewed, at 100%. What it *changed* is
+        measurable only at 8.6% purity, so Ferry does not extract it -- and a
+        header reading "0 files touched" for a session that edited twenty would
+        be a false summary in the document's first line."""
+        item = conversation(
+            user("build the popup"),
+            call("CODE_ACTION", {"detail": "Edited the file"}, "c1"),
+            tool="antigravity",
+        )
+        document = compact(item)
+
+        assert "0 files read" in document
+        assert "0 files touched" not in document
+        assert "not in its record" in document
+
+    def test_claude_code_says_touched_because_it_records_both(self) -> None:
+        item = conversation(
+            user("fix it"),
+            call("Edit", {"file_path": "a.py"}, "c1"),
+        )
+        document = compact(item)
+
+        assert "1 file touched" in document

@@ -156,7 +156,13 @@ def compact_command(
     )
 
     if not out:
-        typer.echo(document, nl=False)
+        try:
+            typer.echo(document, nl=False)
+        except (BrokenPipeError, OSError):
+            # `ferry compact ... | head` closes the pipe partway through, and a
+            # command written to be piped should not answer that with a
+            # traceback. Nothing has gone wrong: the reader stopped reading.
+            return
         return
 
     target = Path(out).expanduser()

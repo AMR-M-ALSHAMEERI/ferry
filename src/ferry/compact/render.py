@@ -107,9 +107,13 @@ def _header(digest: Digest, version: str) -> list[str]:
     line = " - ".join(
         part for part in (_TOOL_NAMES.get(digest.source_tool, digest.source_tool), where) if part
     )
+    # "0 files touched" for a session that edited twenty would be a false
+    # summary in the first line of the document. Where a tool's file record is
+    # incomplete, the count says what it actually counted.
+    verb = " read" if digest.fidelity.files else " touched"
     counts = [
         _plural(digest.messages, "message"),
-        _plural(len(digest.files), "file") + " touched",
+        _plural(len(digest.files), "file") + verb,
         _plural(digest.tool_calls, "tool call"),
     ]
     if digest.images:

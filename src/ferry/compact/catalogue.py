@@ -282,6 +282,10 @@ _FIDELITY: dict[str, Fidelity] = {
     ),
     "antigravity": Fidelity(
         tier="partial",
+        files=(
+            "Antigravity records the files it read. What it created or changed is "
+            "not in its record, so this is what was looked at, not what was written."
+        ),
         commands=(
             "Antigravity records the shell and the program name, not the command "
             "line that was run, so there is nothing here to quote."
