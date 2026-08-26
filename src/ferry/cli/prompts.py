@@ -215,6 +215,7 @@ def _render(
     allow_filter: bool,
     tick: int = 0,
     current: str | None = None,
+    back: bool = False,
 ) -> Fragments:
     """Build the frame shown on each redraw.
 
@@ -223,6 +224,10 @@ def _render(
             icons moving at once is noise, and animating just the selected one
             doubles as a second cursor indicator for the same redraw cost.
         current: Value of the option already in force, marked "in use".
+        back: Whether escape returns to the previous step rather than leaving.
+            The footer says which, because a key that goes back while the
+            screen says "cancel" is the same fault as one that works and is
+            never mentioned.
     """
     icons = theme.icons
     ascii_only = icons is ASCII_ICONS
@@ -315,9 +320,10 @@ def _render(
         keys = f"up/down move  {sep}  enter select  {sep}  esc clear filter"
         out += [(dim, f"  {keys}\n")]
     else:
-        keys = f"up/down move  {sep}  enter select  {sep}  esc cancel"
+        leave = "esc back" if back else "esc cancel"
+        keys = f"up/down move  {sep}  enter select  {sep}  {leave}"
         if allow_filter:
-            keys = f"up/down move  {sep}  enter select  {sep}  / filter  {sep}  esc cancel"
+            keys = f"up/down move  {sep}  enter select  {sep}  / filter  {sep}  {leave}"
         out += [(dim, f"  {keys}\n")]
     return out
 
@@ -419,6 +425,7 @@ def run_select(
     allow_filter: bool = True,
     initial: int = 0,
     current: str | None = None,
+    back: bool = False,
 ) -> str | None:
     """Show an arrow-driven picker and return the chosen value.
 
@@ -434,9 +441,14 @@ def run_select(
             picker that changes a persistent setting should pass this — the
             cursor says what you are looking at, not what you are looking at
             *instead of*.
+        back: Whether escape returns to the previous step rather than leaving
+            the screen. Changes only the footer -- both cases still return
+            ``None`` -- but a screen that goes back while saying "cancel" is
+            why people stop pressing escape at all.
 
     Returns:
-        The chosen item's value, or ``None`` if the user cancelled.
+        The chosen item's value, or ``None`` if the user cancelled or went
+        back. The caller knows which of those it asked for.
     """
     model = SelectorModel(items, initial=initial)
     animated = theme.uses_color and any(item.motion is not None for item in items)
@@ -451,7 +463,7 @@ def run_select(
     kb = build_bindings(model, allow_filter=allow_filter)
 
     control = FormattedTextControl(
-        lambda: _render(model, theme, title, preview, allow_filter, tick(), current),
+        lambda: _render(model, theme, title, preview, allow_filter, tick(), current, back),
         focusable=True,
         show_cursor=False,
     )

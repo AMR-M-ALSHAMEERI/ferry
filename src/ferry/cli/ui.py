@@ -377,6 +377,8 @@ class UI:
         allow_filter: bool = True,
         motions: Mapping[str, Motion] | None = None,
         current: str | None = None,
+        initial: int = 0,
+        back: bool = False,
     ) -> str | None:
         """Ask the user to pick one option.
 
@@ -391,9 +393,15 @@ class UI:
                 icons it never asked for.
             current: Value already in force, marked "in use" in the list. Pass
                 it from every picker that changes a persistent setting.
+            initial: Which row the cursor starts on. Pass it when returning to
+                a question the user has already answered, so going back lands
+                them where they were rather than at the top.
+            back: Whether escape goes back a step rather than leaving. Only
+                changes what the footer promises; the return is ``None`` either
+                way.
 
         Returns:
-            The chosen value, or ``None`` if the user cancelled.
+            The chosen value, or ``None`` if the user cancelled or went back.
         """
         self._require_interactive(question, hint)
         from ferry.cli.prompts import SelectorItem, run_select
@@ -405,6 +413,8 @@ class UI:
             theme=self.theme,
             allow_filter=allow_filter,
             current=current,
+            initial=initial,
+            back=back,
         )
 
     def multiselect(

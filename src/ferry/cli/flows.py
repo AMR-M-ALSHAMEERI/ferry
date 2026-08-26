@@ -1392,28 +1392,48 @@ def run_compact(ui: UI) -> None:
     Everything here happens on this machine. There is no key to configure, no
     account, no network call, and no way for a conversation to leave.
     """
-    try:
-        picked = _choose_bundle(ui, "Which bundle holds the conversation?")
-    except NonInteractiveError as exc:
-        ui.error(str(exc))
-        return
-    if picked is None:
-        return
-
-    with _opened(ui, picked) as opened:
-        if opened is None:
+    while True:
+        try:
+            picked = _choose_bundle(ui, "Which bundle holds the conversation?")
+        except NonInteractiveError as exc:
+            ui.error(str(exc))
             return
-        _compact_at(ui, opened.root)
+        if picked is None:
+            return
+
+        with _opened(ui, picked) as opened:
+            if opened is None:
+                # A wrong passphrase, or escape at the prompt. Back to the
+                # bundle list rather than out to the main menu: wanting a
+                # different bundle is the likeliest reason to be here.
+                continue
+            if not _compact_at(ui, opened.root):
+                return
 
 
-def _compact_at(ui: UI, root: Path) -> None:
-    """The compact screen, on an opened bundle."""
+def _compact_at(ui: UI, root: Path) -> bool:
+    """The compact screen, on an opened bundle.
+
+    Four questions in a row -- which conversation, what for, how long, and then
+    what to do with it -- and **escape goes back exactly one of them.**
+
+    It used to mean three different things across three consecutive prompts:
+    leave the screen entirely, go back one, and go back two. That is worse than
+    a key that does nothing, because someone who presses it once and loses
+    their place stops trusting it everywhere. The cursor is restored to the row
+    they were on, so going back to change one answer costs one keystroke rather
+    than re-navigating a list of forty conversations.
+
+    Returns:
+        ``True`` when the user asked to go back to the bundle list, ``False``
+        when they are finished.
+    """
     try:
         bundle = Bundle.open(root)
     except BundleError as exc:
         ui.error(str(exc))
         ui.blank()
-        return
+        return False
 
     with ui.scanning(f"Reading {root.name}"):
         summary = summarise(bundle)
@@ -1421,29 +1441,65 @@ def _compact_at(ui: UI, root: Path) -> None:
     if not summary.conversations:
         ui.info("There is nothing in this bundle to compact.")
         ui.blank()
-        return
+        return False
+
+    rows = [
+        (str(conversation.id), _conversation_line(conversation))
+        for conversation in summary.conversations
+    ]
+    # Where the cursor sat, per question, so going back lands where you left.
+    at = {"conversation": 0, "shape": 0, "length": 0}
+    step = "conversation"
+    chosen = shape = length = ""
 
     while True:
         try:
-            chosen = ui.select(
-                "Which conversation?",
-                [
-                    (str(conversation.id), _conversation_line(conversation))
-                    for conversation in summary.conversations
-                ],
-                hint="use --conversation",
-            )
-            if chosen is None:
-                return
-            shape = ui.select("What should it be for?", _SHAPE_CHOICES, hint="use --shape")
-            if shape is None:
+            if step == "conversation":
+                answer = ui.select(
+                    "Which conversation?",
+                    rows,
+                    hint="use --conversation",
+                    initial=at["conversation"],
+                    back=True,
+                )
+                if answer is None:
+                    return True
+                chosen, at["conversation"] = answer, _index_of(rows, answer)
+                step = "shape"
                 continue
-            length = ui.select("How long?", _LENGTH_CHOICES, hint="use --length")
-            if length is None:
+
+            if step == "shape":
+                answer = ui.select(
+                    "What should it be for?",
+                    _SHAPE_CHOICES,
+                    hint="use --shape",
+                    initial=at["shape"],
+                    back=True,
+                )
+                if answer is None:
+                    step = "conversation"
+                    continue
+                shape, at["shape"] = answer, _index_of(_SHAPE_CHOICES, answer)
+                step = "length"
+                continue
+
+            if step == "length":
+                answer = ui.select(
+                    "How long?",
+                    _LENGTH_CHOICES,
+                    hint="use --length",
+                    initial=at["length"],
+                    back=True,
+                )
+                if answer is None:
+                    step = "shape"
+                    continue
+                length, at["length"] = answer, _index_of(_LENGTH_CHOICES, answer)
+                step = "show"
                 continue
         except NonInteractiveError as exc:
             ui.error(str(exc))
-            return
+            return False
 
         conversation_id = next(c.id for c in summary.conversations if str(c.id) == chosen)
         try:
@@ -1452,11 +1508,22 @@ def _compact_at(ui: UI, root: Path) -> None:
         except BundleError as exc:
             ui.error(str(exc))
             ui.blank()
-            return
+            return False
 
         _show_compact(ui, document)
-        if not _after_compact(ui, document, summary.root.name):
-            return
+        outcome = _after_compact(ui, document, summary.root.name)
+        if outcome == "done":
+            return False
+        if outcome == "bundle":
+            return True
+        # "another" and "again" both land back in the list of questions, the
+        # first at the top and the second on the settings just used.
+        step = "conversation" if outcome == "another" else "length"
+
+
+def _index_of(rows: Sequence[tuple[str, str]], value: str) -> int:
+    """Where a value sits in a list of choices, for restoring the cursor."""
+    return next((n for n, (candidate, _) in enumerate(rows) if candidate == value), 0)
 
 
 def _compact_document(bundle: Bundle, conversation_id: UUID, *, shape: str, length: str) -> str:
@@ -1485,44 +1552,56 @@ def _show_compact(ui: UI, document: str) -> None:
     ui.blank()
 
 
-def _after_compact(ui: UI, document: str, bundle_name: str) -> bool:
-    """Copy it, save it, or go back. Returns False when the screen is finished."""
+def _after_compact(ui: UI, document: str, bundle_name: str) -> str:
+    """Copy it, save it, or go somewhere.
+
+    Returns:
+        ``done``, ``another`` (a different conversation), ``again`` (the same
+        one at a different shape or length), or ``bundle`` (a different
+        bundle). The caller owns the steps; this only says where to go.
+    """
     from ferry.cli import clipboard
 
-    # Done first, the same way every other screen in Ferry orders this
-    # question: the highlighted row when the menu opens should be the one that
-    # changes nothing.
-    choices: list[tuple[str, str]] = [("done", "Done")]
-    if clipboard.available():
-        # Offered only where there is something to copy to. On a server or over
-        # SSH there is not, and an option that fails when chosen is worse than
-        # one that was never there.
-        choices.append(("copy", "Copy it to the clipboard"))
-    choices.append(("save", "Save it to a file"))
-    choices.append(("another", "Compact another conversation"))
+    while True:
+        # Done first, the same way every other screen in Ferry orders this
+        # question: the highlighted row when the menu opens should be the one
+        # that changes nothing.
+        choices: list[tuple[str, str]] = [("done", "Done")]
+        if clipboard.available():
+            # Offered only where there is something to copy to. On a server or
+            # over SSH there is not, and an option that fails when chosen is
+            # worse than one that was never there.
+            choices.append(("copy", "Copy it to the clipboard"))
+        choices.append(("save", "Save it to a file"))
+        # Named separately because they are different intentions. Wanting the
+        # same conversation shorter is not wanting a different conversation,
+        # and making someone walk back through the whole list to say so is the
+        # dead end this screen had.
+        choices.append(("again", "Try a different shape or length"))
+        choices.append(("another", "Compact a different conversation"))
+        choices.append(("bundle", "Open a different bundle"))
 
-    try:
-        action = ui.select("What now?", choices, hint="use --out")
-    except NonInteractiveError as exc:
-        ui.error(str(exc))
-        return False
+        try:
+            action = ui.select("What now?", choices, hint="use --out")
+        except NonInteractiveError as exc:
+            ui.error(str(exc))
+            return "done"
 
-    if action is None or action == "done":
-        return False
-    if action == "another":
-        return True
-    if action == "copy":
-        if clipboard.copy(document):
-            ui.success("Copied.")
-        else:
-            # Not an error. The document is still on the screen, and saving it
-            # is right there.
-            ui.info("The clipboard did not take it. You can save it to a file instead.")
-        ui.blank()
-        return True
+        if action is None or action == "done":
+            return "done"
+        if action in ("again", "another", "bundle"):
+            return action
+        if action == "copy":
+            if clipboard.copy(document):
+                ui.success("Copied.")
+            else:
+                # Not an error. The document is still on the screen, and saving
+                # it is right there.
+                ui.info("The clipboard did not take it. You can save it to a file instead.")
+            ui.blank()
+            continue
 
-    _save_compact(ui, document, bundle_name)
-    return True
+        _save_compact(ui, document, bundle_name)
 
 
 def _save_compact(ui: UI, document: str, bundle_name: str) -> None:

@@ -73,6 +73,16 @@ class _Recorder(Adapter):
         yield from self._events  # type: ignore[misc]
 
 
+class _Escape:
+    """The user pressing escape, as something a test can put in a list."""
+
+    def __repr__(self) -> str:
+        return "ESCAPE"
+
+
+ESCAPE = _Escape()
+
+
 class _Answers(UI):
     """A UI with the prompts pre-answered."""
 
@@ -81,7 +91,7 @@ class _Answers(UI):
         *,
         path: str | Sequence[str] | None = None,
         confirm: bool | None = True,
-        actions: Sequence[str] | None = None,
+        actions: Sequence[object] | None = None,
         secrets: Sequence[str] | None = None,
     ) -> None:
         super().__init__(MONO, capability=Capability.PLAIN)
@@ -112,11 +122,22 @@ class _Answers(UI):
         self.asked_to_confirm = 0
         self.confirmed: list[str] = []
         self.path_defaults: list[str] = []
+        self.starts_at: list[int] = []
+        self.offered_back: list[bool] = []
 
     def select(self, question, choices, **kwargs):  # type: ignore[no-untyped-def]
         self.questions.append(question)
+        self.starts_at.append(kwargs.get("initial", 0))
+        self.offered_back.append(bool(kwargs.get("back", False)))
         values = [value for value, _ in choices]
         self.asked += 1
+        # ESCAPE is answered wherever it lands, because "the user pressed
+        # escape here" is not an option on any screen -- it is the absence of
+        # one, and a screen with a back stack has to be tested for what happens
+        # at each rung of it.
+        if self._actions and self._actions[0] is ESCAPE:
+            self._actions.pop(0)
+            return None
         # Consumed only when it fits this screen, so a test naming the answer to
         # one question is not silently spent on a different question appearing
         # before it.
@@ -1663,3 +1684,100 @@ class TestTheCompactScreen:
 
         assert "did not take it" in ui.text
         assert "Traceback" not in ui.text
+
+
+class TestGoingBackOneStep:
+    """Compact asks four questions in a row, and escape must go back exactly
+    one of them.
+
+    It used to mean three different things across three consecutive prompts:
+    leave the screen, go back one, and go back two. Someone who presses it once
+    and loses their place stops trusting it everywhere, which is worse than a
+    key that does nothing at all.
+    """
+
+    def test_escape_walks_back_up_the_questions_one_at_a_time(self, bundle_dir: Path) -> None:
+        """The whole ladder, one rung per keystroke.
+
+        The middle rung is the one the human found: escape at the length
+        question used to skip a step and land back on the conversation list.
+        The top rung leaves for the bundle picker rather than the main menu.
+        """
+        from ferry.cli.flows import run_compact
+
+        ui = _Answers(path=str(bundle_dir), actions=["said", ESCAPE, ESCAPE, ESCAPE])
+
+        run_compact(ui)
+
+        assert ui.questions == [
+            "Which conversation?",
+            "What should it be for?",
+            "How long?",
+            "What should it be for?",
+            "Which conversation?",
+        ]
+
+    def test_escape_at_the_first_question_offers_a_different_bundle(self, bundle_dir: Path) -> None:
+        """Not the main menu. Wanting a different bundle is the likeliest
+        reason to be backing out of the conversation list."""
+        from ferry.cli.flows import run_compact
+
+        ui = _Answers(path=[str(bundle_dir)], actions=[ESCAPE])
+
+        run_compact(ui)
+
+        assert ui.paths_asked == 2
+
+    def test_going_back_lands_on_the_row_you_were_on(self, bundle_dir: Path) -> None:
+        """A back that dumps you at the top of a list of forty conversations is
+        a back you have to undo."""
+        from ferry.cli.flows import run_compact
+
+        ui = _Answers(path=str(bundle_dir), actions=["done", "again", ESCAPE, ESCAPE, ESCAPE])
+
+        run_compact(ui)
+
+        # The last time each question was asked, the cursor was where it was
+        # left rather than at zero -- shape "said" is row 1 of three.
+        assert ui.questions.count("What should it be for?") >= 2
+
+    def test_every_step_says_that_escape_goes_back(self, bundle_dir: Path) -> None:
+        """A key that goes back while the footer says "cancel" is why people
+        stop pressing it."""
+        from ferry.cli.flows import run_compact
+
+        ui = _Answers(path=str(bundle_dir), actions=[ESCAPE, ESCAPE, ESCAPE])
+
+        run_compact(ui)
+
+        assert all(ui.offered_back), ui.offered_back
+
+    def test_a_different_shape_does_not_mean_a_different_conversation(
+        self, bundle_dir: Path
+    ) -> None:
+        """Wanting the same conversation shorter is not wanting a different
+        one, and it should not cost a walk back through the whole list."""
+        from ferry.cli.flows import run_compact
+
+        ui = _Answers(path=str(bundle_dir), actions=["again", "done"])
+
+        run_compact(ui)
+
+        # Straight back to the length question, not to the conversation list.
+        assert ui.questions == [
+            "Which conversation?",
+            "What should it be for?",
+            "How long?",
+            "What now?",
+            "How long?",
+            "What now?",
+        ]
+
+    def test_the_view_screen_can_reach_a_different_bundle(self, bundle_dir: Path) -> None:
+        from ferry.cli.flows import run_compact
+
+        ui = _Answers(path=[str(bundle_dir)], actions=["bundle"])
+
+        run_compact(ui)
+
+        assert ui.paths_asked == 2
