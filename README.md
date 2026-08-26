@@ -104,5 +104,5 @@ as a conversation you had.
   with the same passphrase to prove it is readable, and only then replaces it.
 
 See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for contributing, and
-[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) (added at M7) once issues
-start to surface.
+[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) when something does not go
+the way it should.
