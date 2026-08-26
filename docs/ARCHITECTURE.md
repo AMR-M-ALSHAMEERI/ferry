@@ -275,8 +275,8 @@ src/ferry/
 ├── core/         bundle, manifest, orchestration
 ├── ucs/          pydantic schema models
 ├── adapters/     one subpackage per tool
-├── compact/      LLM providers for conversation summarisation
-└── config.py     API key / settings storage
+├── compact/      turning a conversation into a document, offline
+└── config.py     settings storage
 scripts/          maintained tooling (schema generation, self-checks)
 schemas/          generated JSON schema, checked in
 ```

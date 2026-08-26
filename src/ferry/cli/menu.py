@@ -1,6 +1,6 @@
 """The interactive flows: scan, top-level menu, and the per-action stubs.
 
-Export and Import reach real adapters; Inspect and Compact are still stubs.
+Every action on this menu reaches real behaviour as of M7c.
 The wordmark, the
 scan screen, the theme picker, the slash filter and the non-interactive guard
 are all real, so later milestones fill in behaviour behind a finished interface.
@@ -9,7 +9,7 @@ are all real, so later milestones fill in behaviour behind a finished interface.
 from __future__ import annotations
 
 from ferry.adapters.base import Adapter, DetectResult, list_adapters
-from ferry.cli.flows import run_export, run_import, run_inspect
+from ferry.cli.flows import run_compact, run_export, run_import, run_inspect
 from ferry.cli.motion import MENU_MOTION
 from ferry.cli.theme import IconSet
 from ferry.cli.ui import UI, NonInteractiveError, _DetectionRow
@@ -32,12 +32,13 @@ Each action has an animated icon in :data:`~ferry.cli.motion.MENU_MOTION`,
 keyed by the same value.
 """
 
-_MILESTONE_FOR_ACTION: dict[str, str] = {
-    "compact": "M7",
-}
-"""Actions that genuinely do not exist yet, and when they arrive."""
+_MILESTONE_FOR_ACTION: dict[str, str] = {}
+"""Actions that genuinely do not exist yet, and when they arrive.
 
-_WIRED = frozenset({"export", "import", "inspect"})
+Empty since M7c, when Compact -- the last of them -- was built.
+"""
+
+_WIRED = frozenset({"export", "import", "inspect", "compact"})
 """Actions that reach a real adapter.
 
 These were stubs reporting "arrives at M3" long after M3 and M4 had shipped --
@@ -171,7 +172,10 @@ def run_menu(ui: UI) -> int:
             # Re-scanned rather than reused: the user may have installed or
             # removed a tool since the menu opened, and acting on a stale answer
             # is how an export silently misses a whole assistant.
-            if action == "inspect":
+            if action == "compact":
+                # No scan either, and for the same reason: this reads a bundle.
+                run_compact(ui)
+            elif action == "inspect":
                 # No scan: this screen reads a bundle, not the machine. Asking
                 # four adapters where their data lives to open a folder the
                 # user already chose is a delay with nothing behind it.

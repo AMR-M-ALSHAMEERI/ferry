@@ -30,8 +30,15 @@ Importing history makes conversations *visible and browsable* in the target
 tool again, exactly as if you'd never switched machines. It does **not** make
 the AI automatically "remember" the thread — no current tool re-loads full
 conversation history into context on a new message. Ferry's optional
-**Compact** feature is the workaround: it generates a context summary you can
-paste as the first message in a new session.
+**Compact** feature is the workaround: it turns a conversation into a document
+you can paste as the first message in a new session.
+
+Compact runs **entirely on your machine**. There is no API key, no account, no
+cost, and no model — it works offline, and it adds nothing to Ferry's install.
+It also invents nothing: every line of what it produces is either quoted from
+your conversation word for word or counted from it. What it gives up in
+exchange is narrative. It can quote you the three facts; it cannot write the
+sentence that joins them.
 
 This applies doubly to cross-tool migration: it gives you a readable transcript
 in the target tool, not a session that tool's AI can pick up and continue. If
@@ -74,6 +81,8 @@ as a conversation you had.
 ## Safety
 
 - Ferry never modifies your source conversation data — it only reads.
+- **Ferry makes no network calls at all.** Nothing it reads leaves this
+  machine, and there is nothing to configure to keep it that way.
 - **Preview first.** The import screen offers to show you exactly what would
   change, writing nothing, before you commit to it. That option is the one
   under the cursor.

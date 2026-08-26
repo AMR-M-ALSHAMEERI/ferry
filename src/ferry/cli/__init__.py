@@ -98,3 +98,75 @@ def tools(
     ui = UI(resolve_theme(theme, capability=capability), capability=capability)
     results = scan(ui)
     raise typer.Exit(0 if any(r.installed for _, r in results) else 1)
+
+
+@app.command("compact")
+def compact_command(
+    bundle: str = typer.Argument(..., help="The bundle holding the conversation."),
+    conversation: str = typer.Option(
+        "", "--conversation", "-c", help="Which conversation, by id. Lists them when omitted."
+    ),
+    shape: str = typer.Option("handoff", "--shape", help="handoff, said, or done."),
+    length: str = typer.Option("standard", "--length", help="brief, standard, or full."),
+    out: str = typer.Option("", "--out", help="Write to a file instead of standard output."),
+) -> None:
+    """Compact one conversation in a bundle into a markdown document.
+
+    Prints to standard output by default, so it pipes. Nothing is sent
+    anywhere: the document is built on this machine from the bundle alone.
+
+    A sealed bundle cannot be read here -- it needs a passphrase, and asking
+    for one is what the interactive screen is for.
+    """
+    from pathlib import Path
+
+    from ferry import __version__
+    from ferry.compact import LENGTHS, SHAPES, compact
+    from ferry.core import Bundle, BundleError
+
+    if shape not in SHAPES:
+        raise typer.BadParameter(f"unknown shape {shape!r}. Choose one of: {', '.join(SHAPES)}")
+    if length not in LENGTHS:
+        valid = ", ".join(sorted(LENGTHS))
+        raise typer.BadParameter(f"unknown length {length!r}. Choose one of: {valid}")
+
+    try:
+        opened = Bundle.open(Path(bundle).expanduser())
+    except (BundleError, OSError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
+
+    known = opened.list_conversations()
+    if not conversation:
+        # Listing rather than guessing. Picking "the first one" would quietly
+        # produce a document about the wrong conversation, which is worse than
+        # printing nothing.
+        typer.echo("Which conversation? Pass --conversation with one of:", err=True)
+        for found in known:
+            typer.echo(f"  {found}", err=True)
+        raise typer.Exit(2 if known else 1)
+
+    wanted = next((found for found in known if str(found) == conversation), None)
+    if wanted is None:
+        typer.echo(f"{conversation} is not in this bundle.", err=True)
+        raise typer.Exit(2)
+
+    document = compact(
+        opened.load_conversation(wanted), shape=shape, length=length, version=__version__
+    )
+
+    if not out:
+        typer.echo(document, nl=False)
+        return
+
+    target = Path(out).expanduser()
+    if target.exists():
+        typer.echo(f"There is already something at {target}.", err=True)
+        raise typer.Exit(2)
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(document, encoding="utf-8", newline="\n")
+    except OSError as exc:
+        typer.echo(f"Could not write it: {exc}", err=True)
+        raise typer.Exit(2) from exc
+    typer.echo(f"Saved to {target}", err=True)

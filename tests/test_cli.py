@@ -85,7 +85,7 @@ def test_export_and_import_reach_a_real_adapter() -> None:
     """
     from ferry.cli.menu import _MILESTONE_FOR_ACTION, _WIRED, MENU_ITEMS
 
-    assert _WIRED == {"export", "import", "inspect"}
+    assert _WIRED == {"export", "import", "inspect", "compact"}
     assert not (_WIRED & set(_MILESTONE_FOR_ACTION))
 
     accounted = _WIRED | set(_MILESTONE_FOR_ACTION) | {"theme", "quit"}
@@ -93,14 +93,26 @@ def test_export_and_import_reach_a_real_adapter() -> None:
 
 
 def test_an_action_that_really_is_unbuilt_still_names_its_milestone() -> None:
-    from ferry.cli.menu import _stub
+    """Compact was the last unbuilt action, so `_MILESTONE_FOR_ACTION` is now
+    empty -- and the mechanism is still worth a test, because the next stub to
+    be added should say when it arrives rather than shrugging."""
+    from ferry.cli import menu
 
     ui = _plain_ui()
     buf = io.StringIO()
     ui.console.file = buf
-    _stub(ui, "compact")
+    menu._stub(ui, "somethingelse")
+    assert "a later milestone" in buf.getvalue()
 
-    assert "M7" in buf.getvalue()
+    buf.truncate(0)
+    buf.seek(0)
+    menu._MILESTONE_FOR_ACTION["somethingelse"] = "M12"
+    try:
+        menu._stub(ui, "somethingelse")
+    finally:
+        del menu._MILESTONE_FOR_ACTION["somethingelse"]
+
+    assert "M12" in buf.getvalue()
 
 
 def test_stub_export_and_import_raise_not_implemented() -> None:

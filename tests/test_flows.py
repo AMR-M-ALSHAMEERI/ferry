@@ -1547,3 +1547,119 @@ class TestDeletingASealedBundle:
 
         assert archive.exists()
         assert "Nothing was deleted" in ui.text
+
+
+# --------------------------------------------------------------------------
+# compact
+# --------------------------------------------------------------------------
+
+
+class TestTheCompactScreen:
+    """Compact reads a bundle and writes a document. It never touches a store,
+    never asks the network, and never writes over a file that exists."""
+
+    def test_it_builds_a_document_from_the_chosen_conversation(self, bundle_dir: Path) -> None:
+        from ferry.cli.flows import run_compact
+
+        ui = _Answers(path=str(bundle_dir), actions=["handoff", "standard", "done"])
+
+        run_compact(ui)
+
+        assert "Compact:" in ui.text
+        assert "without sending it anywhere" in ui.text
+
+    def test_it_says_where_the_document_came_from_before_showing_it(self, bundle_dir: Path) -> None:
+        """The honesty line goes above the document, not under it. It is what a
+        person needs in order to know how to read what follows."""
+        from ferry.cli.flows import run_compact
+
+        ui = _Answers(path=str(bundle_dir), actions=["handoff", "standard", "done"])
+
+        run_compact(ui)
+
+        assert ui.text.index("Nothing was invented") < ui.text.index("# Compact:")
+
+    def test_backing_out_of_the_bundle_prompt_does_nothing(self) -> None:
+        from ferry.cli.flows import run_compact
+
+        ui = _Answers(path=None)
+
+        run_compact(ui)
+
+        assert "Compact:" not in ui.text
+
+    def test_an_empty_bundle_says_so_rather_than_offering_a_list_of_nothing(
+        self, tmp_path: Path, manifest
+    ) -> None:  # type: ignore[no-untyped-def]
+        from ferry.cli.flows import run_compact
+        from ferry.core import Bundle
+
+        Bundle.create(tmp_path / "empty", manifest)
+        ui = _Answers(path=str(tmp_path / "empty"))
+
+        run_compact(ui)
+
+        assert "nothing in this bundle to compact" in ui.text
+
+    def test_a_sealed_bundle_is_opened_with_its_passphrase(
+        self, tmp_path: Path, conversation
+    ) -> None:  # type: ignore[no-untyped-def]
+        """The same picker as inspect, so the passphrase retry and the path
+        prompt are the ones already built rather than a second copy."""
+        from ferry.cli.flows import run_compact
+
+        archive = _seal(tmp_path, conversation)
+        ui = _Answers(
+            path=str(archive),
+            secrets=[PHRASE_TWO],
+            actions=["handoff", "standard", "done"],
+        )
+
+        run_compact(ui)
+
+        assert ui.secrets_asked == 1
+        assert "# Compact:" in ui.text
+
+    def test_saving_refuses_to_write_over_something_that_is_there(
+        self, bundle_dir: Path, tmp_path: Path
+    ) -> None:
+        from ferry.cli.flows import run_compact
+
+        taken = tmp_path / "taken.md"
+        taken.write_text("do not lose me", encoding="utf-8")
+        free = tmp_path / "free.md"
+        ui = _Answers(
+            path=[str(bundle_dir), str(taken), str(free)],
+            actions=["handoff", "standard", "save", "done"],
+        )
+
+        run_compact(ui)
+
+        assert taken.read_text(encoding="utf-8") == "do not lose me"
+        assert "# Compact:" in free.read_text(encoding="utf-8")
+
+    def test_the_clipboard_is_not_offered_where_there_is_none(
+        self, bundle_dir: Path, monkeypatch
+    ) -> None:  # type: ignore[no-untyped-def]
+        """Headless, over SSH, in a container. An option that fails when chosen
+        is worse than one that was never there."""
+        from ferry.cli import clipboard, flows
+
+        monkeypatch.setattr(clipboard, "available", lambda: False)
+        ui = _Answers(path=str(bundle_dir), actions=["handoff", "standard", "done"])
+
+        flows.run_compact(ui)
+
+        assert "Copy it to the clipboard" not in ui.text
+
+    def test_a_clipboard_that_refuses_is_not_an_error(self, bundle_dir: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        from ferry.cli import clipboard, flows
+
+        monkeypatch.setattr(clipboard, "available", lambda: True)
+        monkeypatch.setattr(clipboard, "copy", lambda text: False)
+        ui = _Answers(path=str(bundle_dir), actions=["handoff", "standard", "copy", "done"])
+
+        flows.run_compact(ui)
+
+        assert "did not take it" in ui.text
+        assert "Traceback" not in ui.text

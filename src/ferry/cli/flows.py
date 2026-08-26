@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final, cast
+from uuid import UUID
 
 from ferry.adapters.base import (
     Adapter,
@@ -51,7 +52,14 @@ from ferry.core.sealed import (
 )
 from ferry.core.summary import ConversationSummary
 
-__all__ = ["Scanned", "find_bundles", "run_export", "run_import", "run_inspect"]
+__all__ = [
+    "Scanned",
+    "find_bundles",
+    "run_compact",
+    "run_export",
+    "run_import",
+    "run_inspect",
+]
 
 _MAX_SHOWN_WARNINGS = 8
 """Messages printed in full, per group, before the rest are counted."""
@@ -1353,3 +1361,194 @@ def _delete_bundle(ui: UI, summary: BundleSummary) -> bool:
     ui.success(f"Deleted {summary.root.name} - {_megabytes(removed.bytes_freed)} freed")
     ui.blank()
     return True
+
+
+# --------------------------------------------------------------------------
+# compact
+# --------------------------------------------------------------------------
+
+_SHAPE_CHOICES: Final = [
+    ("handoff", "A handoff, to resume this in a new session"),
+    ("said", "Just what I said"),
+    ("done", "What was done - files, commands and errors"),
+]
+
+_LENGTH_CHOICES: Final = [
+    ("standard", "Standard - about a page"),
+    ("brief", "Brief - the shortest useful version"),
+    ("full", "Full - everything that survives the cut"),
+]
+
+
+def run_compact(ui: UI) -> None:
+    """Turn one conversation into a document worth pasting somewhere else.
+
+    Reads a bundle, never a live store. A bundle is a snapshot; a conversation
+    still being written is a moving target, and compacting one would give a
+    different answer every time it was asked. Reaching into a live store would
+    also mean a second way into people's real data for no gain -- Ferry reads a
+    store in exactly two places, `detect` and `export`, and that stays true.
+
+    Everything here happens on this machine. There is no key to configure, no
+    account, no network call, and no way for a conversation to leave.
+    """
+    try:
+        picked = _choose_bundle(ui, "Which bundle holds the conversation?")
+    except NonInteractiveError as exc:
+        ui.error(str(exc))
+        return
+    if picked is None:
+        return
+
+    with _opened(ui, picked) as opened:
+        if opened is None:
+            return
+        _compact_at(ui, opened.root)
+
+
+def _compact_at(ui: UI, root: Path) -> None:
+    """The compact screen, on an opened bundle."""
+    try:
+        bundle = Bundle.open(root)
+    except BundleError as exc:
+        ui.error(str(exc))
+        ui.blank()
+        return
+
+    with ui.scanning(f"Reading {root.name}"):
+        summary = summarise(bundle)
+
+    if not summary.conversations:
+        ui.info("There is nothing in this bundle to compact.")
+        ui.blank()
+        return
+
+    while True:
+        try:
+            chosen = ui.select(
+                "Which conversation?",
+                [
+                    (str(conversation.id), _conversation_line(conversation))
+                    for conversation in summary.conversations
+                ],
+                hint="use --conversation",
+            )
+            if chosen is None:
+                return
+            shape = ui.select("What should it be for?", _SHAPE_CHOICES, hint="use --shape")
+            if shape is None:
+                continue
+            length = ui.select("How long?", _LENGTH_CHOICES, hint="use --length")
+            if length is None:
+                continue
+        except NonInteractiveError as exc:
+            ui.error(str(exc))
+            return
+
+        conversation_id = next(c.id for c in summary.conversations if str(c.id) == chosen)
+        try:
+            with ui.scanning("Compacting"):
+                document = _compact_document(bundle, conversation_id, shape=shape, length=length)
+        except BundleError as exc:
+            ui.error(str(exc))
+            ui.blank()
+            return
+
+        _show_compact(ui, document)
+        if not _after_compact(ui, document, summary.root.name):
+            return
+
+
+def _compact_document(bundle: Bundle, conversation_id: UUID, *, shape: str, length: str) -> str:
+    """The document itself. Imported here so the menu does not pay for the
+    compact package on every run of a screen that never opens it."""
+    from ferry import __version__
+    from ferry.compact import compact
+
+    conversation = bundle.load_conversation(conversation_id)
+    return compact(conversation, shape=shape, length=length, version=__version__)
+
+
+def _show_compact(ui: UI, document: str) -> None:
+    """Put the document on the screen, and say plainly where it came from.
+
+    The honesty line is shown *before* the document rather than buried under
+    it, because it is the thing a person needs in order to know how to read
+    what follows.
+    """
+    ui.blank()
+    ui.info("Built from your conversation without sending it anywhere.")
+    ui.detail("Nothing was invented - every line is quoted from it or counted from it.")
+    ui.blank()
+    for line in document.splitlines():
+        ui.detail(line) if line.startswith(("#", "-", ">", "*")) else ui.info(line)
+    ui.blank()
+
+
+def _after_compact(ui: UI, document: str, bundle_name: str) -> bool:
+    """Copy it, save it, or go back. Returns False when the screen is finished."""
+    from ferry.cli import clipboard
+
+    # Done first, the same way every other screen in Ferry orders this
+    # question: the highlighted row when the menu opens should be the one that
+    # changes nothing.
+    choices: list[tuple[str, str]] = [("done", "Done")]
+    if clipboard.available():
+        # Offered only where there is something to copy to. On a server or over
+        # SSH there is not, and an option that fails when chosen is worse than
+        # one that was never there.
+        choices.append(("copy", "Copy it to the clipboard"))
+    choices.append(("save", "Save it to a file"))
+    choices.append(("another", "Compact another conversation"))
+
+    try:
+        action = ui.select("What now?", choices, hint="use --out")
+    except NonInteractiveError as exc:
+        ui.error(str(exc))
+        return False
+
+    if action is None or action == "done":
+        return False
+    if action == "another":
+        return True
+    if action == "copy":
+        if clipboard.copy(document):
+            ui.success("Copied.")
+        else:
+            # Not an error. The document is still on the screen, and saving it
+            # is right there.
+            ui.info("The clipboard did not take it. You can save it to a file instead.")
+        ui.blank()
+        return True
+
+    _save_compact(ui, document, bundle_name)
+    return True
+
+
+def _save_compact(ui: UI, document: str, bundle_name: str) -> None:
+    """Write the document where the person asks, without overwriting anything."""
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    default = str(Path.cwd() / f"compact-{bundle_name}-{stamp}.md")
+    while True:
+        try:
+            answer = ui.path("Save it to", default=default, hint="use --out")
+        except NonInteractiveError as exc:
+            ui.error(str(exc))
+            return
+        if answer is None:
+            return
+
+        target = Path(clean_path(answer)).expanduser()
+        if target.exists():
+            ui.error(f"There is already something at {target}.")
+            ui.detail("Choose another name - Ferry does not write over a file that exists.")
+            continue
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(document, encoding="utf-8", newline="\n")
+        except OSError as exc:
+            ui.error(f"Could not write it: {exc}")
+            continue
+        ui.success(f"Saved to {target}")
+        ui.blank()
+        return
