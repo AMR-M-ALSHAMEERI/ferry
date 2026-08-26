@@ -194,8 +194,16 @@ the machine that made it.**
 - The passphrase is asked twice. There is no recovery.
 - The sealed file is opened again with the same passphrase **before** the
   unencrypted bundle can be deleted, and deleting it is a separate question.
-- A sealed bundle is opened **read-only** by `inspect`. Deleting from inside
-  one would mean unseal, edit, reseal — three chances to lose the only copy.
+- Changing a sealed bundle is offered two ways, because unseal-edit-reseal is
+  three chances to lose the only copy and that is an argument for care, not for
+  refusing. **Unsealing to a folder** writes the bundle out and leaves the
+  `.ferry` file alone — nothing existing is rewritten. **Delete-and-reseal**
+  writes the new file *beside* the old one, reopens it with the same passphrase
+  to prove it is readable, and only then renames it into place; a crash before
+  that rename leaves the previous file untouched.
+- The passphrase a bundle was opened with is what it is sealed again with.
+  A different one would keep the filename and quietly stop opening the way it
+  did yesterday.
 - Ferry never stores a passphrase, and never puts one in a log or an error.
 
 Measured on the reference machine: a 36.2 MB Antigravity bundle seals to

@@ -13,6 +13,7 @@ wiring. Two properties carry the weight:
 from __future__ import annotations
 
 import io
+import shutil
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -30,6 +31,8 @@ from ferry.adapters.base import (
 from ferry.cli.flows import (
     _describe,
     _report,
+    bundle_at,
+    clean_path,
     find_bundles,
     run_export,
     run_import,
@@ -76,7 +79,7 @@ class _Answers(UI):
     def __init__(
         self,
         *,
-        path: str | None = None,
+        path: str | Sequence[str] | None = None,
         confirm: bool | None = True,
         actions: Sequence[str] | None = None,
         secrets: Sequence[str] | None = None,
@@ -88,7 +91,12 @@ class _Answers(UI):
         self.buffer = io.StringIO()
         self.console.file = self.buffer
         self.console.width = 100
-        self._path = path
+        # A list is answered in order; a bare string is answered once. Both
+        # then answer None, which is escape. The path prompt asks again until
+        # it gets something real, so a fake that repeats one wrong answer for
+        # ever would hang the suite rather than test it.
+        self._paths = [path] if isinstance(path, str) else list(path or [])
+        self.paths_asked = 0
         self._confirm = confirm
         # Answers taken in order, by value rather than by position, so a test
         # says which option it is choosing instead of which row it happens to
@@ -103,6 +111,7 @@ class _Answers(UI):
         self.questions: list[str] = []
         self.asked_to_confirm = 0
         self.confirmed: list[str] = []
+        self.path_defaults: list[str] = []
 
     def select(self, question, choices, **kwargs):  # type: ignore[no-untyped-def]
         self.questions.append(question)
@@ -116,7 +125,9 @@ class _Answers(UI):
         return choices[0][0]
 
     def path(self, question, *, default="", hint=""):  # type: ignore[no-untyped-def]
-        return self._path
+        self.paths_asked += 1
+        self.path_defaults.append(default)
+        return self._paths.pop(0) if self._paths else None
 
     def secret(self, question, *, hint=""):  # type: ignore[no-untyped-def]
         self.secrets_asked += 1
@@ -976,24 +987,26 @@ class TestSealing:
         assert "did not open" in ui.text
         assert "conversation" not in ui.text.split("did not open")[-1]
 
-    def test_a_sealed_bundle_is_opened_read_only(self, tmp_path: Path, conversation) -> None:
-        """Deleting from inside one would mean unseal, edit, reseal.
+    def test_a_sealed_bundle_offers_a_way_to_change_it(self, tmp_path: Path, conversation) -> None:
+        """This screen used to be a dead end.
 
-        Three chances to lose the only copy of something, on a screen whose job
-        is to let you look.
+        It said "unseal it first" and Ferry had no way to do that -- an
+        instruction the program did not support. Both ways out are offered
+        here now, and looking is still what happens if you touch nothing.
         """
         adapter = _RealExport([conversation])
         seeded = _KeepPlaintext(path=str(tmp_path / "bundle"), secrets=[PHRASE, PHRASE])
         run_export(seeded, scanned(adapter))
         sealed = next(iter(tmp_path.glob("*.ferry")))
+        before = sealed.read_bytes()
 
         ui = _Recorded(path=str(sealed), actions=["done"], secrets=[PHRASE])
         run_inspect(ui)
 
         offered = {value for question, choices in ui.offered for value, _ in choices}
-        assert "one" not in offered
-        assert "all" not in offered
-        assert "read-only" in ui.text
+        assert "unseal" in offered, "the plain way: write it out where it can be worked on"
+        assert "one" in offered, "the convenient way: delete, then seal it again"
+        assert sealed.read_bytes() == before, "looking must change nothing"
 
     def test_the_unsealed_copy_does_not_survive_the_screen(
         self, tmp_path: Path, conversation, monkeypatch
@@ -1187,10 +1200,10 @@ class TestTheOpeningSpinnerStops:
         archive = self._sealed(tmp_path, conversation)
         ui = _Spied(secrets=[PHRASE])
 
-        with _opened(ui, archive) as root:
-            assert root is not None
+        with _opened(ui, archive) as opened:
+            assert opened is not None
             spinning_while_the_caller_works = ui.spinning
-            assert (root / "manifest.json").is_file(), "the bundle must really be open"
+            assert (opened.root / "manifest.json").is_file(), "the bundle must really be open"
 
         assert not spinning_while_the_caller_works, (
             'the "Opening" spinner was still running while the caller did its work'
@@ -1204,10 +1217,10 @@ class TestTheOpeningSpinnerStops:
         archive = self._sealed(tmp_path, conversation)
         ui = _Spied(secrets=[PHRASE])
 
-        with _opened(ui, archive) as root:
-            assert root is not None
-            inside = root
-            assert list(root.glob("conversations/*.json"))
+        with _opened(ui, archive) as opened:
+            assert opened is not None
+            inside = opened.root
+            assert list(opened.root.glob("conversations/*.json"))
 
         assert not inside.exists(), "the unsealed copy must be cleaned up on the way out"
 
@@ -1228,3 +1241,309 @@ class _Spied(_Answers):
             yield
         finally:
             self.spinning = False
+
+
+# --------------------------------------------------------------------------
+# typing a path
+# --------------------------------------------------------------------------
+
+
+class TestBundleAt:
+    """What a typed path is, decided without opening anything.
+
+    A pure function so it can be tested at all. The screen it serves cannot be
+    driven without a terminal, and behaviour that cannot be invoked without one
+    does not get tested -- so the deciding moved out until it could be.
+    """
+
+    def test_a_bundle_directory_is_a_bundle(self, bundle_dir: Path) -> None:
+        assert bundle_at(str(bundle_dir)).bundle == bundle_dir
+
+    def test_a_sealed_file_is_a_bundle(self, tmp_path: Path, conversation) -> None:  # type: ignore[no-untyped-def]
+        archive = _seal(tmp_path, conversation)
+        assert bundle_at(str(archive)).bundle == archive
+
+    def test_nothing_there_says_so(self, tmp_path: Path) -> None:
+        verdict = bundle_at(str(tmp_path / "no-such-folder"))
+        assert verdict.bundle is None
+        assert "There is nothing at" in verdict.problem
+
+    def test_a_folder_that_is_not_a_bundle_names_the_missing_manifest(self, tmp_path: Path) -> None:
+        (tmp_path / "empty").mkdir()
+        verdict = bundle_at(str(tmp_path / "empty"))
+        assert "manifest.json" in verdict.problem
+
+    def test_an_ordinary_file_says_file_not_bundle(self, tmp_path: Path) -> None:
+        note = tmp_path / "notes.txt"
+        note.write_text("hello", encoding="utf-8")
+        assert "is a file, not a bundle" in bundle_at(str(note)).problem
+
+    def test_a_ferry_file_that_is_not_sealed_is_told_apart(self, tmp_path: Path) -> None:
+        """Named like one, does not begin like one.
+
+        "not a bundle" alone would leave someone staring at a file whose name
+        says otherwise.
+        """
+        fake = tmp_path / "looks-real.ferry"
+        fake.write_text("not encrypted at all", encoding="utf-8")
+        assert "named like a sealed bundle" in bundle_at(str(fake)).problem
+
+    def test_a_folder_holding_bundles_offers_them(self, bundle_dir: Path) -> None:
+        """Pointing at the right neighbourhood is not a mistake."""
+        verdict = bundle_at(str(bundle_dir.parent))
+        assert verdict.bundle is None
+        assert bundle_dir in verdict.nearby
+
+    def test_quotes_around_a_path_are_stripped(self, bundle_dir: Path) -> None:
+        """Windows Explorer's "Copy as path" wraps the path in double quotes."""
+        assert bundle_at(f'"{bundle_dir}"').bundle == bundle_dir
+
+    def test_clean_path_leaves_an_ordinary_path_alone(self) -> None:
+        assert clean_path("  C:/Users/x/bundle  ") == "C:/Users/x/bundle"
+
+    def test_an_empty_path_is_neither_a_bundle_nor_a_complaint(self) -> None:
+        verdict = bundle_at("   ")
+        assert verdict.bundle is None
+        assert verdict.problem == ""
+
+
+class TestTheTypedPathAsksAgain:
+    """A wrong path used to end the screen.
+
+    One stray character, one stale folder, one paste with a quote on the end,
+    and you were back at the main menu with nothing to correct. Unlike a
+    passphrase, a path is checkable, so there is no attempt limit here -- but
+    escape still has to leave on the first press.
+    """
+
+    def test_a_wrong_path_is_reported_and_asked_again(
+        self, bundle_dir: Path, tmp_path: Path
+    ) -> None:
+        ui = _Answers(
+            path=[str(tmp_path / "typo"), str(bundle_dir)],
+            actions=["done"],
+        )
+
+        run_inspect(ui)
+
+        assert ui.paths_asked == 2, "the screen must ask again rather than give up"
+        assert "There is nothing at" in ui.text
+        assert "1 conversation" in ui.text, "the second answer must actually open it"
+
+    def test_what_was_typed_comes_back_as_the_starting_text(
+        self, bundle_dir: Path, tmp_path: Path
+    ) -> None:
+        """A typo should be a keystroke to fix, not a line to type again."""
+        typo = str(tmp_path / "typo")
+        ui = _Answers(path=[typo, str(bundle_dir)], actions=["done"])
+
+        run_inspect(ui)
+
+        assert ui.path_defaults[0] == ""
+        assert ui.path_defaults[1] == typo
+
+    def test_escape_leaves_on_the_first_press(self, tmp_path: Path) -> None:
+        ui = _Answers(path=None, actions=["done"])
+
+        run_inspect(ui)
+
+        assert ui.paths_asked == 1
+
+    def test_a_folder_holding_bundles_lists_them(self, bundle_dir: Path) -> None:
+        ui = _Answers(path=[str(bundle_dir.parent)], actions=[str(bundle_dir), "done"])
+
+        run_inspect(ui)
+
+        assert "is not a bundle itself, but it holds" in ui.text
+        assert "1 conversation" in ui.text
+
+
+# --------------------------------------------------------------------------
+# unsealing
+# --------------------------------------------------------------------------
+
+PHRASE_TWO = "correct horse battery staple"
+
+
+def _seal(tmp_path: Path, conversation, name: str = "plain-bundle") -> Path:  # type: ignore[no-untyped-def]
+    from ferry.core import Bundle, Manifest, SourceMachine
+    from ferry.core.sealed import seal_bundle
+
+    root = tmp_path / name
+    bundle = Bundle.create(
+        root,
+        Manifest(
+            created_at=datetime(2026, 8, 1, tzinfo=UTC),
+            created_by="ferry test",
+            source_machine=SourceMachine(os="win32", user_home=str(Path.home())),
+        ),
+    )
+    bundle.add_conversation(conversation)
+    archive = seal_bundle(root, PHRASE_TWO).path
+    shutil.rmtree(root)
+    return archive
+
+
+class TestUnsealingASealedBundle:
+    """The screen used to say "unseal it first" and offer no way to do it.
+
+    An instruction the program does not support is worse than no instruction:
+    it tells someone the thing they want is possible and leaves them looking
+    for it.
+    """
+
+    def test_it_writes_a_real_bundle_and_leaves_the_sealed_file_alone(
+        self, tmp_path: Path, conversation
+    ) -> None:  # type: ignore[no-untyped-def]
+        archive = _seal(tmp_path, conversation)
+        before = archive.read_bytes()
+        into = tmp_path / "opened-up"
+        ui = _Answers(
+            path=[str(archive), str(into)],
+            actions=["unseal", "done"],
+            secrets=[PHRASE_TWO],
+        )
+
+        run_inspect(ui)
+
+        assert (into / "manifest.json").is_file(), "the unsealed folder must be a real bundle"
+        assert list((into / "conversations").glob("*.json"))
+        assert archive.read_bytes() == before, "unsealing must not touch the sealed file"
+
+    def test_it_says_the_folder_is_not_encrypted_before_writing_it(
+        self, tmp_path: Path, conversation
+    ) -> None:  # type: ignore[no-untyped-def]
+        archive = _seal(tmp_path, conversation)
+        ui = _Answers(
+            path=[str(archive), str(tmp_path / "opened-up")],
+            actions=["unseal", "done"],
+            secrets=[PHRASE_TWO],
+        )
+
+        run_inspect(ui)
+
+        assert "not encrypted" in ui.text
+
+    def test_it_refuses_to_write_over_something_that_is_already_there(
+        self, tmp_path: Path, conversation
+    ) -> None:  # type: ignore[no-untyped-def]
+        archive = _seal(tmp_path, conversation)
+        taken = tmp_path / "taken"
+        taken.mkdir()
+        (taken / "important.txt").write_text("do not lose me", encoding="utf-8")
+        ui = _Answers(
+            path=[str(archive), str(taken)],
+            actions=["unseal", "done"],
+            secrets=[PHRASE_TWO],
+        )
+
+        run_inspect(ui)
+
+        assert "will not write over it" in ui.text
+        assert (taken / "important.txt").read_text(encoding="utf-8") == "do not lose me"
+
+
+class TestEditingASealedBundle:
+    """Delete from a sealed bundle, then seal it again.
+
+    The convenience option, and the same act underneath as unsealing by hand:
+    unseal, edit, seal, prove the new file opens, and only then replace the
+    old one.
+    """
+
+    def test_the_conversation_is_gone_and_the_file_still_opens(
+        self, tmp_path: Path, conversation
+    ) -> None:  # type: ignore[no-untyped-def]
+        archive = _seal(tmp_path, conversation)
+        before = archive.read_bytes()
+        ui = _Answers(
+            path=[str(archive)],
+            actions=["one", "done"],
+            secrets=[PHRASE_TWO],
+            confirm=True,
+        )
+
+        run_inspect(ui)
+
+        assert archive.read_bytes() != before, "the sealed file must have been written again"
+        assert is_sealed(archive)
+        assert opens_with(archive, PHRASE_TWO), "the same passphrase, not a new one"
+
+        from ferry.core.sealed import unsealed
+
+        with unsealed(archive, PHRASE_TWO) as bundle:
+            assert bundle.list_conversations() == []
+
+    def test_saying_no_leaves_the_file_untouched(self, tmp_path: Path, conversation) -> None:  # type: ignore[no-untyped-def]
+        archive = _seal(tmp_path, conversation)
+        before = archive.read_bytes()
+        ui = _Answers(
+            path=[str(archive)],
+            actions=["one", "done"],
+            secrets=[PHRASE_TWO],
+            confirm=False,
+        )
+
+        run_inspect(ui)
+
+        assert archive.read_bytes() == before
+
+    def test_the_backup_is_named_as_unencrypted(self, tmp_path: Path, conversation) -> None:  # type: ignore[no-untyped-def]
+        """The safety copy is a plain folder even though the bundle is not."""
+        archive = _seal(tmp_path, conversation)
+        ui = _Answers(
+            path=[str(archive)],
+            actions=["one", "done"],
+            secrets=[PHRASE_TWO],
+            confirm=False,
+        )
+
+        run_inspect(ui)
+
+        assert "not encrypted, even though this bundle is" in ui.text
+
+    def test_a_sealed_file_that_does_not_verify_is_never_put_in_place(
+        self, tmp_path: Path, conversation, monkeypatch
+    ) -> None:  # type: ignore[no-untyped-def]
+        """The one place where being wrong costs everything.
+
+        The check is written as an unconditional step rather than an
+        assumption, so this forces it to say no and asserts that yesterday's
+        file survived.
+        """
+        archive = _seal(tmp_path, conversation)
+        before = archive.read_bytes()
+        monkeypatch.setattr("ferry.cli.flows.opens_with", lambda *args, **kwargs: False)
+        ui = _Answers(
+            path=[str(archive)],
+            actions=["one", "done"],
+            secrets=[PHRASE_TWO],
+            confirm=True,
+        )
+
+        run_inspect(ui)
+
+        assert archive.read_bytes() == before, "the original must survive a failed check"
+        assert not (archive.parent / (archive.name + ".new")).exists()
+        assert "is unchanged" in ui.text
+
+
+class TestDeletingASealedBundle:
+    def test_the_file_is_removed(self, tmp_path: Path, conversation) -> None:  # type: ignore[no-untyped-def]
+        archive = _seal(tmp_path, conversation)
+        ui = _Answers(path=[str(archive)], actions=["all"], secrets=[PHRASE_TWO], confirm=True)
+
+        run_inspect(ui)
+
+        assert not archive.exists()
+
+    def test_saying_no_keeps_it(self, tmp_path: Path, conversation) -> None:  # type: ignore[no-untyped-def]
+        archive = _seal(tmp_path, conversation)
+        ui = _Answers(
+            path=[str(archive)], actions=["all", "done"], secrets=[PHRASE_TWO], confirm=False
+        )
+
+        run_inspect(ui)
+
+        assert archive.exists()
+        assert "Nothing was deleted" in ui.text

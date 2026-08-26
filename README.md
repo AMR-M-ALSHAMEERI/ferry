@@ -97,6 +97,11 @@ as a conversation you had.
   that same screen, because you delete something after looking at it. Deleting
   one conversation keeps a copy in `~/.ferry/backups` first; deleting a whole
   bundle does not, and says so.
+- **A sealed bundle can be changed too.** Inspect offers to unseal it into a
+  folder you can work with, leaving the `.ferry` file exactly where it is; or
+  to delete a conversation and seal it again in one step. The second one never
+  writes in place — the new file is written beside the old one, opened again
+  with the same passphrase to prove it is readable, and only then replaces it.
 
 See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for contributing, and
 [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) (added at M7) once issues

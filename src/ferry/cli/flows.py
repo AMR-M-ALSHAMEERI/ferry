@@ -19,10 +19,12 @@ omission.
 
 from __future__ import annotations
 
+import os
 import shutil
 from collections import Counter
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import ExitStack, contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final, cast
@@ -194,10 +196,126 @@ def _choose_bundle(ui: UI, question: str = "Which bundle should be imported?") -
     return Path(chosen)
 
 
+_QUOTES: Final = "\"'"
+
+
+def clean_path(text: str) -> str:
+    """What someone actually meant by what they pasted.
+
+    Windows Explorer's "Copy as path" wraps the path in double quotes, and a
+    path with quotes around it does not exist. Stripping them turns a
+    mystifying "there is nothing there" into no error at all.
+    """
+    return text.strip().strip(_QUOTES).strip()
+
+
+@dataclass(frozen=True)
+class PathVerdict:
+    """What a typed path turned out to be."""
+
+    bundle: Path | None = None
+    """Something Ferry can open -- a bundle directory, or a sealed file."""
+
+    nearby: tuple[Path, ...] = ()
+    """Bundles found *inside* the folder that was typed."""
+
+    problem: str = ""
+    """Why it is neither, phrased for the person who typed it."""
+
+
+def bundle_at(text: str) -> PathVerdict:
+    """Decide what a typed path is, without opening anything.
+
+    Four answers rather than one, because "that did not work" is the least
+    useful thing this screen can say. A path that does not exist, a folder
+    that is not a bundle, a folder *holding* bundles, and a file that is not
+    sealed are four different mistakes with four different next steps -- and
+    the third one is not a mistake at all: pointing at the right neighbourhood
+    deserves a list, not a complaint.
+    """
+    cleaned = clean_path(text)
+    if not cleaned:
+        return PathVerdict()
+    path = Path(cleaned).expanduser()
+
+    if path.is_file():
+        if is_sealed(path):
+            return PathVerdict(bundle=path)
+        if path.suffix == SEALED_SUFFIX:
+            # Named like one but does not begin like one. Saying only "not a
+            # bundle" would leave someone staring at a file whose name says
+            # otherwise.
+            return PathVerdict(
+                problem=f"{path.name} is named like a sealed bundle but does not begin like one."
+            )
+        return PathVerdict(problem=f"{path.name} is a file, not a bundle.")
+
+    if not path.exists():
+        return PathVerdict(problem=f"There is nothing at {path}")
+    if not path.is_dir():
+        return PathVerdict(problem=f"{path} is neither a folder nor a file Ferry can open.")
+    if (path / MANIFEST_NAME).is_file():
+        return PathVerdict(bundle=path)
+
+    inside = tuple(find_bundles([path]))
+    if inside:
+        return PathVerdict(nearby=inside)
+    return PathVerdict(problem=f"{path.name} is not a bundle - there is no {MANIFEST_NAME} in it.")
+
+
 def _typed_bundle(ui: UI) -> Path | None:
+    """Ask for a path, and keep asking until it names something real.
+
+    A mistyped path used to end the screen: one stray character, one stale
+    folder, one paste with a quote on the end, and you were back at the main
+    menu with nothing to correct. Nothing is being guessed here -- unlike a
+    passphrase, a path is checkable -- so there is no attempt limit. What you
+    typed stays in the prompt as the starting text so a typo is a keystroke to
+    fix rather than a line to type again, and escape still leaves on the first
+    press.
+    """
     ui.detail("Type or paste the folder holding the bundle. Tab completes it.")
-    answer = ui.path("Path to the bundle", hint="use --bundle")
-    return Path(answer).expanduser() if answer else None
+    typed = ""
+    while True:
+        try:
+            answer = ui.path("Path to the bundle", default=typed, hint="use --bundle")
+        except NonInteractiveError as exc:
+            ui.error(str(exc))
+            return None
+        if not answer or not clean_path(answer):
+            return None
+        typed = clean_path(answer)
+
+        verdict = bundle_at(typed)
+        if verdict.bundle is not None:
+            return verdict.bundle
+        if verdict.nearby:
+            picked = _pick_nearby(ui, Path(typed).expanduser(), verdict.nearby)
+            if picked is not None:
+                return picked
+            continue
+        ui.error(verdict.problem)
+
+
+def _pick_nearby(ui: UI, folder: Path, found: Sequence[Path]) -> Path | None:
+    """That folder is not a bundle, but it holds some. Offer them.
+
+    Typing the folder your bundles live in is close enough to right that
+    refusing it would be pedantry.
+    """
+    ui.blank()
+    ui.info(f"{folder.name} is not a bundle itself, but it holds {count_of(len(found), 'bundle')}.")
+    listed = list(found[:_MAX_LISTED_BUNDLES])
+    choices = [(str(path), _describe(path)) for path in listed]
+    choices.append((_TYPE_A_PATH, "None of these - type another path"))
+    try:
+        chosen = ui.select("Which one?", choices, hint="use --bundle")
+    except NonInteractiveError as exc:
+        ui.error(str(exc))
+        return None
+    if chosen is None or chosen == _TYPE_A_PATH:
+        return None
+    return Path(chosen)
 
 
 def _default_bundle_name() -> str:
@@ -553,8 +671,25 @@ def _passphrase_refused(ui: UI, attempt: int) -> None:
     ui.blank()
 
 
+@dataclass(frozen=True)
+class Opened:
+    """A bundle directory ready to read, and how it came to be open."""
+
+    root: Path
+    """Where the bundle is. For a sealed one, a temporary copy."""
+
+    passphrase: str | None = None
+    """What it was unsealed with, or ``None`` if it was never sealed.
+
+    Kept because sealing it again needs it, and asking a second time would be
+    worse than useless: a bundle edited and then sealed under a *different*
+    passphrase keeps its name and quietly stops opening the way it did
+    yesterday. The same passphrase in, the same passphrase out.
+    """
+
+
 @contextmanager
-def _opened(ui: UI, picked: Path) -> Iterator[Path | None]:
+def _opened(ui: UI, picked: Path) -> Iterator[Opened | None]:
     """Yield a directory holding the bundle, unsealing it first if it is sealed.
 
     Yields ``None`` when the user backed out of the passphrase or it was wrong,
@@ -562,7 +697,7 @@ def _opened(ui: UI, picked: Path) -> Iterator[Path | None]:
     the way out, including when the caller raises.
     """
     if not is_sealed(picked):
-        yield picked
+        yield Opened(root=picked)
         return
 
     for attempt in range(1, PASSPHRASE_TRIES + 1):
@@ -590,7 +725,7 @@ def _opened(ui: UI, picked: Path) -> Iterator[Path | None]:
             with ExitStack() as opened:
                 with ui.scanning("Opening"):
                     bundle = opened.enter_context(unsealed(picked, passphrase))
-                yield bundle.root
+                yield Opened(root=bundle.root, passphrase=passphrase)
             return
         except WrongPassphrase:
             _passphrase_refused(ui, attempt)
@@ -684,7 +819,7 @@ def run_import(ui: UI, adapters: Scanned) -> None:
     with _opened(ui, picked) as bundle_dir:
         if bundle_dir is None:
             return
-        _import_from(ui, available, bundle_dir)
+        _import_from(ui, available, bundle_dir.root)
 
 
 def _import_from(ui: UI, available: list[Adapter], bundle_dir: Path) -> None:
@@ -890,19 +1025,16 @@ def run_inspect(ui: UI) -> None:
     if picked is None:
         return
 
-    sealed = is_sealed(picked)
     with _opened(ui, picked) as opened:
         if opened is None:
             return
-        if sealed:
-            # Deleting from inside a sealed bundle would mean unsealing,
-            # editing and resealing -- three chances to lose the only copy of
-            # something, for a screen whose job is to let you look.
-            ui.detail("Opened read-only. To change a sealed bundle, unseal it first.")
-        _inspect_at(ui, opened, read_only=sealed)
+        if opened.passphrase is None:
+            _inspect_at(ui, opened.root)
+            return
+        _inspect_sealed(ui, picked, opened)
 
 
-def _inspect_at(ui: UI, picked: Path, *, read_only: bool = False) -> None:
+def _inspect_at(ui: UI, picked: Path) -> None:
     """The inspect screen, on a directory that is already a plain bundle."""
     while True:
         try:
@@ -917,10 +1049,9 @@ def _inspect_at(ui: UI, picked: Path, *, read_only: bool = False) -> None:
         _show(ui, summary)
 
         choices = [("done", "Done")]
-        if not read_only:
-            if summary.conversations:
-                choices.append(("one", "Delete one conversation from this bundle"))
-            choices.append(("all", "Delete this whole bundle"))
+        if summary.conversations:
+            choices.append(("one", "Delete one conversation from this bundle"))
+        choices.append(("all", "Delete this whole bundle"))
         try:
             action = ui.select("Anything else?", choices, hint="inspect is read-only")
         except NonInteractiveError as exc:
@@ -936,8 +1067,206 @@ def _inspect_at(ui: UI, picked: Path, *, read_only: bool = False) -> None:
         _delete_conversation(ui, bundle, summary)
 
 
-def _delete_conversation(ui: UI, bundle: Bundle, summary: BundleSummary) -> None:
-    """Pick one conversation and remove it, its attachments and its original file."""
+def _inspect_sealed(ui: UI, archive: Path, opened: Opened) -> None:
+    """The inspect screen for a sealed bundle.
+
+    This screen used to end at "To change a sealed bundle, unseal it first" --
+    an instruction Ferry offered no way to follow. Two ways out of that, and
+    both are here because they suit different days.
+
+    **Unsealing to a folder** is the plain one: it writes the bundle out where
+    you can work with it, leaves the sealed file exactly as it was, and hands
+    you back the ordinary screen. Nothing is at risk because nothing existing
+    is rewritten.
+
+    **Deleting and sealing again** is the convenient one, and it is the same
+    act underneath -- unseal, edit, seal, prove the new file opens, and only
+    then let it replace the old one. Convenience that skipped the proving step
+    would be a backup tool destroying a backup.
+    """
+    assert opened.passphrase is not None
+    while True:
+        try:
+            bundle = Bundle.open(opened.root)
+        except BundleError as exc:
+            ui.error(str(exc))
+            ui.blank()
+            return
+
+        with ui.scanning(f"Reading {archive.name}"):
+            summary = summarise(bundle)
+        _show(ui, summary)
+        ui.detail("Sealed. Nothing in the file changes until you choose one of these.")
+
+        choices = [("done", "Done")]
+        if summary.conversations:
+            choices.append(("one", "Delete one conversation, then seal it again"))
+        choices.append(("unseal", "Unseal it into a folder I can work with"))
+        choices.append(("all", "Delete this sealed bundle"))
+        try:
+            action = ui.select("Anything else?", choices, hint="inspect is read-only")
+        except NonInteractiveError as exc:
+            ui.error(str(exc))
+            return
+
+        if action is None or action == "done":
+            return
+        if action == "unseal":
+            _unseal_to_folder(ui, archive, opened.root)
+            continue
+        if action == "all":
+            if _delete_sealed(ui, archive, summary):
+                return
+            continue
+        if _delete_conversation(ui, bundle, summary, sealed=True):
+            if not _reseal(ui, archive, opened.root, opened.passphrase):
+                return
+
+
+def _unseal_to_folder(ui: UI, archive: Path, source: Path) -> Path | None:
+    """Write the opened bundle somewhere that outlives this screen.
+
+    The copy being read already exists; this only puts it somewhere permanent.
+    The sealed file is not touched, so there is a moment where both exist --
+    which is the safe order, and the reason this is the option to reach for
+    first.
+    """
+    ui.blank()
+    ui.warn("An unsealed bundle is not encrypted.")
+    ui.info("It is every conversation in it, readable by anything on this machine.")
+    ui.detail("The sealed file stays where it is. Delete the folder when you are done.")
+
+    default = str(archive.parent / archive.with_suffix("").name)
+    while True:
+        try:
+            answer = ui.path("Unseal it to", default=default, hint="use --into")
+        except NonInteractiveError as exc:
+            ui.error(str(exc))
+            return None
+        if not answer or not clean_path(answer):
+            ui.info("Nothing was unsealed.")
+            ui.blank()
+            return None
+        destination = Path(clean_path(answer)).expanduser()
+        if destination.exists():
+            ui.error(f"{destination} is already there. Ferry will not write over it.")
+            default = str(destination)
+            continue
+        break
+
+    try:
+        with ui.scanning(f"Unsealing to {destination.name}"):
+            shutil.copytree(source, destination)
+    except OSError as exc:
+        ui.error(f"could not unseal to {destination}: {exc}")
+        ui.blank()
+        return None
+
+    ui.success(f"Unsealed: {destination}")
+    ui.detail("Open it from Inspect to delete anything from it, then seal it again from Export.")
+    ui.blank()
+    return destination
+
+
+def _reseal(ui: UI, archive: Path, root: Path, passphrase: str) -> bool:
+    """Write the edited bundle back over the sealed file. Returns success.
+
+    **Never in place.** The new file is written beside the old one, opened
+    again with the same passphrase to prove it is readable, and only then does
+    it replace the original -- one rename, which the filesystem does whole or
+    not at all. A crash at any point before that leaves yesterday's file
+    untouched, which is the property that makes editing a sealed bundle
+    something a backup tool may reasonably offer.
+    """
+    staged = archive.with_name(archive.name + ".new")
+    try:
+        with ui.scanning("Sealing it again"):
+            sealed = seal_bundle(root, passphrase, staged)
+    except (BundleError, OSError) as exc:
+        ui.error(f"could not seal the bundle: {exc}")
+        _discard(staged)
+        ui.detail(f"{archive.name} is unchanged.")
+        ui.blank()
+        return False
+
+    with ui.scanning("Checking it opens"):
+        confirmed = opens_with(sealed.path, passphrase)
+    if not confirmed:
+        # Should be impossible, and is checked anyway: this is the one place
+        # where being wrong costs the user everything.
+        ui.error("The new file did not open with that passphrase.")
+        ui.detail(f"{archive.name} is unchanged, and the new file was discarded.")
+        _discard(staged)
+        ui.blank()
+        return False
+
+    try:
+        os.replace(staged, archive)
+    except OSError as exc:
+        ui.error(f"could not replace {archive.name}: {exc}")
+        ui.detail(f"The edited copy is at {staged}, and the original is untouched.")
+        ui.blank()
+        return False
+
+    ui.success(
+        f"{archive.name} sealed again - {count_of(sealed.conversations, 'conversation')}, "
+        f"{_megabytes(sealed.bytes_written)}"
+    )
+    ui.blank()
+    return True
+
+
+def _discard(staged: Path) -> None:
+    """Remove a half-made sealed file. Failing to is not worth an error."""
+    try:
+        staged.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _delete_sealed(ui: UI, archive: Path, summary: BundleSummary) -> bool:
+    """Remove a sealed bundle -- the one file. Returns ``True`` when it is gone."""
+    try:
+        size = archive.stat().st_size
+    except OSError as exc:
+        ui.error(f"could not read {archive}: {exc}")
+        return False
+    try:
+        ui.blank()
+        ui.warn(f"Deleting the sealed bundle: {archive}")
+        ui.detail(
+            f"{count_of(len(summary.conversations), 'conversation')}, "
+            f"{_megabytes(size)}, made {summary.manifest.created_at:%d %b %Y}"
+        )
+        ui.detail("Nothing puts this back. A bundle is the backup.")
+        if not ui.confirm("Delete it?", default=False, hint="inspect is read-only"):
+            ui.info("Nothing was deleted.")
+            ui.blank()
+            return False
+    except NonInteractiveError as exc:
+        ui.error(str(exc))
+        return False
+
+    try:
+        archive.unlink()
+    except OSError as exc:
+        ui.error(f"could not delete {archive}: {exc}")
+        ui.blank()
+        return False
+
+    ui.success(f"Deleted {archive.name} - {_megabytes(size)} freed")
+    ui.blank()
+    return True
+
+
+def _delete_conversation(
+    ui: UI, bundle: Bundle, summary: BundleSummary, *, sealed: bool = False
+) -> bool:
+    """Pick one conversation and remove it, its attachments and its original file.
+
+    Returns ``True`` when something was actually deleted, which is what tells
+    a sealed bundle it needs sealing again.
+    """
     try:
         chosen = ui.select(
             "Which conversation should go?",
@@ -948,7 +1277,7 @@ def _delete_conversation(ui: UI, bundle: Bundle, summary: BundleSummary) -> None
             hint="inspect is read-only",
         )
         if chosen is None:
-            return
+            return False
         doomed = next(c for c in summary.conversations if str(c.id) == chosen)
 
         # Named, not counted. This is the one action in Ferry after which the
@@ -965,20 +1294,25 @@ def _delete_conversation(ui: UI, bundle: Bundle, summary: BundleSummary) -> None
             "the conversation, its attachments and the original file it came from"
         )
         ui.info("A copy goes to ~/.ferry/backups first.")
+        if sealed:
+            # Said out loud, because it is the one thing about this that is
+            # not obvious: the safety copy is a plain folder, even though the
+            # bundle it came out of is encrypted.
+            ui.detail("That copy is not encrypted, even though this bundle is.")
         if not ui.confirm("Delete it?", default=False, hint="inspect is read-only"):
             ui.info("Nothing was deleted.")
             ui.blank()
-            return
+            return False
     except NonInteractiveError as exc:
         ui.error(str(exc))
-        return
+        return False
 
     try:
         removed = bundle.delete_conversation(doomed.id)
     except BundleError as exc:
         ui.error(str(exc))
         ui.blank()
-        return
+        return False
 
     ui.success(
         f"Deleted {doomed.name} - {count_of(removed.files, 'file')}, "
@@ -987,6 +1321,7 @@ def _delete_conversation(ui: UI, bundle: Bundle, summary: BundleSummary) -> None
     if removed.backup:
         ui.detail(f"copy kept at {removed.backup}")
     ui.blank()
+    return True
 
 
 def _delete_bundle(ui: UI, summary: BundleSummary) -> bool:
