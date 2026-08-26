@@ -42,7 +42,15 @@ from ferry.ucs import (
 )
 from ferry.ucs.models import ContentBlock
 
-__all__ = ["NARRATION_KINDS", "PendingImage", "SessionRead", "read_session"]
+__all__ = ["NARRATION_KINDS", "URIS_KEY", "PendingImage", "SessionRead", "read_session"]
+
+URIS_KEY = "ferry_invocation_uris"
+"""Where the files named by ``invocationMessage`` are kept in a call's input.
+
+Prefixed so it cannot collide with a key ``toolSpecificData`` owns, and so a
+reader of a bundle can tell at a glance which keys came from the tool and which
+Ferry put there. It is still Copilot's own data -- see :func:`_invocation_uris`.
+"""
 
 NARRATION_KINDS = frozenset({"mcpServersStarting", "autoModeResolution"})
 """Blocks that are the interface talking about itself, not the conversation.
@@ -117,6 +125,29 @@ def _thinking_text(value: Any) -> str:
     return ""
 
 
+def _invocation_uris(block: dict[str, Any]) -> list[str]:
+    """The files a tool invocation names, as Copilot itself recorded them.
+
+    ``toolSpecificData`` is **empty for every file tool** -- 78 of 104 real
+    invocations on this machine carry a ``copilot_readFile`` or
+    ``copilot_findFiles`` call with no arguments at all. The files are not
+    missing, they are somewhere else: ``invocationMessage`` is the line Copilot
+    showed the user ("Reading [](file:///c%3A/...)") and its ``uris`` map keys
+    that line's links to the files behind them.
+
+    Copied verbatim, keys only, in the order Copilot wrote them. Turning a URI
+    into a path is a *reader's* job and belongs where the paths are read, not
+    here -- this stays a faithful copy of what the tool recorded.
+    """
+    message = block.get("invocationMessage")
+    if not isinstance(message, dict):
+        return []
+    uris = message.get("uris")
+    if not isinstance(uris, dict):
+        return []
+    return [key for key in uris if isinstance(key, str) and key]
+
+
 def _tool_blocks(block: dict[str, Any]) -> list[ContentBlock]:
     """A tool invocation as a call, and its outcome.
 
@@ -134,11 +165,15 @@ def _tool_blocks(block: dict[str, Any]) -> list[ContentBlock]:
     call_id = block.get("toolCallId")
     name = block.get("toolId")
     specific = block.get("toolSpecificData")
+    arguments: dict[str, Any] = dict(specific) if isinstance(specific, dict) else {}
+    uris = _invocation_uris(block)
+    if uris and URIS_KEY not in arguments:
+        arguments[URIS_KEY] = uris
     out: list[ContentBlock] = [
         ToolUseBlock(
             name=name if isinstance(name, str) and name else "unknown",
             id=call_id if isinstance(call_id, str) else None,
-            input=specific if isinstance(specific, dict) else {},
+            input=arguments,
         )
     ]
     if not isinstance(call_id, str):

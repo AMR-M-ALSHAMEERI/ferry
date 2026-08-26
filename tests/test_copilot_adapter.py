@@ -422,3 +422,40 @@ def test_a_longer_duplicate_is_reported_rather_than_swallowed(store: Path, tmp_p
     assert "not carried" in warnings[0].message
     skipped = [e for e in events if e.kind == "skipped" and e.conversation_id == str(IDS["basic"])]
     assert "longer copy exists" in skipped[0].message
+
+
+def test_the_files_a_tool_named_survive_a_round_trip(tmp_path: Path, monkeypatch, target) -> None:  # type: ignore[no-untyped-def]
+    """The reader now carries `invocationMessage.uris` into the call's input.
+
+    The writer rebuilds a transcript from `source_raw` and never reads `input`,
+    so this should hold untouched -- **which is exactly why it is asserted
+    rather than assumed.** A round trip that quietly stopped being faithful is
+    the kind of breakage no unit test above would notice.
+    """
+    from ferry.adapters.base import ImportOptions
+    from ferry.adapters.copilot.reader import URIS_KEY, read_session
+
+    session_id = UUID("77777777-8888-4999-8aaa-bbbbbbbbbbbb")
+    user = tmp_path / "source" / "Code" / "User"
+    chats = user / "workspaceStorage" / WS_KEY / "chatSessions"
+    chats.mkdir(parents=True)
+    (chats / f"{session_id}.jsonl").write_bytes((FIXTURES / "uris.jsonl").read_bytes())
+    monkeypatch.setenv(cp.USER_DIR_ENV, str(user))
+
+    exported = tmp_path / "bundle"
+    list(CopilotAdapter().export(exported))
+    original = Bundle.open(exported).load_conversation(session_id)
+    assert any(
+        URIS_KEY in b.input for m in original.messages for b in m.content if b.type == "tool_use"
+    )
+
+    list(CopilotAdapter(target).import_(exported, ImportOptions()))
+
+    written = cp.session_files(target)
+    assert len(written) == 1
+    key, path = written[0]
+    rebuilt = read_session(path, key, target).conversation
+    assert rebuilt is not None
+    assert [[b.model_dump() for b in m.content] for m in rebuilt.messages] == [
+        [b.model_dump() for b in m.content] for m in original.messages
+    ]

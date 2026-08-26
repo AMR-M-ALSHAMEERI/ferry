@@ -13,6 +13,7 @@ these were built from.
 | `splice.jsonl` | A `kind: 2` record carrying `i`. The response is streamed, then revised — reading `i` as a plain append duplicates the answer. |
 | `edge.jsonl` | An unknown delta kind, a corrupt line, an empty `thinking` block, a turn marked `hiddenFromTranscript`, and an unknown response kind. |
 | `empty.jsonl` | A chat panel that was opened and never used. VS Code writes one of these every time; it is the common case, not a fault. |
+| `uris.jsonl` | The file tools as they really arrive: `toolSpecificData` empty, and the files named only by `invocationMessage.uris`. Also a tool that carries arguments and no `uris`. |
 
 Two properties these exist to protect:
 

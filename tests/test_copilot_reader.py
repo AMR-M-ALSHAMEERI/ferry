@@ -287,3 +287,87 @@ def test_a_tool_call_that_recorded_no_outcome_at_all_yields_only_the_call() -> N
     blocks = _tool_blocks({"kind": "toolInvocationSerialized", "toolId": "t", "toolCallId": "c"})
 
     assert [b.type for b in blocks] == ["tool_use"]
+
+
+# --------------------------------------------------------------------------
+# the files a tool touched
+# --------------------------------------------------------------------------
+
+
+def test_the_files_a_tool_call_named_are_carried(session) -> None:  # type: ignore[no-untyped-def]
+    """`toolSpecificData` is empty for every file tool in real transcripts --
+    78 of 104 invocations on the probe machine. The files are not missing, they
+    are in `invocationMessage.uris`, which the reader used to walk past."""
+    from ferry.adapters.copilot.reader import URIS_KEY
+
+    found = read_session(session("uris.jsonl", UUID("77777777-8888-4999-8aaa-bbbbbbbbbbbb")))
+
+    assert found.conversation is not None
+    calls = [
+        b for m in found.conversation.messages for b in m.content if isinstance(b, ToolUseBlock)
+    ]
+    read, search, terminal = calls
+    assert read.input[URIS_KEY] == ["file:///c%3A/work/demo/client.py"]
+    assert search.input[URIS_KEY] == [
+        "file:///c%3A/work/demo/settings.py",
+        "file:///c%3A/work/demo/tests/test_client.py",
+    ]
+    # A call with arguments of its own keeps them, and gains no empty key.
+    assert terminal.input == {"kind": "terminal", "command": "pytest -q"}
+
+
+def test_a_calls_own_arguments_are_not_replaced_by_the_files() -> None:
+    """Both are recorded, side by side. `toolSpecificData` is what the tool was
+    given; `uris` is what Copilot showed. Merging them would put Ferry's
+    reading of the display line where an argument is expected."""
+    from ferry.adapters.copilot.reader import URIS_KEY, _tool_blocks
+
+    blocks = _tool_blocks(
+        {
+            "kind": "toolInvocationSerialized",
+            "toolId": "copilot_readFile",
+            "toolCallId": "call-1",
+            "toolSpecificData": {"kind": "input", "path": "example.py"},
+            "invocationMessage": {"value": "Reading", "uris": {"file:///c%3A/a.py": {"$mid": 1}}},
+        }
+    )
+
+    assert blocks[0].input == {
+        "kind": "input",
+        "path": "example.py",
+        URIS_KEY: ["file:///c%3A/a.py"],
+    }
+
+
+def test_a_display_line_with_no_files_adds_nothing() -> None:
+    """Most invocation messages have no `uris` at all. An empty list would be a
+    key that says nothing, in every tool call in every bundle."""
+    from ferry.adapters.copilot.reader import URIS_KEY, _tool_blocks
+
+    blocks = _tool_blocks(
+        {
+            "kind": "toolInvocationSerialized",
+            "toolId": "manage_todo_list",
+            "toolCallId": "call-2",
+            "invocationMessage": {"value": "Updating the list", "isTrusted": True},
+        }
+    )
+
+    assert URIS_KEY not in blocks[0].input
+
+
+def test_an_invocation_message_that_is_a_bare_string_is_not_read_for_files() -> None:
+    """`explore_subagent` writes a plain string there. Four of 104 real
+    invocations do, so this is the ordinary case for at least one tool."""
+    from ferry.adapters.copilot.reader import URIS_KEY, _tool_blocks
+
+    blocks = _tool_blocks(
+        {
+            "kind": "toolInvocationSerialized",
+            "toolId": "explore_subagent",
+            "toolCallId": "call-3",
+            "invocationMessage": "Exploring the codebase",
+        }
+    )
+
+    assert URIS_KEY not in blocks[0].input
