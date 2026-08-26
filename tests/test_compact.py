@@ -619,3 +619,33 @@ class TestNotClaimingMoreThanTheToolRecorded:
         document = compact(item)
 
         assert "1 file touched" in document
+
+
+class TestNothingLeavesTheMachine:
+    def test_compacting_opens_no_socket(self, realistic: Conversation) -> None:
+        """The README says Ferry makes no network calls at all. That is a claim
+        on the front page, and a claim on the front page should have a test
+        under it rather than a person watching a network monitor once.
+
+        Blocking the socket module is a stronger check than observing traffic:
+        it fails on the *attempt*, whether or not anything was listening.
+        """
+        import socket
+
+        opened: list[object] = []
+
+        class Refused(socket.socket):  # type: ignore[misc]
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                opened.append(args)
+                raise AssertionError("compact tried to open a socket")
+
+        real = socket.socket
+        socket.socket = Refused  # type: ignore[misc, assignment]
+        try:
+            for shape in SHAPES:
+                for length in LENGTHS:
+                    compact(realistic, shape=shape, length=length)
+        finally:
+            socket.socket = real  # type: ignore[misc]
+
+        assert opened == []
