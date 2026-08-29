@@ -1824,7 +1824,7 @@ def test_a_mixed_bundle_says_what_converting_would_cost(foreign_bundle: Path) ->
 
     run_import(ui, scanned(adapter))
 
-    assert "came from codex" in ui.text
+    assert "from codex" in ui.text
     # The honest ceiling, said before the choice rather than in the release notes.
     assert "not a session its assistant can pick up and continue" in ui.text
     # And the reassurance that makes the choice safe to get wrong.
@@ -1873,7 +1873,7 @@ def test_the_two_convert_rows_say_what_they_cost_not_only_what_they_give(
     """
     from ferry.cli.flows import _cross_tool_choices
 
-    rows = {row[0]: row for row in _cross_tool_choices("GitHub Copilot Chat", 3, "Antigravity")}
+    rows = {row[0]: row for row in _cross_tool_choices("GitHub Copilot Chat", 0)}
 
     # The cost lives on the second line, where there is room to say it plainly.
     assert "not continue them" in rows["archive"][2]
@@ -1906,11 +1906,30 @@ def test_cancelling_the_conversion_writes_nothing_at_all(foreign_bundle: Path) -
     assert "Nothing was written" in ui.text
 
 
-def test_the_safe_option_is_the_one_under_the_cursor(foreign_bundle: Path) -> None:
-    """Every other screen in Ferry puts the option that writes least first."""
+def test_a_default_that_would_import_nothing_is_not_offered() -> None:
+    """An export writes one tool per bundle, so a bundle going into a different
+    assistant is normally foreign all the way through.
+
+    The first draft offered *"import only the ones that came from Antigravity"*
+    even then -- under the cursor, importing **nought of nineteen**. A default
+    that does nothing is worse than a missing option: someone pressing Enter
+    past a screen they have understood gets an empty result and no error.
+    """
     from ferry.cli.flows import _cross_tool_choices
 
-    rows = _cross_tool_choices("GitHub Copilot Chat", 3, "Antigravity")
+    only_foreign = _cross_tool_choices("Antigravity", 0)
+
+    assert [row[0] for row in only_foreign] == ["archive", "continue", "cancel"]
+    assert only_foreign[-1][0] == "cancel"
+
+
+def test_skipping_is_offered_and_first_when_there_is_something_to_skip() -> None:
+    """A bundle holding both only happens when someone exports twice into the
+    same folder, but then the option is real and is the one that writes least."""
+    from ferry.cli.flows import _cross_tool_choices
+
+    rows = _cross_tool_choices("Claude Code", 16)
 
     assert rows[0][0] == "skip"
+    assert "16" in rows[0][1]
     assert rows[-1][0] == "cancel"

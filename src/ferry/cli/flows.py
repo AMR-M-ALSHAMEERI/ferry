@@ -863,64 +863,67 @@ def run_import(ui: UI, adapters: Scanned) -> None:
         _import_from(ui, available, bundle_dir.root)
 
 
-def _cross_tool_choices(tool: str, count: int, sources: str) -> list[tuple[str, str, str]]:
+def _cross_tool_choices(tool: str, mixed: int) -> list[tuple[str, str, str]]:
     """What to do about conversations from another assistant.
 
-    Four rows on a screen that already existed, rather than a screen of its own.
+    ``mixed`` is how many of the bundle's conversations came from ``tool``
+    itself, and it is usually **zero**. An export writes one tool per bundle, so
+    a bundle imported into a different assistant is normally foreign all the way
+    through, and a bundle with both in it only happens when someone exports
+    twice into the same folder.
 
-    **Leaving them out is first, and is the safe answer.** Every other screen in
-    Ferry puts the option that writes least under the cursor, and a person who
-    pressed Enter past this one without reading it should end up with the
-    conversations they could have had anyway.
+    That is why the *skip* row is conditional. The first draft offered it
+    always, so importing a Claude Code bundle into Antigravity put "import only
+    the conversations that came from Antigravity" under the cursor -- an option
+    that would have imported **nought of nineteen**. A default that does nothing
+    is worse than a missing option, because someone pressing Enter to get past a
+    screen they have already understood ends up with an empty result and no
+    error to explain it.
 
-    **Each row carries its cost on a second line.** The two middle options
-    differ *only* in what they give up, so a label naming the benefit alone
-    makes them look interchangeable and the choice arbitrary.
-
-    **No Ferry vocabulary.** "Archive" and "Continue" are names in the spec and
-    the code and must never reach the screen; someone here is choosing between
-    reading and working, not between two modes with names they have never met.
+    Nothing here writes: the import screen still follows, and *its* default is
+    still Preview. This screen only decides what a conversion may give up.
     """
-    return [
-        (
-            "skip",
-            f"Import only the conversations that came from {tool}",
-            f"The {count} from {sources} stay in the bundle. None of them is written.",
-        ),
+    rows = []
+    if mixed:
+        rows.append(
+            (
+                "skip",
+                f"Import only the {mixed} that {tool} made, and skip the rest",
+                "The others stay in the bundle. None of them is written.",
+            )
+        )
+    rows += [
         (
             "archive",
-            "Bring them in so I can read and search them here",
+            "Convert them so I can read and search them here",
             "Keeps the most detail. You can read them, but not continue them.",
         ),
         (
             "continue",
-            "Bring them in so I can carry on working in them",
+            "Convert them so I can carry on working in them",
             "Drops the assistant's thinking and tool output so you can continue.",
         ),
-        (
-            "cancel",
-            "Cancel",
-            "Nothing is written at all, not even the ones from this assistant.",
-        ),
+        ("cancel", "Cancel", "Nothing is written."),
     ]
+    return rows
 
 
 def _cross_tool(ui: UI, bundle: Bundle, adapter: Adapter) -> str | None:
     """What to do about foreign conversations, having said what it costs.
 
     Returns ``"skip"``, ``"archive"``, ``"continue"``, or ``None`` to cancel.
-    Says nothing at all when the bundle is entirely native, which is the
-    ordinary case -- a restore onto a new machine should not be interrupted to
-    explain a feature it is not using.
+    Says nothing at all when everything in the bundle already belongs to the
+    target, which is the ordinary restore -- that path should not be
+    interrupted to explain a feature it is not using.
     """
+    native: list[Conversation] = []
     foreign: list[Conversation] = []
     for found in bundle.list_conversations():
         try:
             item = bundle.load_conversation(found)
         except Exception:  # noqa: BLE001 - a bad file is the importer's to report
             continue
-        if item.source_tool != adapter.name:
-            foreign.append(item)
+        (native if item.source_tool == adapter.name else foreign).append(item)
     if not foreign:
         return "skip"
 
@@ -929,32 +932,37 @@ def _cross_tool(ui: UI, bundle: Bundle, adapter: Adapter) -> str | None:
 
     ui.blank()
     sources = ", ".join(sorted({c.source_tool for c in foreign}))
-    ui.info(
-        f"{len(foreign)} of {len(bundle.list_conversations())} conversations came from "
-        f"{sources}, not {adapter.display_name}."
-    )
+    if native:
+        ui.info(
+            f"This bundle holds {len(foreign)} conversations from {sources} "
+            f"and {len(native)} from {adapter.display_name}."
+        )
+    else:
+        # The ordinary case, said plainly. "19 of 19 came from elsewhere" is
+        # arithmetic standing where a sentence belongs.
+        ui.info(
+            f"This bundle holds {len(foreign)} conversations from {sources}. "
+            f"Writing them into {adapter.display_name} means converting them."
+        )
 
     if impossible:
-        # Named before the question, not after it. A person choosing to convert
-        # should already know how many of these cannot be converted at all,
-        # because otherwise the count in the result reads as a failure.
         reason = pair(impossible[0].source_tool, adapter.name).reason
         ui.warn(f"{len(impossible)} of them cannot be written into {adapter.display_name}.")
         ui.info(reason)
         if not convertible:
-            ui.info("They will be skipped whatever you choose here.")
+            ui.info("There is nothing here Ferry can import.")
             ui.blank()
-            return "skip"
+            return None
 
     ui.blank()
-    ui.info(f"Converting the other {len(convertible)} costs:")
+    ui.info("Converting costs:")
     for note in _combined_loss(convertible, adapter.name):
         ui.info(f"  {note}")
     ui.blank()
 
     choice = ui.select(
-        f"What should Ferry do with the {len(convertible)} from another assistant?",
-        _cross_tool_choices(adapter.display_name, len(convertible), sources),
+        f"How should Ferry bring these into {adapter.display_name}?",
+        _cross_tool_choices(adapter.display_name, len(native)),
         hint="use --allow-cross-tool",
     )
     if choice is None or choice == "cancel":
