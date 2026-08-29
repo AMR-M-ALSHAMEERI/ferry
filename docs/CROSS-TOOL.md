@@ -30,19 +30,28 @@ reported success" and "the conversation is really there" are different claims.
 |---|---|---|
 | **Claude Code** | **Yes** | Its transcript is plain JSONL and every envelope field can be rebuilt. All three other tools, every message, 100% of the words. |
 | OpenAI Codex | No | Codex rebuilds a conversation from the `session_meta` header in its own rollout file. A bundle from another tool does not carry one, and the header cannot be invented — Codex rejects the whole file if it is wrong. |
-| GitHub Copilot Chat | No | A conversation is invisible in Copilot Chat unless it is also written into the workspace chat index, and deriving that workspace key is unsolved even for Copilot's own conversations. |
+| GitHub Copilot Chat | Not yet | A conversation is invisible in Copilot Chat unless it is also listed in the workspace chat index. Ferry writes that index for Copilot's own conversations already; it does not yet build an entry for one that arrived from another tool. |
 | Antigravity | No | Antigravity conversations are restored from the original SQLite database they were exported with. Ferry can carry one across; it cannot build one for a conversation that never had it. |
 
 **Importing a tool's own conversations back into it is not a conversion** and is
 unaffected by any of this. That is an ordinary restore and it works for all
 four tools.
 
-### Why "no" and not "not yet"
+### Why some say "no" and one says "not yet"
 
-Three of these four are properties of how the target stores its data, not
-missing features in Ferry. They are listed as refusals with reasons rather than
-as a roadmap, because a person deciding what to do with their history is better
-served by a straight answer than by an implied promise.
+Codex and Antigravity are refused because of how those tools store their data,
+not because of a missing feature in Ferry: Codex rejects a rollout whose header
+it did not write, and an Antigravity conversation is restored from a database
+that has to already exist.
+
+**Copilot is different, and the table says so.** Nothing there is unsolved —
+Ferry already derives the workspace key and writes the chat index for Copilot's
+own conversations. What is missing is the step that builds an index entry for a
+conversation that came from somewhere else. That is work, not a wall.
+
+The distinction is kept because a person deciding what to do with their history
+is served by a straight answer, and "cannot" and "not yet" are different
+answers.
 
 ## What is lost
 

@@ -14,12 +14,14 @@ locked to the tool that created it. **Into Claude Code, that works today**: a
 conversation from Codex, Copilot Chat or Antigravity is written into Claude
 Code's history with every message and every word intact.
 
-The other three directions are **refused, and not because they are unbuilt.**
-Codex rebuilds a conversation from a header only its own rollout files carry;
-a conversation is invisible in Copilot Chat unless it is also written into a
-workspace index nobody has worked out how to derive; Antigravity restores from
-the original SQLite database, which Ferry can copy but cannot invent. Each
-refusal names its reason.
+The other three directions are refused today, and the reasons differ. Codex
+rebuilds a conversation from a header only its own rollout files carry, and
+Antigravity restores from an original SQLite database Ferry can copy but cannot
+invent — both are properties of those tools. **Copilot Chat is closer:** a
+conversation is invisible there unless it is also listed in the workspace chat
+index, and Ferry builds that index for Copilot's own conversations already —
+it does not yet build an entry for one that arrived from elsewhere. Each
+refusal names its own reason.
 
 Conversion is **off by default**. When a bundle holds conversations from
 another tool, Ferry counts what converting them would cost — signatures that

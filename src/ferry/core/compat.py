@@ -18,10 +18,12 @@ really there* are different claims and only the second is worth shipping.
 ``-> codex``            unsupported. Its importer needs a ``session_meta``
                         header out of ``source_raw``; a foreign bundle
                         has not got one.
-``-> copilot``          unsupported. An import must also write the
-                        workspace's ``ChatSessionStore.index`` or the
-                        conversation is invisible, and the workspace-key
-                        derivation is unsolved even for same-tool import.
+``-> copilot``          unsupported **today**, and the nearest to working.
+                        An import must also list the conversation in the
+                        workspace's ``ChatSessionStore.index`` or it is
+                        invisible; Ferry writes that index for Copilot's own
+                        conversations already and does not yet build an entry
+                        for a foreign one.
 ``-> antigravity``      unsupported. A conversation is restored *from its
                         original SQLite database*. Ferry can copy one; it
                         cannot generate one.
@@ -31,6 +33,15 @@ really there* are different claims and only the second is worth shipping.
 Antigravity-as-target to end the milestone this way, and the honest ceiling for
 every pair that does work is a *readable transcript* in the target tool -- not a
 session the target's AI can meaningfully continue.
+
+**A reason here must be a measured one.** The first version of this table said
+Copilot was refused because the workspace-key derivation was unsolved. That was
+taken from the PLAN's original feasibility assessment and had been **false for
+six days** -- PROGRESS #124 solved the derivation, #130 verified it against
+folders it had never seen, and ``copilot/paths.py`` implements it. The refusal
+was right and the explanation was invented, which no test can catch. PLAN.md
+records what was expected; PROGRESS records what was found; where they
+disagree, PROGRESS wins.
 """
 
 from __future__ import annotations
@@ -86,9 +97,9 @@ _TARGETS: dict[str, Pair] = {
     ),
     "copilot": Pair(
         "unsupported",
-        "A conversation is invisible in Copilot Chat unless it is also written "
-        "into the workspace chat index, and deriving that workspace key is "
-        "unsolved even for Copilot's own conversations.",
+        "A conversation is invisible in Copilot Chat unless it is also listed "
+        "in the workspace chat index, and Ferry does not yet build that entry "
+        "for a conversation that arrived from another tool.",
     ),
     "antigravity": Pair(
         "unsupported",
