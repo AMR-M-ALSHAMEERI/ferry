@@ -13,7 +13,14 @@ import json
 import pytest
 
 from ferry.cli.brand import TAGLINE, build_wordmark
-from ferry.cli.prompts import SelectorItem, SelectorModel, _style_for, build_bindings
+from ferry.cli.prompts import (
+    SelectorItem,
+    SelectorModel,
+    _render_multi,
+    _style_for,
+    build_bindings,
+    multiselect_bindings,
+)
 from ferry.cli.theme import (
     ASCII_ICONS,
     HARBOR,
@@ -906,3 +913,103 @@ class TestPathPromptTheme:
         rules = dict(path_style(THEMES["harbor"]).style_rules)
 
         assert "noreverse" in rules["bottom-toolbar"]
+
+
+class TestTheChecklist:
+    """Ticking several things at once, in Ferry's own colours.
+
+    This prompt existed from M2 and was called by nothing until M7b.2. The
+    first time anyone saw it, it rendered **black and white in the middle of a
+    themed run** -- it went through questionary, which takes a pointer and a
+    marker but no colours. Ledger #64's rule was written against exactly that,
+    and it was being broken inside the module whose docstring states it,
+    because dead code cannot be caught by a rule nobody runs.
+    """
+
+    @staticmethod
+    def model(*labels: str) -> tuple[SelectorModel, set[str]]:
+        items = [SelectorItem(label, label.title()) for label in labels]
+        return SelectorModel(items), {label for label in labels}
+
+    def test_space_unticks_and_ticks_again(self) -> None:
+        model, ticked = self.model("a", "b", "c")
+        keys = multiselect_bindings(model, ticked)
+
+        _press(keys, " ", _FakeEvent())
+        assert ticked == {"b", "c"}
+
+        _press(keys, " ", _FakeEvent())
+        assert ticked == {"a", "b", "c"}
+
+    def test_a_toggles_everything(self) -> None:
+        """The two answers a checklist really gets are "all of them" and "one of
+        them", and reaching the second by unticking forty rows is not a thing
+        anyone should have to do."""
+        model, ticked = self.model("a", "b", "c")
+        keys = multiselect_bindings(model, ticked)
+
+        _press(keys, "a", _FakeEvent())
+        assert ticked == set()
+
+        _press(keys, "a", _FakeEvent())
+        assert ticked == {"a", "b", "c"}
+
+    def test_toggling_all_follows_the_filter(self) -> None:
+        """`/b` then `a` ticks what matched, not the whole list."""
+        model, ticked = self.model("alpha", "beta", "gamma")
+        keys = multiselect_bindings(model, ticked)
+        model.start_filtering()
+        model.set_filter("bet")
+        model.stop_filtering(clear=False)
+
+        _press(keys, "a", _FakeEvent())
+
+        assert ticked == {"alpha", "gamma"}
+
+    def test_space_does_nothing_while_typing_a_filter(self) -> None:
+        """A space belongs to the search box, not to the list underneath it."""
+        model, ticked = self.model("a", "b")
+        keys = multiselect_bindings(model, ticked)
+        model.start_filtering()
+
+        _press(keys, " ", _FakeEvent())
+
+        assert ticked == {"a", "b"}
+
+    def test_the_frame_uses_the_theme_rather_than_bare_text(self) -> None:
+        """The defect this class exists for: every fragment carries a style."""
+        model, ticked = self.model("a", "b")
+        model.cursor = 0
+
+        # HARBOR, not MONO: under mono every style is deliberately empty, so
+        # the check would pass on a screen that had no theming at all -- which
+        # is the exact condition being tested for.
+        frame = _render_multi(model, ticked, HARBOR, "Which ones?")
+        rendered = "".join(text for _, text in frame)
+        styles = {style for style, text in frame if text.strip()}
+
+        assert "Which ones?" in rendered
+        assert "2 of 2 chosen" in rendered
+        # Not one bare fragment: questionary's output was unstyled throughout.
+        assert "" not in styles
+        assert len(styles) > 1, "a single style is not a theme, it is a colour"
+
+    def test_the_frame_shows_what_is_ticked(self) -> None:
+        model, ticked = self.model("a", "b")
+        ticked.discard("b")
+
+        rendered = "".join(text for _, text in _render_multi(model, ticked, MONO, "Which?"))
+
+        assert MONO.icons.selected in rendered
+        assert MONO.icons.unselected in rendered
+        assert "1 of 2 chosen" in rendered
+
+    def test_the_footer_names_every_key_it_answers_to(self) -> None:
+        """A key that works and is never advertised is the same fault as one
+        advertised as doing the wrong thing."""
+        model, ticked = self.model("a")
+
+        rendered = "".join(text for _, text in _render_multi(model, ticked, MONO, "Which?"))
+
+        for key in ("space", "enter", "esc", "a all", "/ filter"):
+            assert key in rendered

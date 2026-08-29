@@ -19,8 +19,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Protocol
 
-import questionary
-from questionary import Choice
 from rich.console import Console
 from rich.progress import (
     BarColumn,
@@ -450,19 +448,24 @@ class UI:
 
         Everything is ticked by default unless ``preselected`` says otherwise —
         the common case is "take all of it".
+
+        Ferry's own prompt, not questionary's. This method was written at M2 and
+        called by nothing until M7b.2, and the first time anyone saw it on
+        screen it was **black and white in the middle of a themed run**:
+        questionary takes a pointer and a marker but no colours, so it ignored
+        the theme entirely. That is precisely the failure ledger #64 wrote the
+        rule against, sitting unnoticed inside the module whose docstring states
+        it — dead code cannot be caught by a rule nobody runs.
         """
         self._require_interactive(question, hint)
-        chosen = set(preselected) if preselected is not None else {v for v, _ in choices}
-        answer = questionary.checkbox(
+        from ferry.cli.prompts import SelectorItem, run_multiselect
+
+        return run_multiselect(
             question,
-            choices=[
-                Choice(title=label, value=value, checked=value in chosen)
-                for value, label in choices
-            ],
-            qmark=self.theme.icons.info,
-            pointer=self.theme.icons.cursor,
-        ).ask()
-        return answer if isinstance(answer, list) else None
+            [SelectorItem(value, label) for value, label in choices],
+            theme=self.theme,
+            preselected=preselected,
+        )
 
     def confirm(self, question: str, *, default: bool, hint: str = "") -> bool | None:
         """Ask a yes/no question.

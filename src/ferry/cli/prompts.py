@@ -705,3 +705,143 @@ def run_confirm(
     if chosen is None:
         return None
     return chosen == "yes"
+
+
+# --------------------------------------------------------------------------
+# ticking several things at once
+# --------------------------------------------------------------------------
+
+
+def multiselect_bindings(model: SelectorModel, ticked: set[str]) -> KeyBindings:
+    """The keys for the checklist, built against a model so they can be tested.
+
+    Space toggles, enter accepts, escape cancels. ``a`` toggles everything at
+    once, because the two answers a checklist really gets are "all of them" and
+    "one of them", and reaching the second by unticking forty rows is not a
+    thing anyone should have to do.
+    """
+    kb = build_bindings(model, allow_filter=True)
+
+    @kb.add("space")
+    def _toggle(event: object) -> None:
+        if model.filtering:
+            return
+        item = model.current
+        if item is None:
+            return
+        if item.value in ticked:
+            ticked.discard(item.value)
+        else:
+            ticked.add(item.value)
+
+    @kb.add("a")
+    def _toggle_all(event: object) -> None:
+        if model.filtering:
+            return
+        # Everything visible, so it follows a filter: `/ferry` then `a` ticks
+        # the ones that matched rather than the whole bundle.
+        visible = {item.value for item in model.visible}
+        # Mutated in place, never reassigned: `ticked -= visible` would make
+        # `ticked` a local of this closure and raise on the read above it.
+        if visible <= ticked:
+            ticked.difference_update(visible)
+        else:
+            ticked.update(visible)
+
+    return kb
+
+
+def _render_multi(
+    model: SelectorModel,
+    ticked: set[str],
+    theme: Theme,
+    title: str,
+) -> Fragments:
+    """The checklist frame.
+
+    Deliberately the same shape as :func:`_render`: same marker column, same
+    dim footer, same filter behaviour. A screen that looks like it belongs to a
+    different program is what this function exists to stop -- the first version
+    of this prompt went through ``questionary`` and came out black and white in
+    the middle of a themed run.
+    """
+    icons = theme.icons
+    sep = icons.separator
+    dim = _style_for(theme, "dim")
+    text = _style_for(theme, "text")
+    primary = _style_for(theme, "primary")
+    accent = _style_for(theme, "accent")
+
+    cell = max(len(icons.selected), len(icons.unselected))
+
+    out: Fragments = []
+    if title:
+        out += [(dim, f"  {icons.info} "), (text, title), ("", "\n\n")]
+
+    visible = model.visible
+    if not visible:
+        out += [(dim, f"  no match for {model.filter!r}\n")]
+    for index, item in enumerate(visible):
+        selected = index == min(model.cursor, len(visible) - 1)
+        on = item.value in ticked
+        box = icons.selected if on else icons.unselected
+        out += [(primary if selected else dim, "  " + (icons.cursor if selected else " ") + " ")]
+        out += [(accent if on else dim, box.center(cell) + " ")]
+        out += [(primary if selected else (dim if model.filtering else text), item.label)]
+        out += [("", "\n")]
+
+    out += [("", "\n")]
+    out += [(dim, f"  {len(ticked)} of {len(model.items)} chosen\n")]
+    if model.filtering:
+        out += [(accent, "  / "), (text, model.filter), (primary, "_")]
+        out += [(dim, f"    enter apply  {sep}  esc cancel filter\n")]
+    else:
+        keys = (
+            f"up/down move  {sep}  space tick  {sep}  a all  {sep}  "
+            f"/ filter  {sep}  enter accept  {sep}  esc cancel"
+        )
+        out += [(dim, f"  {keys}\n")]
+    return out
+
+
+def run_multiselect(
+    title: str,
+    items: Sequence[SelectorItem],
+    *,
+    theme: Theme,
+    preselected: Sequence[str] | None = None,
+) -> list[str] | None:
+    """Show a themed checklist and return the ticked values.
+
+    Args:
+        title: Question shown above the list.
+        items: Choices, in display order.
+        theme: Active theme, used for both colour and glyphs.
+        preselected: Values ticked on open. Everything, when omitted -- the
+            common answer to "which of these?" is "all of them", and a list
+            that opens empty makes the common answer the most work.
+
+    Returns:
+        The ticked values, or ``None`` if the user cancelled.
+    """
+    model = SelectorModel(list(items))
+    ticked: set[str] = (
+        set(preselected) if preselected is not None else {item.value for item in items}
+    )
+    kb = multiselect_bindings(model, ticked)
+
+    control = FormattedTextControl(
+        lambda: _render_multi(model, ticked, theme, title),
+        focusable=True,
+        show_cursor=False,
+    )
+    app: Application[str | None] = Application(
+        layout=Layout(HSplit([Window(control, always_hide_cursor=True)])),
+        key_bindings=kb,
+        full_screen=False,
+        erase_when_done=True,
+    )
+    # `enter` in the shared bindings exits with the highlighted value; here the
+    # answer is the whole ticked set, so the result is read from `ticked` and
+    # only cancellation is carried by the return.
+    return None if app.run() is None else [item.value for item in items if item.value in ticked]
