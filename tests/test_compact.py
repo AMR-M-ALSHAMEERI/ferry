@@ -10,6 +10,7 @@ every shape and length, on every conversation the tests can build.
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from urllib.parse import unquote
 from uuid import uuid4
@@ -17,7 +18,7 @@ from uuid import uuid4
 import pytest
 
 from ferry.compact import compact, digest, quotations
-from ferry.compact.catalogue import describe, fidelity
+from ferry.compact.catalogue import _FIDELITY, _UNKNOWN, describe, fidelity
 from ferry.compact.paste import trim
 from ferry.compact.prune import error_line, facts, failed
 from ferry.compact.rank import top
@@ -649,3 +650,172 @@ class TestNothingLeavesTheMachine:
             socket.socket = real  # type: ignore[misc]
 
         assert opened == []
+
+
+class TestTheVocabularyIsClosed:
+    """The other half of "nothing was invented", from the opposite side.
+
+    :class:`TestTheQuotationProperty` checks that every line *claiming* to be a
+    quotation is one. A fabricated sentence would not make that claim -- it
+    would sit in the gap between the quotes, unmarked, and pass. So this test
+    closes the gap: **every line of the document must match one of the shapes
+    the renderer can emit**, and each template names which of its parts are
+    Ferry's own words and which must be quotations.
+
+    The vocabulary is written out here rather than imported from
+    :mod:`ferry.compact.render`, deliberately. Importing it would make the test
+    agree with the renderer by construction and assert nothing. Written out, a
+    new phrase in the renderer fails this test until a person adds it here on
+    purpose -- which is exactly the moment worth pausing at, because that person
+    is adding a sentence to the set Ferry is allowed to say.
+    """
+
+    HEADINGS = frozenset(
+        {
+            "What you asked for",
+            "What you said",
+            "Files touched",
+            "Commands run",
+            "Errors seen",
+            "What was worked out along the way",
+            "Where it ended",
+            "Still open",
+        }
+    )
+
+    FOOTER = frozenset(
+        {
+            "Every line above is quoted from the conversation or counted from it.",
+            "Its record of files and commands is complete.",
+            "Its record of files and commands is good.",
+            "Its record is partial, and the gaps are named above.",
+            "Ferry has no catalogue for this tool.",
+        }
+    )
+
+    NOTES = frozenset(
+        note
+        for entry in (*_FIDELITY.values(), _UNKNOWN)
+        for note in (entry.files, entry.commands)
+        if note
+    )
+
+    N = r"\d+"
+
+    # (name, pattern, the group numbers that must be found in the source)
+    TEMPLATES: tuple[tuple[str, str, tuple[int, ...]], ...] = (
+        ("blank", r"^$", ()),
+        ("rule", r"^---$", ()),
+        ("title-untitled", r"^# Compact: an untitled conversation$", ()),
+        ("title", r"^# Compact: (.+)$", (1,)),
+        (
+            "provenance",
+            r"^(?![>#*-])(.+?)(?: - (.+?))? - "
+            r"(\d{2} \w{3} \d{4}|\d{2} \w{3} to \d{2} \w{3} \d{4})$",
+            (2,),
+        ),
+        (
+            "counts",
+            r"^\d+ messages? - \d+ files? (?:touched|read) - \d+ tool calls?"
+            r"(?: - \d+ images?)? - built by Ferry \S+, nothing sent anywhere$",
+            (),
+        ),
+        ("heading", r"^## (.+)$", ()),
+        ("quote-empty", r"^>$", ()),
+        ("quote-paste", r"^> \*\(\d+ pasted lines? removed\)\*$", ()),
+        ("quote-paste-error", r"^> \*\(\d+ pasted lines?, ending in\)\* `(.+)`$", (1,)),
+        ("quote", r"^> (.+)$", (1,)),
+        ("aside-dropped", r"^\*\d+ earlier messages? not shown at this length\.\*$", ()),
+        ("aside-note", r"^\*(.+)\*$", ()),
+        ("row-file", r"^- `(.+)` - (?:edited \d+(?:, read \d+)?|read \d+)$", (1,)),
+        ("row-counted", r"^- `(.+)` - \d+ times?(?:, \d+ failed)?$", (1,)),
+        ("row-more", r"^- \*and \d+ other (?:file|command|error)s?\*$", ()),
+        ("row-thread", r"^- (.+)$", (1,)),
+        ("footer-built", r"^Built from \d+ messages? without sending them anywhere\.$", ()),
+        # Last, and matches anything left. A sentence that reaches this rule and
+        # is not one of the fixed footer lines is the failure this test exists
+        # to catch: prose Ferry produced that nobody can account for.
+        ("residue", r"^(.+)$", ()),
+    )
+
+    @staticmethod
+    def source(item: Conversation) -> str:
+        """The conversation, plus the two things about it that live outside the
+        messages. The title and the workspace path appear in the header and are
+        the conversation's own -- not in any message, but not invented either."""
+        parts = [
+            TestTheQuotationProperty.source_text(item),
+            item.title or "",
+            item.workspace.original_path or "",
+            item.workspace.name or "",
+        ]
+        return " ".join(" ".join(parts).split())
+
+    def account_for(self, line: str, source: str) -> None:
+        for name, pattern, quoted in self.TEMPLATES:
+            found = re.match(pattern, line)
+            if not found:
+                continue
+            if name == "heading":
+                assert found.group(1) in self.HEADINGS, f"a heading nobody wrote: {line!r}"
+            if name == "aside-note":
+                assert found.group(1) in self.NOTES, f"an aside that is not a fixed note: {line!r}"
+            assert name != "residue" or line in self.FOOTER, (
+                f"a sentence that is neither a quotation nor a fixed phrase: {line!r}"
+            )
+            for group in quoted:
+                body = found.group(group)
+                if body is None:
+                    continue
+                wanted = " ".join(body.split()).removesuffix("...")
+                assert not wanted or wanted in source, f"not in the conversation: {body!r}"
+            return
+        raise AssertionError(f"matched no template at all: {line!r}")
+
+    @pytest.mark.parametrize("shape", SHAPES)
+    @pytest.mark.parametrize("length", sorted(LENGTHS))
+    def test_every_line_is_a_quotation_or_a_phrase_of_ferrys(
+        self, realistic: Conversation, shape: str, length: str
+    ) -> None:
+        source = self.source(realistic)
+        for line in compact(realistic, shape=shape, length=length).splitlines():
+            self.account_for(line, source)
+
+    def test_it_holds_for_every_tool_including_the_ones_that_record_least(self) -> None:
+        """The fidelity notes are Ferry's own sentences. A tool whose note went
+        missing, or gained one nobody wrote, shows up here.
+
+        The four are the whole list: ``source_tool`` is a closed literal in UCS,
+        so a conversation naming a fifth tool does not reach the renderer -- it
+        fails to load at all. The catalogue's ``unknown`` tier is therefore
+        defensive rather than reachable, and is left in place for the day the
+        literal grows."""
+        for tool in ("claude-code", "codex", "copilot", "antigravity"):
+            item = conversation(
+                user("Where did the seal step go?"),
+                call("VIEW_FILE", {"detail": "Reading src/ferry/core/sealed.py"}, "c1"),
+                result("ok", "c1"),
+                tool=tool,
+            )
+            source = self.source(item)
+            for line in compact(item, length="full").splitlines():
+                self.account_for(line, source)
+
+    def test_an_invented_sentence_would_be_caught(self, realistic: Conversation) -> None:
+        """The test that tests the test.
+
+        A vocabulary check that cannot fail is decoration. This drops a
+        plausible, well-behaved summary sentence into a finished document -- the
+        exact thing an LLM would have written -- and asserts it is refused.
+        """
+        source = self.source(realistic)
+        invented = "The session ended with the reseal working and the clipboard left for later."
+
+        with pytest.raises(AssertionError):
+            self.account_for(invented, source)
+
+        with pytest.raises(AssertionError):
+            self.account_for(f"> {invented}", source)
+
+        with pytest.raises(AssertionError):
+            self.account_for("## What went well", source)
