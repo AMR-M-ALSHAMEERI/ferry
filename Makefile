@@ -1,4 +1,4 @@
-.PHONY: install lint format typecheck test check clean verify-m1 verify-m2 verify-m3 verify-m4 verify-m5 verify-m6 verify-m7 verify-m7c
+.PHONY: install lint format typecheck test check clean verify-m1 verify-m2 verify-m3 verify-m4 verify-m5 verify-m6 verify-m7 verify-m7b verify-m7c
 
 install:
 	pip install -e ".[dev]"
@@ -42,6 +42,9 @@ verify-m6:
 
 verify-m7:
 	python scripts/selfcheck/verify_m7.py
+
+verify-m7b:
+	python scripts/selfcheck/verify_m7b.py
 
 verify-m7c:
 	python scripts/selfcheck/verify_m7c.py

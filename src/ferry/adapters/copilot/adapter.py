@@ -49,6 +49,7 @@ from ferry.adapters.copilot.writer import (
 from ferry.adapters.dedup import compare_duplicate
 from ferry.adapters.formatcheck import FormatCheck
 from ferry.core import Bundle, Manifest, SourceMachine, back_up
+from ferry.core.compat import refusal
 from ferry.core.manifest import OSName
 from ferry.ucs import Conversation, ToolName
 
@@ -354,13 +355,14 @@ class CopilotAdapter(Adapter):
     ) -> Iterator[ImportEvent]:
         conversation = bundle.load_conversation(conversation_id)
         if conversation.source_tool != TOOL:
+            # Refused whether or not the flag was passed, and the reason comes
+            # from the compatibility table rather than from here: "this arrives
+            # at M7b" was true until M7b arrived and measured it. The blocker is
+            # real and is not a missing feature, so it is stated as what it is.
             yield ImportEvent(
                 kind="skipped",
                 conversation_id=str(conversation_id),
-                message=(
-                    f"came from {conversation.source_tool}; "
-                    "cross-tool import into Copilot Chat is M7b"
-                ),
+                message=refusal(conversation.source_tool, TOOL),
             )
             return
 

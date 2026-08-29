@@ -42,6 +42,7 @@ from ferry.adapters.census import count_of
 from ferry.cli.ui import UI, NonInteractiveError
 from ferry.core import Bundle, BundleError, BundleSummary, delete_bundle, summarise
 from ferry.core.bundle import MANIFEST_NAME
+from ferry.core.compat import CEILING, assess, pair
 from ferry.core.crypto import WrongPassphrase
 from ferry.core.sealed import (
     SEALED_SUFFIX,
@@ -51,6 +52,7 @@ from ferry.core.sealed import (
     unsealed,
 )
 from ferry.core.summary import ConversationSummary
+from ferry.ucs import Conversation
 
 __all__ = [
     "Scanned",
@@ -830,6 +832,113 @@ def run_import(ui: UI, adapters: Scanned) -> None:
         _import_from(ui, available, bundle_dir.root)
 
 
+_CROSS_TOOL: list[tuple[str, str]] = [
+    ("skip", "Import only the ones that came from this assistant"),
+    ("convert", "Convert the others too, accepting what is lost"),
+    ("cancel", "Cancel"),
+]
+"""Importing only the native ones is first, and is the safe answer.
+
+Every other screen in Ferry puts the option that writes least under the cursor
+(the import screen's own default is *preview*), and a person who pressed Enter
+past this one without reading it should end up with the conversations they
+could have had anyway -- not with a directory of converted transcripts they did
+not know they were asking for.
+"""
+
+
+def _cross_tool(ui: UI, bundle: Bundle, adapter: Adapter) -> bool | None:
+    """Whether to convert foreign conversations, having said what that costs.
+
+    Returns ``True`` to convert, ``False`` to import only the native ones, and
+    ``None`` to cancel. Says nothing at all when the bundle is entirely native,
+    which is the ordinary case -- a restore onto a new machine should not be
+    interrupted to explain a feature it is not using.
+    """
+    foreign: list[Conversation] = []
+    for found in bundle.list_conversations():
+        try:
+            item = bundle.load_conversation(found)
+        except Exception:  # noqa: BLE001 - a bad file is the importer's to report
+            continue
+        if item.source_tool != adapter.name:
+            foreign.append(item)
+    if not foreign:
+        return False
+
+    impossible = [c for c in foreign if pair(c.source_tool, adapter.name).support == "unsupported"]
+    convertible = [c for c in foreign if c not in impossible]
+
+    ui.blank()
+    sources = ", ".join(sorted({c.source_tool for c in foreign}))
+    ui.info(
+        f"{len(foreign)} of {len(bundle.list_conversations())} conversations came from "
+        f"{sources}, not {adapter.display_name}."
+    )
+
+    if impossible:
+        # Named before the question, not after it. A person choosing to convert
+        # should already know how many of these cannot be converted at all,
+        # because otherwise the count in the result reads as a failure.
+        reason = pair(impossible[0].source_tool, adapter.name).reason
+        ui.warn(f"{len(impossible)} of them cannot be written into {adapter.display_name}.")
+        ui.info(reason)
+        if not convertible:
+            ui.info("They will be skipped whatever you choose here.")
+            ui.blank()
+            return False
+
+    ui.blank()
+    ui.info(f"Converting the other {len(convertible)} costs:")
+    for note in _combined_loss(convertible, adapter.name):
+        ui.info(f"  {note}")
+    ui.blank()
+
+    choice = ui.select(
+        f"Convert {len(convertible)} conversations into {adapter.display_name}?",
+        _CROSS_TOOL,
+        hint="use --allow-cross-tool",
+    )
+    if choice is None or choice == "cancel":
+        return None
+    return choice == "convert"
+
+
+def _combined_loss(items: list[Conversation], target: str) -> list[str]:
+    """One summary of what a whole batch loses, with the counts added up.
+
+    Per-conversation notes would be nineteen paragraphs saying the same four
+    things with different numbers, and a wall of text is read as carefully as
+    no text at all. The counts are summed because that is the number a person is
+    actually deciding about.
+    """
+    signatures = calls = images = 0
+    for item in items:
+        loss = assess(item, target)
+        for note in loss.notes:
+            number = int(note.split(" ", 1)[0]) if note[:1].isdigit() else 0
+            if "signature" in note:
+                signatures += number
+            elif "tool calls" in note:
+                calls += number
+            elif "image" in note:
+                images += number
+
+    summary: list[str] = []
+    if signatures:
+        summary.append(
+            f"{signatures} thinking blocks lose their signature - it is issued by "
+            f"the model's vendor and cannot be reissued outside it"
+        )
+    if calls:
+        summary.append(f"{calls} tool calls and results become readable text, not runnable calls")
+    if images:
+        summary.append(f"{images} image blocks need their bytes in the bundle to survive")
+    summary.append("each conversation stays attributed to the tool and model that produced it")
+    summary.append(CEILING)
+    return summary
+
+
 def _import_from(ui: UI, available: list[Adapter], bundle_dir: Path) -> None:
     """Everything after a bundle has been chosen and, if sealed, opened."""
     try:
@@ -861,6 +970,14 @@ def _import_from(ui: UI, available: list[Adapter], bundle_dir: Path) -> None:
         if remap is None:
             return
 
+        # Asked before the write screen, not after it: what a person is
+        # agreeing to on the next screen depends on the answer to this one.
+        cross_tool = _cross_tool(ui, bundle, adapter)
+        if cross_tool is None:
+            ui.info("Nothing was written.")
+            ui.blank()
+            return
+
         # The only screen in Ferry that writes into a user's real conversation
         # history. It says so, and the option under the cursor is the one that
         # writes nothing.
@@ -884,7 +1001,10 @@ def _import_from(ui: UI, available: list[Adapter], bundle_dir: Path) -> None:
         ui.info("Preview only. Nothing below is written.")
         _report(
             ui,
-            adapter.import_(bundle_dir, ImportOptions(dry_run=True, path_remap=remap)),
+            adapter.import_(
+                bundle_dir,
+                ImportOptions(dry_run=True, path_remap=remap, allow_cross_tool=cross_tool),
+            ),
             "conversations would be imported",
             label="Previewing",
             total=count,
@@ -906,7 +1026,14 @@ def _import_from(ui: UI, available: list[Adapter], bundle_dir: Path) -> None:
     ui.blank()
     _report(
         ui,
-        adapter.import_(bundle_dir, ImportOptions(on_conflict=_conflict(action), path_remap=remap)),
+        adapter.import_(
+            bundle_dir,
+            ImportOptions(
+                on_conflict=_conflict(action),
+                path_remap=remap,
+                allow_cross_tool=cross_tool,
+            ),
+        ),
         "conversations imported",
         label="Importing",
         total=count,

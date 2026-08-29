@@ -7,22 +7,32 @@ assistant entirely — across **Claude Code**, **OpenAI Codex**,
 
 **Status:** pre-release, actively under construction. Not yet published to PyPI.
 
-## Cross-tool migration — *planned, not yet implemented*
+## Cross-tool migration
 
 Ferry's Universal Conversation Schema is designed so a conversation is not
-locked to the tool that created it: export from one assistant, import into a
-different one — for example moving a Claude Code conversation into Codex.
+locked to the tool that created it. **Into Claude Code, that works today**: a
+conversation from Codex, Copilot Chat or Antigravity is written into Claude
+Code's history with every message and every word intact.
 
-When built, this will be **off by default** and gated behind an explicit flag,
-because the conversion is **lossy**. Reasoning-block signatures cannot cross
-vendors, and tool calls reference tools the target assistant does not have.
-The intent is that Ferry shows you exactly what would be lost before writing
-anything, marks the result as converted rather than passing it off as native,
-and refuses conversions it cannot do safely instead of writing something broken.
+The other three directions are **refused, and not because they are unbuilt.**
+Codex rebuilds a conversation from a header only its own rollout files carry;
+a conversation is invisible in Copilot Chat unless it is also written into a
+workspace index nobody has worked out how to derive; Antigravity restores from
+the original SQLite database, which Ferry can copy but cannot invent. Each
+refusal names its reason.
 
-Which tool pairs end up supported depends on what each tool's storage format
-allows; some may not be feasible at all. This section will be replaced with the
-actual supported-pair matrix once the feature exists.
+Conversion is **off by default**. When a bundle holds conversations from
+another tool, Ferry counts what converting them would cost — signatures that
+cannot be reissued, tool calls that become text — and asks, with the option
+that converts nothing under the cursor. The result is marked as converted in
+its `provenance` record rather than passed off as native.
+
+**What you get is a readable transcript in the target tool, not a session that
+tool's assistant can pick up and continue.** If your goal is to *continue* the
+work elsewhere, use **Compact** — it is the better tool for that job.
+
+See [docs/CROSS-TOOL.md](docs/CROSS-TOOL.md) for the full table and what each
+conversion costs.
 
 ## What Ferry does NOT do
 
@@ -40,10 +50,9 @@ your conversation word for word or counted from it. What it gives up in
 exchange is narrative. It can quote you the three facts; it cannot write the
 sentence that joins them.
 
-This applies doubly to cross-tool migration: it gives you a readable transcript
-in the target tool, not a session that tool's AI can pick up and continue. If
-your goal is to *continue* the work elsewhere, use **Compact** — it is the
-better tool for that job.
+This applies doubly to cross-tool migration, which is why the section above
+says the same thing: it gives you a readable transcript in the target tool, not
+a session that tool's AI can pick up and continue.
 
 ## Install
 
@@ -112,6 +121,8 @@ as a conversation you had.
   writes in place — the new file is written beside the old one, opened again
   with the same passphrase to prove it is readable, and only then replaces it.
 
-See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for contributing, and
+See [docs/CROSS-TOOL.md](docs/CROSS-TOOL.md) for moving a conversation
+between assistants, [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for
+contributing, and
 [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) when something does not go
 the way it should.

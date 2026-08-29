@@ -40,6 +40,7 @@ from ferry.adapters.conflict import reidentify, rename_note
 from ferry.adapters.dedup import compare_duplicate
 from ferry.adapters.formatcheck import FormatCheck
 from ferry.core import Bundle, Manifest, SourceMachine, back_up
+from ferry.core.compat import refusal
 from ferry.core.manifest import OSName
 from ferry.ucs import Attachment, Conversation, Provenance, ToolName
 
@@ -425,16 +426,23 @@ class CodexAdapter(Adapter):
             yield ImportEvent(kind="error", conversation_id=cid, message=str(exc))
             return
 
-        if conversation.source_tool != TOOL and not options.allow_cross_tool:
-            yield ImportEvent(
-                kind="skipped",
-                conversation_id=cid,
-                message=(
-                    f"came from {conversation.source_tool}; "
-                    "cross-tool import must be asked for explicitly"
-                ),
-            )
-            return
+        if conversation.source_tool != TOOL:
+            if not options.allow_cross_tool:
+                yield ImportEvent(
+                    kind="skipped",
+                    conversation_id=cid,
+                    message=(
+                        f"came from {conversation.source_tool}; "
+                        "cross-tool import must be asked for explicitly"
+                    ),
+                )
+                return
+            why = refusal(conversation.source_tool, TOOL)
+            if why:
+                # Asked for and still refused. The flag says the person accepts
+                # a lossy conversion; it does not make an impossible one work.
+                yield ImportEvent(kind="skipped", conversation_id=cid, message=why)
+                return
 
         original = conversation.workspace.original_path
         target_cwd = remap_prefix(original, options.path_remap) if original else str(Path.cwd())

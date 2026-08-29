@@ -348,8 +348,15 @@ def test_a_conversation_from_another_tool_is_skipped_not_mangled(
     manifest,
     conversation,
 ) -> None:
-    """Cross-tool import is M7b. Writing a Claude Code conversation into
-    Copilot's format now would produce something neither tool can read."""
+    """Writing a Claude Code conversation into Copilot's format would produce
+    something neither tool can read.
+
+    M7b measured why, and the reason is not a missing feature: a conversation is
+    invisible in Copilot Chat unless it is also written into the workspace chat
+    index, and deriving that workspace key is unsolved even for Copilot's own
+    conversations. So the refusal is unconditional -- ``allow_cross_tool`` does
+    not open it -- and the message says the blocker rather than naming a
+    milestone that has since arrived."""
     from ferry.adapters.base import ImportOptions
 
     dest = tmp_path / "foreign"
@@ -359,7 +366,7 @@ def test_a_conversation_from_another_tool_is_skipped_not_mangled(
     events = list(CopilotAdapter(target).import_(dest, ImportOptions()))
 
     assert sum(1 for e in events if e.kind == "progress") == 0
-    assert any("M7b" in e.message for e in events if e.kind == "skipped")
+    assert any("chat index" in e.message for e in events if e.kind == "skipped")
 
 
 def test_import_reports_a_bundle_it_cannot_open(tmp_path: Path, target) -> None:  # type: ignore[no-untyped-def]

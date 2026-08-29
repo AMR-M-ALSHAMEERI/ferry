@@ -18,6 +18,7 @@ from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
@@ -1781,3 +1782,90 @@ class TestGoingBackOneStep:
         run_compact(ui)
 
         assert ui.paths_asked == 2
+
+
+# --------------------------------------------------------------------------
+# cross-tool: the screen that appears only when a bundle is not all native
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture
+def foreign_bundle(tmp_path: Path, manifest, conversation) -> Path:
+    """A bundle holding one Claude Code conversation and one from Codex."""
+    from ferry.core import Bundle
+
+    bundle = Bundle.create(tmp_path / "mixed", manifest)
+    bundle.add_conversation(conversation)
+    bundle.add_conversation(conversation.model_copy(update={"id": uuid4(), "source_tool": "codex"}))
+    return tmp_path / "mixed"
+
+
+def test_a_wholly_native_bundle_is_never_asked_about(bundle_dir: Path) -> None:
+    """The ordinary case must not be interrupted.
+
+    Restoring a backup onto a new machine is the common path, and a screen
+    explaining a conversion that is not happening is a screen people learn to
+    dismiss without reading -- which is how the ones that matter get dismissed.
+    """
+    adapter = _Recorder()
+    ui = _Answers(path=str(bundle_dir), confirm=True)
+
+    run_import(ui, scanned(adapter))
+
+    assert not any("Convert" in question for question in ui.questions)
+    assert adapter.options[-1].allow_cross_tool is False
+
+
+def test_a_mixed_bundle_says_what_converting_would_cost(foreign_bundle: Path) -> None:
+    adapter = _Recorder()
+    ui = _Answers(path=str(foreign_bundle), actions=["skip", "cancel"])
+
+    run_import(ui, scanned(adapter))
+
+    assert "came from codex" in ui.text
+    # The honest ceiling, said before the choice rather than in the release notes.
+    assert "not a session its assistant can pick up and continue" in ui.text
+
+
+def test_converting_is_asked_for_and_not_assumed(foreign_bundle: Path) -> None:
+    adapter = _Recorder(events=[ImportEvent(kind="progress", message="ok")])
+    ui = _Answers(path=str(foreign_bundle), actions=["skip", "skip"])
+
+    run_import(ui, scanned(adapter))
+
+    # First answer is the cross-tool screen: "import only the native ones".
+    assert adapter.options[-1].allow_cross_tool is False
+
+
+def test_saying_yes_carries_the_permission_into_the_import(foreign_bundle: Path) -> None:
+    adapter = _Recorder(events=[ImportEvent(kind="progress", message="ok")])
+    ui = _Answers(path=str(foreign_bundle), actions=["convert", "skip"])
+
+    run_import(ui, scanned(adapter))
+
+    assert adapter.options[-1].allow_cross_tool is True
+
+
+def test_cancelling_the_conversion_writes_nothing_at_all(foreign_bundle: Path) -> None:
+    """Cancel here means cancel the import, not "carry on without converting".
+
+    Someone who reads what a conversion costs and cancels is telling Ferry they
+    have changed their mind about the whole operation. Treating it as "import
+    the native ones anyway" would write into a real store on the strength of an
+    answer that said stop.
+    """
+    adapter = _Recorder()
+    ui = _Answers(path=str(foreign_bundle), actions=["cancel"])
+
+    run_import(ui, scanned(adapter))
+
+    assert adapter.imported_from is None
+    assert "Nothing was written" in ui.text
+
+
+def test_the_safe_option_is_the_one_under_the_cursor(foreign_bundle: Path) -> None:
+    """Every other screen in Ferry puts the option that writes least first."""
+    from ferry.cli.flows import _CROSS_TOOL
+
+    assert _CROSS_TOOL[0][0] == "skip"
+    assert _CROSS_TOOL[-1][0] == "cancel"

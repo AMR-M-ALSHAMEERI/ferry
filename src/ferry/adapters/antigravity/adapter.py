@@ -57,10 +57,24 @@ from ferry.adapters.conflict import RENAME_NOT_POSSIBLE
 from ferry.adapters.dedup import compare_duplicate
 from ferry.adapters.formatcheck import FormatCheck
 from ferry.core import Bundle, Manifest, SourceMachine, back_up
+from ferry.core.compat import refusal
 from ferry.core.manifest import OSName
 from ferry.ucs import ToolName
 
 __all__ = ["TESTED_VERSION", "TOOL", "AntigravityAdapter"]
+
+SQLITE_MAGIC: Final = b"SQLite format 3\x00"
+"""The first sixteen bytes of every SQLite file.
+
+Here because a conversation is restored by copying a database into place, and
+"there is a file in the bundle" is not the same question as "that file is a
+database". The M7b probe found the difference the expensive way: handed a
+Claude Code conversation, this adapter copied its 1.6 MB **JSONL transcript**
+to ``conversations/<uuid>.db``, remapped it without complaint, and reported
+``1 of 1 imported``. Nothing was there afterwards. A success message over an
+empty result is worse than an error, because nobody goes looking.
+"""
+
 
 TOOL: Final[ToolName] = "antigravity"
 
@@ -208,6 +222,21 @@ class _Tally:
                     "as assistant messages."
                 ),
             )
+
+
+def _is_database(path: Path) -> bool:
+    """Whether ``path`` really is a SQLite database.
+
+    The header, not the extension: the extension is chosen by whoever wrote the
+    file and the header is chosen by SQLite. Any read error counts as "no" --
+    a file that cannot be read cannot be verified, and installing it unchecked
+    is the thing this exists to stop.
+    """
+    try:
+        with path.open("rb") as handle:
+            return handle.read(len(SQLITE_MAGIC)) == SQLITE_MAGIC
+    except OSError:
+        return False
 
 
 class AntigravityAdapter(Adapter):
@@ -500,13 +529,22 @@ class AntigravityAdapter(Adapter):
             yield ImportEvent(kind="error", conversation_id=identifier, message=str(exc))
             return
 
-        if conversation.source_tool != TOOL and not options.allow_cross_tool:
-            yield ImportEvent(
-                kind="skipped",
-                conversation_id=identifier,
-                message=f"came from {conversation.source_tool}, not Antigravity",
-            )
-            return
+        if conversation.source_tool != TOOL:
+            if not options.allow_cross_tool:
+                yield ImportEvent(
+                    kind="skipped",
+                    conversation_id=identifier,
+                    message=f"came from {conversation.source_tool}, not Antigravity",
+                )
+                return
+            why = refusal(conversation.source_tool, TOOL)
+            if why:
+                # Asked for and still refused. The flag says the person accepts
+                # a lossy conversion; it does not make an impossible one work,
+                # and answering it with a half-written file would be obeying the
+                # instruction rather than the intent.
+                yield ImportEvent(kind="skipped", conversation_id=identifier, message=why)
+                return
 
         original = bundle.source_raw_path(conversation_id)
         if not original.is_file():
@@ -520,6 +558,22 @@ class AntigravityAdapter(Adapter):
                 message=(
                     "no original database in the bundle; Antigravity conversations are "
                     "restored from it, so this one cannot be written"
+                ),
+            )
+            return
+
+        if not _is_database(original):
+            # Present, and not a database. Every tool writes *something* to
+            # source_raw, so the file being there says nothing about what it is
+            # -- see SQLITE_MAGIC. Checked for native conversations too: a
+            # truncated or half-copied database fails here rather than being
+            # installed as a conversation nobody can open.
+            yield ImportEvent(
+                kind="skipped",
+                conversation_id=identifier,
+                message=(
+                    "the bundle's original file is not a SQLite database, so it is not "
+                    "an Antigravity conversation and was not written"
                 ),
             )
             return

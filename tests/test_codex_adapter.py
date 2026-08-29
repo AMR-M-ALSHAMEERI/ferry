@@ -597,6 +597,13 @@ def test_a_cross_tool_import_records_where_it_came_from(
 
     PLAN.md §3.2 forbids passing a converted conversation off as native; here
     the format itself refuses, which is a stronger guarantee than a flag.
+
+    Refused now as a **skip with a reason** rather than as an error. The
+    compatibility table answers first, so a person asking for an impossible
+    conversion is told why it cannot work instead of being handed the failure
+    of the attempt. The format-level refusal underneath is unchanged and is
+    covered by :func:`test_the_format_still_refuses_a_headerless_rollout` --
+    the table is the courtesy, not the guarantee.
     """
     conversation_id = UUID("019f6666-6666-7666-8666-666666666666")
     bundle = Bundle.create(tmp_path / "foreign", manifest)
@@ -612,7 +619,33 @@ def test_a_cross_tool_import_records_where_it_came_from(
     )
 
     events = list(target.import_(tmp_path / "foreign", ImportOptions(allow_cross_tool=True)))
-    assert any(e.kind == "error" and "session_meta" in e.message for e in events)
+
+    assert sum(1 for e in events if e.kind == "progress") == 0
+    assert any(e.kind == "skipped" and "session_meta" in e.message for e in events)
+
+
+def test_the_format_still_refuses_a_headerless_rollout(
+    exported: Path, target: CodexAdapter, tmp_path: Path, manifest
+) -> None:
+    """The guarantee under the courtesy.
+
+    The compatibility table refuses a foreign conversation before the writer
+    ever sees it, which is the right thing for a person and the wrong thing to
+    rely on: a table is one edit away from being wrong. This calls the writer
+    directly and asserts it produces nothing for a conversation with no Codex
+    header, so the refusal survives the table being loosened by mistake.
+    """
+    conversation = Conversation(
+        id=UUID("019f7777-7777-7777-8777-777777777777"),
+        source_tool="claude-code",
+        created_at=datetime(2026, 8, 1, tzinfo=UTC),
+        updated_at=datetime(2026, 8, 1, tzinfo=UTC),
+        workspace=Workspace(original_path="/home/bob/other"),
+        messages=[Message(role="user", content=[TextBlock(text="hello")])],
+    )
+
+    rebuild = Rebuild(cwd="/home/bob/other", thread_id=conversation.id)
+    assert session_meta_for(conversation, rebuild) is None
 
 
 def test_detect_survives_an_unreadable_directory(tmp_path: Path, monkeypatch) -> None:

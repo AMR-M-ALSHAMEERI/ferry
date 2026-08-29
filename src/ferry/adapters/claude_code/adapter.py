@@ -53,6 +53,7 @@ from ferry.adapters.conflict import reidentify, rename_note
 from ferry.adapters.dedup import compare_duplicate
 from ferry.adapters.formatcheck import FormatCheck
 from ferry.core import Bundle, Manifest, SourceMachine, back_up
+from ferry.core.compat import assess, refusal
 from ferry.core.manifest import OSName
 from ferry.ucs import Conversation, Provenance, ToolName
 
@@ -375,16 +376,23 @@ class ClaudeCodeAdapter(Adapter):
             yield ImportEvent(kind="error", conversation_id=cid, message=str(exc))
             return
 
-        if conversation.source_tool != TOOL and not options.allow_cross_tool:
-            yield ImportEvent(
-                kind="skipped",
-                conversation_id=cid,
-                message=(
-                    f"came from {conversation.source_tool}; "
-                    "cross-tool import must be asked for explicitly"
-                ),
-            )
-            return
+        if conversation.source_tool != TOOL:
+            if not options.allow_cross_tool:
+                yield ImportEvent(
+                    kind="skipped",
+                    conversation_id=cid,
+                    message=(
+                        f"came from {conversation.source_tool}; "
+                        "cross-tool import must be asked for explicitly"
+                    ),
+                )
+                return
+            why = refusal(conversation.source_tool, TOOL)
+            if why:
+                # Asked for and still refused. The flag says the person accepts
+                # a lossy conversion; it does not make an impossible one work.
+                yield ImportEvent(kind="skipped", conversation_id=cid, message=why)
+                return
 
         original = conversation.workspace.original_path
         target_cwd = remap_prefix(original, options.path_remap) if original else str(Path.cwd())
@@ -425,22 +433,32 @@ class ClaudeCodeAdapter(Adapter):
         for note in notes:
             yield ImportEvent(kind="warning", conversation_id=cid, message=note)
 
+        loss = assess(conversation, TOOL)
         if conversation.source_tool != TOOL:
+            # The notes recorded are the notes the person was shown before
+            # agreeing: the assessment's, plus whatever this particular rebuild
+            # turned out to cost. A provenance block saying less than the
+            # confirmation screen would be the more durable of the two documents
+            # disagreeing with the one someone actually read.
             conversation.provenance = Provenance(
                 original_tool=conversation.source_tool,
                 imported_into=TOOL,
                 imported_at=datetime.now(UTC),
                 ferry_version=__version__,
                 lossy=True,
-                conversion_notes=list(notes),
+                conversion_notes=[*loss.notes, *notes],
             )
 
         if options.dry_run:
-            yield ImportEvent(
-                kind="progress",
-                conversation_id=cid,
-                message=f"would write {len(payload)} bytes to {destination}",
-            )
+            # A dry run for a conversion has to print the cost, not just the
+            # size. "Would write 400 KB" is true of a conversion that drops
+            # every tool result, and tells the person nothing they can decide on.
+            for note in loss.notes:
+                yield ImportEvent(kind="warning", conversation_id=cid, message=note)
+            detail = f"would write {len(payload)} bytes to {destination}"
+            if loss.degraded:
+                detail += f", {loss.degraded} blocks degraded"
+            yield ImportEvent(kind="progress", conversation_id=cid, message=detail)
             return
 
         if options.backup and destination.exists():
