@@ -1812,8 +1812,9 @@ def test_a_wholly_native_bundle_is_never_asked_about(bundle_dir: Path) -> None:
 
     run_import(ui, scanned(adapter))
 
-    assert not any("Convert" in question for question in ui.questions)
+    assert not any("another assistant" in question for question in ui.questions)
     assert adapter.options[-1].allow_cross_tool is False
+    assert adapter.options[-1].mode == "archive"
 
 
 def test_a_mixed_bundle_says_what_converting_would_cost(foreign_bundle: Path) -> None:
@@ -1825,6 +1826,8 @@ def test_a_mixed_bundle_says_what_converting_would_cost(foreign_bundle: Path) ->
     assert "came from codex" in ui.text
     # The honest ceiling, said before the choice rather than in the release notes.
     assert "not a session its assistant can pick up and continue" in ui.text
+    # And the reassurance that makes the choice safe to get wrong.
+    assert "your backup is not changed" in ui.text
 
 
 def test_converting_is_asked_for_and_not_assumed(foreign_bundle: Path) -> None:
@@ -1833,17 +1836,50 @@ def test_converting_is_asked_for_and_not_assumed(foreign_bundle: Path) -> None:
 
     run_import(ui, scanned(adapter))
 
-    # First answer is the cross-tool screen: "import only the native ones".
+    # First answer is the cross-tool screen: "leave them out".
     assert adapter.options[-1].allow_cross_tool is False
+    assert adapter.options[-1].mode == "archive"
 
 
-def test_saying_yes_carries_the_permission_into_the_import(foreign_bundle: Path) -> None:
+def test_choosing_to_read_them_converts_but_stays_in_archive(foreign_bundle: Path) -> None:
     adapter = _Recorder(events=[ImportEvent(kind="progress", message="ok")])
-    ui = _Answers(path=str(foreign_bundle), actions=["convert", "skip"])
+    ui = _Answers(path=str(foreign_bundle), actions=["archive", "skip"])
 
     run_import(ui, scanned(adapter))
 
     assert adapter.options[-1].allow_cross_tool is True
+    assert adapter.options[-1].mode == "archive"
+
+
+def test_choosing_to_carry_on_working_asks_for_continue_mode(foreign_bundle: Path) -> None:
+    adapter = _Recorder(events=[ImportEvent(kind="progress", message="ok")])
+    ui = _Answers(path=str(foreign_bundle), actions=["continue", "skip"])
+
+    run_import(ui, scanned(adapter))
+
+    assert adapter.options[-1].allow_cross_tool is True
+    assert adapter.options[-1].mode == "continue"
+
+
+def test_the_two_convert_rows_say_what_they_cost_not_only_what_they_give(
+    foreign_bundle: Path,
+) -> None:
+    """The rows differ only in what they give up.
+
+    A label naming just the benefit would make them look interchangeable, and
+    the choice between them arbitrary. Required by the human on 2026-08-30:
+    human-sounding, clearer, not vague.
+    """
+    from ferry.cli.flows import _CROSS_TOOL
+
+    labels = dict(_CROSS_TOOL)
+
+    assert "cannot carry on working" in labels["archive"]
+    assert "drops" in labels["continue"]
+    # Ferry's own vocabulary for the modes must never reach the screen.
+    for label in labels.values():
+        assert "archive" not in label.lower()
+        assert "mode" not in label.lower()
 
 
 def test_cancelling_the_conversion_writes_nothing_at_all(foreign_bundle: Path) -> None:

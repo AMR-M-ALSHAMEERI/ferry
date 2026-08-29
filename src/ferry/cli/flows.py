@@ -833,27 +833,49 @@ def run_import(ui: UI, adapters: Scanned) -> None:
 
 
 _CROSS_TOOL: list[tuple[str, str]] = [
-    ("skip", "Import only the ones that came from this assistant"),
-    ("convert", "Convert the others too, accepting what is lost"),
-    ("cancel", "Cancel"),
+    ("skip", "Leave them out - import only what came from this assistant"),
+    (
+        "archive",
+        "Bring them in to read and search - keeps the most detail, "
+        "but you cannot carry on working in them",
+    ),
+    (
+        "continue",
+        "Bring them in to carry on working - drops the assistant's thinking "
+        "and tool output to make that possible",
+    ),
+    ("cancel", "Cancel - nothing is written"),
 ]
-"""Importing only the native ones is first, and is the safe answer.
+"""Four rows on a screen that already existed, rather than a screen of its own.
 
-Every other screen in Ferry puts the option that writes least under the cursor
-(the import screen's own default is *preview*), and a person who pressed Enter
-past this one without reading it should end up with the conversations they
-could have had anyway -- not with a directory of converted transcripts they did
-not know they were asking for.
+Leaving them out is first, and is the safe answer. Every other screen in Ferry
+puts the option that writes least under the cursor (the import screen's own
+default is *preview*), and a person who pressed Enter past this one without
+reading it should end up with the conversations they could have had anyway --
+not with a directory of converted transcripts they did not know they asked for.
+
+**Every label carries the cost as well as the benefit.** The two middle options
+differ *only* in what they give up, so a label naming just the benefit would
+make them look interchangeable and the choice arbitrary. "Keeps the most detail,
+but you cannot carry on working in them" is the whole decision in one line.
+
+**No Ferry vocabulary.** "Archive" and "Continue" are names in the spec and in
+the code; they must never reach the screen. Someone here is choosing between
+reading and working, not between two modes with names they have never met.
+
+The grammar matches :data:`_ACTIONS` -- short imperative, dash, consequence --
+because a screen inventing its own makes the one before it look like a
+different program.
 """
 
 
-def _cross_tool(ui: UI, bundle: Bundle, adapter: Adapter) -> bool | None:
-    """Whether to convert foreign conversations, having said what that costs.
+def _cross_tool(ui: UI, bundle: Bundle, adapter: Adapter) -> str | None:
+    """What to do about foreign conversations, having said what it costs.
 
-    Returns ``True`` to convert, ``False`` to import only the native ones, and
-    ``None`` to cancel. Says nothing at all when the bundle is entirely native,
-    which is the ordinary case -- a restore onto a new machine should not be
-    interrupted to explain a feature it is not using.
+    Returns ``"skip"``, ``"archive"``, ``"continue"``, or ``None`` to cancel.
+    Says nothing at all when the bundle is entirely native, which is the
+    ordinary case -- a restore onto a new machine should not be interrupted to
+    explain a feature it is not using.
     """
     foreign: list[Conversation] = []
     for found in bundle.list_conversations():
@@ -864,7 +886,7 @@ def _cross_tool(ui: UI, bundle: Bundle, adapter: Adapter) -> bool | None:
         if item.source_tool != adapter.name:
             foreign.append(item)
     if not foreign:
-        return False
+        return "skip"
 
     impossible = [c for c in foreign if pair(c.source_tool, adapter.name).support == "unsupported"]
     convertible = [c for c in foreign if c not in impossible]
@@ -886,7 +908,7 @@ def _cross_tool(ui: UI, bundle: Bundle, adapter: Adapter) -> bool | None:
         if not convertible:
             ui.info("They will be skipped whatever you choose here.")
             ui.blank()
-            return False
+            return "skip"
 
     ui.blank()
     ui.info(f"Converting the other {len(convertible)} costs:")
@@ -895,13 +917,13 @@ def _cross_tool(ui: UI, bundle: Bundle, adapter: Adapter) -> bool | None:
     ui.blank()
 
     choice = ui.select(
-        f"Convert {len(convertible)} conversations into {adapter.display_name}?",
+        f"What should Ferry do with the {len(convertible)} from another assistant?",
         _CROSS_TOOL,
         hint="use --allow-cross-tool",
     )
     if choice is None or choice == "cancel":
         return None
-    return choice == "convert"
+    return choice
 
 
 def _combined_loss(items: list[Conversation], target: str) -> list[str]:
@@ -936,6 +958,10 @@ def _combined_loss(items: list[Conversation], target: str) -> list[str]:
         summary.append(f"{images} image blocks need their bytes in the bundle to survive")
     summary.append("each conversation stays attributed to the tool and model that produced it")
     summary.append(CEILING)
+    summary.append(
+        "your backup is not changed by any of this - the bundle keeps everything, "
+        "and importing it again gives it all back"
+    )
     return summary
 
 
@@ -972,8 +998,8 @@ def _import_from(ui: UI, available: list[Adapter], bundle_dir: Path) -> None:
 
         # Asked before the write screen, not after it: what a person is
         # agreeing to on the next screen depends on the answer to this one.
-        cross_tool = _cross_tool(ui, bundle, adapter)
-        if cross_tool is None:
+        mode = _cross_tool(ui, bundle, adapter)
+        if mode is None:
             ui.info("Nothing was written.")
             ui.blank()
             return
@@ -1003,7 +1029,12 @@ def _import_from(ui: UI, available: list[Adapter], bundle_dir: Path) -> None:
             ui,
             adapter.import_(
                 bundle_dir,
-                ImportOptions(dry_run=True, path_remap=remap, allow_cross_tool=cross_tool),
+                ImportOptions(
+                    dry_run=True,
+                    path_remap=remap,
+                    allow_cross_tool=mode != "skip",
+                    mode="continue" if mode == "continue" else "archive",
+                ),
             ),
             "conversations would be imported",
             label="Previewing",
@@ -1031,7 +1062,8 @@ def _import_from(ui: UI, available: list[Adapter], bundle_dir: Path) -> None:
             ImportOptions(
                 on_conflict=_conflict(action),
                 path_remap=remap,
-                allow_cross_tool=cross_tool,
+                allow_cross_tool=mode != "skip",
+                mode="continue" if mode == "continue" else "archive",
             ),
         ),
         "conversations imported",

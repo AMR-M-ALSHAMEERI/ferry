@@ -111,6 +111,21 @@ class ImportEvent:
     """
 
 
+ConversionMode = Literal["archive", "continue"]
+"""How much of a conversation crossing tools is given up.
+
+``archive`` keeps everything and is the default -- it is what Ferry has always
+done, and a restore never sees this at all. ``continue`` gives up more on
+purpose so the target's assistant can carry the conversation on: an unsigned
+thinking block is rejected outright by the vendor that issued the signature, and
+a tool call naming a tool the target does not have describes something that
+cannot have happened there.
+
+Ignored entirely when the source and target are the same tool. A restore is not
+a conversion and has nothing to trade.
+"""
+
+
 OnConflict = Literal["skip", "overwrite", "rename"]
 """What to do about a conversation the target tool already has.
 
@@ -138,6 +153,7 @@ class ImportOptions:
     dry_run: bool = False
     on_conflict: OnConflict = "skip"
     allow_cross_tool: bool = False
+    mode: ConversionMode = "archive"
     path_remap: tuple[tuple[str, str], ...] = ()
 
 

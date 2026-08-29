@@ -54,6 +54,7 @@ from ferry.adapters.dedup import compare_duplicate
 from ferry.adapters.formatcheck import FormatCheck
 from ferry.core import Bundle, Manifest, SourceMachine, back_up
 from ferry.core.compat import assess, refusal
+from ferry.core.continuable import prepare
 from ferry.core.manifest import OSName
 from ferry.ucs import Conversation, Provenance, ToolName
 
@@ -429,6 +430,30 @@ class ClaudeCodeAdapter(Adapter):
                     message=rename_note(conversation_id, written_id),
                 )
 
+        # Before the payload is built, not after: Continue mode changes what
+        # the conversation *is*, and a payload built from the full one would be
+        # the thing written while the notes described something else.
+        conversation, flattened = prepare(conversation, TOOL, options.mode)
+        if flattened.anything:
+            yield ImportEvent(
+                kind="note",
+                conversation_id=cid,
+                message=(
+                    f"converted to continue: {flattened.thinking} thinking blocks and "
+                    f"{flattened.results} tool results dropped, {flattened.calls} calls "
+                    f"kept as text"
+                ),
+            )
+        if flattened.dropped:
+            yield ImportEvent(
+                kind="warning",
+                conversation_id=cid,
+                message=(
+                    f"{flattened.dropped} earlier messages left out to fit; they are "
+                    "still in the bundle"
+                ),
+            )
+
         payload, notes = self._payload_for(bundle, conversation, target_cwd, sidecar_root)
         for note in notes:
             yield ImportEvent(kind="warning", conversation_id=cid, message=note)
@@ -498,6 +523,10 @@ class ClaudeCodeAdapter(Adapter):
             new_cwd=target_cwd,
             new_sidecar_root=str(sidecar_root),
         )
+        # `source_tool == TOOL` already excludes every conversion, so a reduced
+        # conversation never reaches the verbatim replay below. Stated here
+        # because the two conditions protect each other: if this ever loosened,
+        # Continue mode would silently write the full original back.
         if raw.is_file() and conversation.source_tool == TOOL:
             records: list[dict[str, Any]] = []
             broken = 0
