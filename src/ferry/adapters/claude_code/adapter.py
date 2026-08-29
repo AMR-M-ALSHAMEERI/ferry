@@ -360,6 +360,8 @@ class ClaudeCodeAdapter(Adapter):
 
         written = 0
         for conversation_id in ids:
+            if options.only and str(conversation_id) not in options.only:
+                continue
             for event in self._import_one(bundle, conversation_id, options):
                 if event.kind == "progress":
                     written += 1

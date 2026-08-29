@@ -492,6 +492,11 @@ def _actions(tool: str) -> list[tuple[str, str, str]]:
             "Shows everything that would happen. Nothing is written.",
         ),
         (
+            "choose",
+            "Choose which conversations to import",
+            "Tick the ones you want. Everything is ticked to begin with.",
+        ),
+        (
             "skip",
             f"Import, and keep the copy {tool} already has",
             "Any conversation it already has is left exactly as it is.",
@@ -1009,6 +1014,41 @@ def _combined_loss(items: list[Conversation], target: str) -> list[str]:
     return summary
 
 
+def _choose_conversations(ui: UI, bundle: Bundle, only: frozenset[str]) -> frozenset[str] | None:
+    """Tick which conversations to import. ``None`` if the person backed out.
+
+    Offered as a row on the action screen rather than as a step of its own.
+    Importing a whole bundle is what almost everyone wants almost every time,
+    and a checklist standing in front of that would be a screen answered
+    identically by nearly everyone who met it.
+
+    Everything starts ticked, so the person who opened this out of curiosity
+    leaves it in the state they found it.
+    """
+    rows: list[tuple[str, str]] = []
+    for found in bundle.list_conversations():
+        try:
+            item = bundle.load_conversation(found)
+        except Exception:  # noqa: BLE001 - the importer reports a bad file
+            rows.append((str(found), f"{found}  (cannot be read)"))
+            continue
+        title = _clip(item.title or "untitled", _MAX_TITLE)
+        rows.append((str(found), f"{title}  ({item.source_tool}, {len(item.messages)} messages)"))
+
+    if not rows:
+        return only
+
+    picked = ui.multiselect(
+        "Which conversations should be imported?",
+        rows,
+        preselected=sorted(only) if only else [value for value, _ in rows],
+        hint="use --conversation",
+    )
+    if picked is None:
+        return None
+    return frozenset(picked)
+
+
 def _import_from(ui: UI, available: list[Adapter], bundle_dir: Path) -> None:
     """Everything after a bundle has been chosen and, if sealed, opened."""
     try:
@@ -1051,13 +1091,24 @@ def _import_from(ui: UI, available: list[Adapter], bundle_dir: Path) -> None:
         # The only screen in Ferry that writes into a user's real conversation
         # history. It says so, and the option under the cursor is the one that
         # writes nothing.
-        ui.blank()
-        ui.warn(f"This writes into your real {adapter.display_name} history.")
-        action = ui.select(
-            f"Import {count} conversations?",
-            _actions(adapter.display_name),
-            hint="use --dry-run / --on-conflict",
-        )
+        only: frozenset[str] = frozenset()
+        while True:
+            ui.blank()
+            ui.warn(f"This writes into your real {adapter.display_name} history.")
+            showing = len(only) if only else count
+            action = ui.select(
+                f"Import {showing} conversations?",
+                _actions(adapter.display_name),
+                hint="use --dry-run / --on-conflict",
+            )
+            if action != "choose":
+                break
+            # Back to this screen afterwards, with the count updated. Choosing
+            # what to import and choosing what to do about a conflict are two
+            # questions, and answering the first should not commit the second.
+            picked = _choose_conversations(ui, bundle, only)
+            if picked is not None:
+                only = frozenset() if len(picked) == count else picked
         if action is None or action == "cancel":
             ui.info("Nothing was written.")
             ui.blank()
@@ -1078,16 +1129,23 @@ def _import_from(ui: UI, available: list[Adapter], bundle_dir: Path) -> None:
                     path_remap=remap,
                     allow_cross_tool=mode != "skip",
                     mode="continue" if mode == "continue" else "archive",
+                    only=only,
                 ),
             ),
             "conversations would be imported",
             label="Previewing",
-            total=count,
+            total=len(only) if only else count,
         )
         try:
             action = ui.select(
                 "Import for real?",
-                [choice for choice in _actions(adapter.display_name) if choice[0] != "preview"],
+                # Neither "preview" nor "choose" again: the preview just ran, and
+                # what to import was settled before it.
+                [
+                    choice
+                    for choice in _actions(adapter.display_name)
+                    if choice[0] not in ("preview", "choose")
+                ],
                 hint="use --on-conflict",
             )
         except NonInteractiveError as exc:
@@ -1108,11 +1166,12 @@ def _import_from(ui: UI, available: list[Adapter], bundle_dir: Path) -> None:
                 path_remap=remap,
                 allow_cross_tool=mode != "skip",
                 mode="continue" if mode == "continue" else "archive",
+                only=only,
             ),
         ),
         "conversations imported",
         label="Importing",
-        total=count,
+        total=len(only) if only else count,
     )
 
 

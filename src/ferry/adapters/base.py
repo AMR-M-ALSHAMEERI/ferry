@@ -154,6 +154,16 @@ class ImportOptions:
     on_conflict: OnConflict = "skip"
     allow_cross_tool: bool = False
     mode: ConversionMode = "archive"
+    only: frozenset[str] = frozenset()
+    """Conversation ids to import, as strings. Empty means **all of them**.
+
+    Empty rather than ``None`` for "everything" because that is the ordinary
+    case and it should be the cheap one to express. An adapter honouring this
+    filters and says nothing: a conversation the person did not choose is not a
+    conversation that was skipped, and reporting it as skipped would fill the
+    screen with notices about a decision they already made.
+    """
+
     path_remap: tuple[tuple[str, str], ...] = ()
 
 

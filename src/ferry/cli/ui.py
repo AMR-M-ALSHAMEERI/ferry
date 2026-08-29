@@ -406,18 +406,32 @@ class UI:
             The chosen value, or ``None`` if the user cancelled or went back.
         """
         self._require_interactive(question, hint)
-        from ferry.cli.prompts import SelectorItem, run_select
+        from ferry.cli.prompts import Fragments, SelectorItem, _style_for, run_select
 
         marks = motions or {}
+        items = [
+            SelectorItem(
+                row[0], row[1], note=row[2] if len(row) > 2 else "", motion=marks.get(row[0])
+            )
+            for row in choices
+        ]
+        dim = _style_for(self.theme, "dim")
+
+        def explain(item: SelectorItem) -> Fragments:
+            """The highlighted row's own sentence, below the list.
+
+            One explanation, in one place that does not move, for the row being
+            considered. Printing every row's sentence at once doubles the height
+            of the list and buries the labels in prose -- and someone reading a
+            menu compares labels first, then asks about one of them.
+            """
+            return [(dim, f"  {item.note}\n")] if item.note else []
+
         return run_select(
             question,
-            [
-                SelectorItem(
-                    row[0], row[1], note=row[2] if len(row) > 2 else "", motion=marks.get(row[0])
-                )
-                for row in choices
-            ],
+            items,
             theme=self.theme,
+            preview=explain if any(item.note for item in items) else None,
             allow_filter=allow_filter,
             current=current,
             initial=initial,

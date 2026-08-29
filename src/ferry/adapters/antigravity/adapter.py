@@ -506,6 +506,8 @@ class AntigravityAdapter(Adapter):
 
         written = 0
         for conversation_id in conversations:
+            if options.only and str(conversation_id) not in options.only:
+                continue
             for event in self._import_one(bundle, conversation_id, options, remapper):
                 if event.kind == "progress":
                     written += 1

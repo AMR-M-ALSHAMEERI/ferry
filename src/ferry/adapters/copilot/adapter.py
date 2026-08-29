@@ -324,6 +324,8 @@ class CopilotAdapter(Adapter):
         backed_up: set[Path] = set()
         saved: list[Path] = []
         for conversation_id in conversations:
+            if options.only and str(conversation_id) not in options.only:
+                continue
             for event in self._import_one(bundle, conversation_id, options, backed_up, saved):
                 if event.kind == "progress":
                     written += 1

@@ -71,11 +71,17 @@ class SelectorItem:
         hint: Optional dim text after the label, on the same line. For a few
             words -- "teal and amber". Anything longer pushes the row past the
             width of a terminal and wraps into the next one.
-        note: Optional dim sentence on its **own** line under the label, for an
-            explanation rather than a tag. Two options that differ only in what
-            they cost cannot say so in three words, and a label that tries reads
-            as vague: *"leaving anything already there alone"* prompted the
-            question "what is *there*?" from the person it was written for.
+        note: Optional sentence explaining this choice, shown **in the panel
+            below the list** for whichever row the cursor is on -- never under
+            every row at once.
+
+            Two options that differ only in what they cost cannot say so in
+            three words, and a label that tries reads as vague: *"leaving
+            anything already there alone"* drew the question "what is *there*?"
+            from the person it was written for. But a sentence under every row
+            doubles the height of the list and buries the labels in prose, so
+            only the row being considered explains itself. One question, one
+            answer, in one place that does not move.
         motion: Optional animated icon. When set it *replaces* the cursor
             glyph for this list — an animated marker already says where the
             cursor is, and showing both reads as clutter.
@@ -308,10 +314,6 @@ def _render(
             # leaves you guessing what you would be changing away from.
             out += [(accent, f"   {icons.selected} in use")]
         out += [("", "\n")]
-        if item.note:
-            # Indented to the label's own column, so the explanation reads as
-            # belonging to the row above it rather than as another choice.
-            out += [("", " " * (cell + 3)), (dim, item.note), ("", "\n")]
 
     highlighted = model.current
     if preview is not None and highlighted is not None:

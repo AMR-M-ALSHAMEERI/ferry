@@ -94,6 +94,7 @@ class _Answers(UI):
         confirm: bool | None = True,
         actions: Sequence[object] | None = None,
         secrets: Sequence[str] | None = None,
+        ticks: Sequence[Sequence[str]] | None = None,
     ) -> None:
         super().__init__(MONO, capability=Capability.PLAIN)
         # The real console, redirected -- not a replacement. A bare rich Console
@@ -119,6 +120,9 @@ class _Answers(UI):
         self._secrets = list(secrets or [])
         self.secrets_asked = 0
         self.asked = 0
+        self._ticks = [list(t) for t in ticks] if ticks is not None else None
+        self.ticked_from: list[list[str]] = []
+        self.preselected: list[list[str]] = []
         self.questions: list[str] = []
         self.asked_to_confirm = 0
         self.confirmed: list[str] = []
@@ -145,6 +149,15 @@ class _Answers(UI):
         if self._actions and self._actions[0] in values:
             return self._actions.pop(0)
         return choices[0][0]
+
+    def multiselect(self, question, choices, **kwargs):  # type: ignore[no-untyped-def]
+        self.ticked_from.append([row[0] for row in choices])
+        self.preselected.append(list(kwargs.get("preselected") or []))
+        if self._ticks is None:
+            # Nothing said: the person opened the list and left it alone, which
+            # is what everything-ticked means.
+            return [row[0] for row in choices]
+        return self._ticks.pop(0) if self._ticks else None
 
     def path(self, question, *, default="", hint=""):  # type: ignore[no-untyped-def]
         self.paths_asked += 1
@@ -1933,3 +1946,97 @@ def test_skipping_is_offered_and_first_when_there_is_something_to_skip() -> None
     assert rows[0][0] == "skip"
     assert "16" in rows[0][1]
     assert rows[-1][0] == "cancel"
+
+
+# --------------------------------------------------------------------------
+# choosing which conversations to import
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture
+def two_conversations(tmp_path: Path, manifest, conversation) -> Path:
+    from ferry.core import Bundle
+
+    bundle = Bundle.create(tmp_path / "two", manifest)
+    bundle.add_conversation(conversation)
+    bundle.add_conversation(conversation.model_copy(update={"id": uuid4()}))
+    return tmp_path / "two"
+
+
+def test_importing_everything_needs_no_extra_answer(two_conversations: Path) -> None:
+    """The common case must not grow a step.
+
+    Importing a whole bundle is what almost everyone wants almost every time,
+    and a checklist standing in front of that would be a screen answered
+    identically by nearly everyone who met it.
+    """
+    adapter = _Recorder(events=[ImportEvent(kind="progress", message="ok")])
+    ui = _Answers(path=str(two_conversations), confirm=True)
+
+    run_import(ui, scanned(adapter))
+
+    assert ui.ticked_from == []
+    assert adapter.options[-1].only == frozenset()
+
+
+def test_choosing_a_subset_carries_it_into_the_import(two_conversations: Path) -> None:
+    from ferry.core import Bundle
+
+    wanted = str(Bundle.open(two_conversations).list_conversations()[0])
+    adapter = _Recorder(events=[ImportEvent(kind="progress", message="ok")])
+    ui = _Answers(path=str(two_conversations), actions=["choose", "skip"], ticks=[[wanted]])
+
+    run_import(ui, scanned(adapter))
+
+    assert adapter.options[-1].only == frozenset({wanted})
+
+
+def test_everything_ticked_is_the_same_as_not_choosing(two_conversations: Path) -> None:
+    """Opening the list and leaving it alone must not narrow anything.
+
+    ``only`` empty means "all of them", so a selection of everything collapses
+    back to empty rather than being carried as an explicit list that would go
+    stale the moment the bundle changed.
+    """
+    adapter = _Recorder(events=[ImportEvent(kind="progress", message="ok")])
+    ui = _Answers(path=str(two_conversations), actions=["choose", "skip"])
+
+    run_import(ui, scanned(adapter))
+
+    assert adapter.options[-1].only == frozenset()
+
+
+def test_everything_starts_ticked(two_conversations: Path) -> None:
+    adapter = _Recorder(events=[ImportEvent(kind="progress", message="ok")])
+    ui = _Answers(path=str(two_conversations), actions=["choose", "skip"])
+
+    run_import(ui, scanned(adapter))
+
+    assert len(ui.preselected[0]) == 2
+
+
+def test_the_count_in_the_question_follows_the_selection(two_conversations: Path) -> None:
+    from ferry.core import Bundle
+
+    wanted = str(Bundle.open(two_conversations).list_conversations()[0])
+    adapter = _Recorder(events=[ImportEvent(kind="progress", message="ok")])
+    ui = _Answers(path=str(two_conversations), actions=["choose", "skip"], ticks=[[wanted]])
+
+    run_import(ui, scanned(adapter))
+
+    assert "Import 2 conversations?" in ui.questions
+    assert "Import 1 conversations?" in ui.questions
+
+
+def test_choosing_returns_to_the_action_screen_rather_than_importing(
+    two_conversations: Path,
+) -> None:
+    """Choosing what to import and choosing what to do about a conflict are two
+    questions, and answering the first must not commit the second."""
+    adapter = _Recorder(events=[ImportEvent(kind="progress", message="ok")])
+    ui = _Answers(path=str(two_conversations), actions=["choose", "cancel"])
+
+    run_import(ui, scanned(adapter))
+
+    assert adapter.imported_from is None
+    assert "Nothing was written" in ui.text
