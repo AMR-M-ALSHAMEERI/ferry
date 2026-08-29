@@ -371,7 +371,7 @@ class UI:
     def select(
         self,
         question: str,
-        choices: Sequence[tuple[str, str]],
+        choices: Sequence[tuple[str, ...]],
         *,
         hint: str = "",
         allow_filter: bool = True,
@@ -384,7 +384,9 @@ class UI:
 
         Args:
             question: The prompt text.
-            choices: ``(value, label)`` pairs, in display order.
+            choices: ``(value, label)`` pairs, or ``(value, label, note)``
+                triples where the note is a sentence shown on its own line
+                under the label. Mixed freely in one list.
             hint: Flag-based equivalent, shown if there is no terminal.
             allow_filter: Whether ``/`` opens the filter.
             motions: Optional animated icon per choice value. Passed in
@@ -409,7 +411,12 @@ class UI:
         marks = motions or {}
         return run_select(
             question,
-            [SelectorItem(value, label, motion=marks.get(value)) for value, label in choices],
+            [
+                SelectorItem(
+                    row[0], row[1], note=row[2] if len(row) > 2 else "", motion=marks.get(row[0])
+                )
+                for row in choices
+            ],
             theme=self.theme,
             allow_filter=allow_filter,
             current=current,

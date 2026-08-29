@@ -130,7 +130,7 @@ class _Answers(UI):
         self.questions.append(question)
         self.starts_at.append(kwargs.get("initial", 0))
         self.offered_back.append(bool(kwargs.get("back", False)))
-        values = [value for value, _ in choices]
+        values = [row[0] for row in choices]
         self.asked += 1
         # ESCAPE is answered wherever it lands, because "the user pressed
         # escape here" is not an option on any screen -- it is the absence of
@@ -395,7 +395,8 @@ def test_a_bundle_lying_nearby_is_offered_rather_than_asked_for(
 def test_a_listed_bundle_says_what_is_in_it(monkeypatch, bundle_dir: Path) -> None:
     monkeypatch.setattr("ferry.cli.flows._search_roots", lambda: [bundle_dir.parent])
 
-    label = _describe(bundle_dir)
+    name, note = _describe(bundle_dir)
+    label = f"{name} {note}"
 
     assert "1 conversation" in label
     assert "claude-code" in label
@@ -434,7 +435,7 @@ def test_a_bundle_with_a_broken_manifest_is_still_listed(tmp_path: Path) -> None
     (broken / "manifest.json").write_text("{ not json", encoding="utf-8")
 
     assert find_bundles([tmp_path]) == [broken]
-    assert "unreadable" in _describe(broken)
+    assert "Cannot be read" in _describe(broken)[1]
 
 
 def test_an_unreadable_root_is_skipped_rather_than_fatal(tmp_path: Path, monkeypatch) -> None:
@@ -979,7 +980,7 @@ class TestSealing:
         found = find_bundles([tmp_path])
 
         assert sealed in found
-        assert "sealed" in _describe(sealed)
+        assert "Sealed" in _describe(sealed)[1]
 
     def test_inspecting_a_sealed_bundle_asks_for_the_passphrase_and_opens_it(
         self, tmp_path: Path, conversation
@@ -1025,7 +1026,7 @@ class TestSealing:
         ui = _Recorded(path=str(sealed), actions=["done"], secrets=[PHRASE])
         run_inspect(ui)
 
-        offered = {value for question, choices in ui.offered for value, _ in choices}
+        offered = {row[0] for question, choices in ui.offered for row in choices}
         assert "unseal" in offered, "the plain way: write it out where it can be worked on"
         assert "one" in offered, "the convenient way: delete, then seal it again"
         assert sealed.read_bytes() == before, "looking must change nothing"
@@ -1870,16 +1871,22 @@ def test_the_two_convert_rows_say_what_they_cost_not_only_what_they_give(
     the choice between them arbitrary. Required by the human on 2026-08-30:
     human-sounding, clearer, not vague.
     """
-    from ferry.cli.flows import _CROSS_TOOL
+    from ferry.cli.flows import _cross_tool_choices
 
-    labels = dict(_CROSS_TOOL)
+    rows = {row[0]: row for row in _cross_tool_choices("GitHub Copilot Chat", 3, "Antigravity")}
 
-    assert "cannot carry on working" in labels["archive"]
-    assert "drops" in labels["continue"]
-    # Ferry's own vocabulary for the modes must never reach the screen.
-    for label in labels.values():
-        assert "archive" not in label.lower()
-        assert "mode" not in label.lower()
+    # The cost lives on the second line, where there is room to say it plainly.
+    assert "not continue them" in rows["archive"][2]
+    assert "Drops" in rows["continue"][2]
+    # Every row explains itself; a bare label was what read as vague.
+    assert all(len(row) == 3 and row[2] for row in rows.values())
+    # Ferry's own vocabulary for the modes must never reach the screen, and
+    # neither must a bare dash standing in for a sentence.
+    for row in rows.values():
+        assert "archive" not in row[1].lower()
+        assert "mode" not in row[1].lower()
+        assert " - " not in row[1]
+        assert " - " not in row[2]
 
 
 def test_cancelling_the_conversion_writes_nothing_at_all(foreign_bundle: Path) -> None:
@@ -1901,7 +1908,9 @@ def test_cancelling_the_conversion_writes_nothing_at_all(foreign_bundle: Path) -
 
 def test_the_safe_option_is_the_one_under_the_cursor(foreign_bundle: Path) -> None:
     """Every other screen in Ferry puts the option that writes least first."""
-    from ferry.cli.flows import _CROSS_TOOL
+    from ferry.cli.flows import _cross_tool_choices
 
-    assert _CROSS_TOOL[0][0] == "skip"
-    assert _CROSS_TOOL[-1][0] == "cancel"
+    rows = _cross_tool_choices("GitHub Copilot Chat", 3, "Antigravity")
+
+    assert rows[0][0] == "skip"
+    assert rows[-1][0] == "cancel"

@@ -157,28 +157,32 @@ def find_bundles(roots: Sequence[Path] | None = None) -> list[Path]:
     return found
 
 
-def _describe(path: Path) -> str:
-    """A one-line label: what is in this bundle, and where it is.
+def _describe(path: Path) -> tuple[str, str]:
+    """A bundle as a name and a sentence about it.
+
+    Two parts rather than one line joined by a dash: the name is what someone
+    is looking for and the rest is what tells them they have found it, and a
+    dash between them makes the eye do work the layout should be doing. The
+    name goes on the row; the sentence goes under it.
 
     A sealed bundle can only be described by its size and date -- everything
     else about it is encrypted, which is the point.
     """
     if path.is_file():
         if not is_sealed(path):
-            return f"{path.name}  -  not a bundle"
+            return path.name, "Not a bundle."
         made = datetime.fromtimestamp(path.stat().st_mtime, UTC)
-        return (
-            f"{path.name}  -  sealed, {path.stat().st_size / 1024 / 1024:.1f} MB, {made:%d %b %Y}"
-        )
+        size = path.stat().st_size / 1024 / 1024
+        return path.name, f"Sealed, {size:.1f} MB, made {made:%d %b %Y}."
     try:
         manifest = Bundle.open(path).manifest
     except BundleError:
-        return f"{path.name}  -  unreadable"
+        return path.name, "Cannot be read."
     tools = ", ".join(manifest.tools_included) or "nothing"
     plural = "" if manifest.conversation_count == 1 else "s"
-    return (
-        f"{path.name}  -  {manifest.conversation_count} conversation{plural}"
-        f" from {tools}, {manifest.created_at:%d %b %Y}"
+    return path.name, (
+        f"{manifest.conversation_count} conversation{plural} from {tools}, "
+        f"made {manifest.created_at:%d %b %Y}."
     )
 
 
@@ -196,8 +200,8 @@ def _choose_bundle(ui: UI, question: str = "Which bundle should be imported?") -
         return _typed_bundle(ui)
 
     listed = bundles[:_MAX_LISTED_BUNDLES]
-    choices = [(str(p), _describe(p)) for p in listed]
-    choices.append((_TYPE_A_PATH, "Somewhere else - type the path"))
+    choices = [(str(p), *_describe(p)) for p in listed]
+    choices.append((_TYPE_A_PATH, "Somewhere else", "Type the path yourself."))
     chosen = ui.select(question, choices, hint="use --bundle")
     if chosen is None:
         return None
@@ -316,8 +320,8 @@ def _pick_nearby(ui: UI, folder: Path, found: Sequence[Path]) -> Path | None:
     ui.blank()
     ui.info(f"{folder.name} is not a bundle itself, but it holds {count_of(len(found), 'bundle')}.")
     listed = list(found[:_MAX_LISTED_BUNDLES])
-    choices = [(str(path), _describe(path)) for path in listed]
-    choices.append((_TYPE_A_PATH, "None of these - type another path"))
+    choices = [(str(path), *_describe(path)) for path in listed]
+    choices.append((_TYPE_A_PATH, "None of these", "Type another path yourself."))
     try:
         chosen = ui.select("Which one?", choices, hint="use --bundle")
     except NonInteractiveError as exc:
@@ -472,13 +476,40 @@ def _report(
     return handled
 
 
-_ACTIONS: list[tuple[str, str]] = [
-    ("preview", "Preview it first - nothing is written"),
-    ("skip", "Import, leaving anything already there alone"),
-    ("rename", "Import, keeping both copies of anything already there"),
-    ("overwrite", "Import, replacing what is there - the old copy is backed up"),
-    ("cancel", "Cancel"),
-]
+def _actions(tool: str) -> list[tuple[str, str, str]]:
+    """The import choices, naming the assistant being written into.
+
+    A function rather than a constant because *"leaving anything already there
+    alone"* was the old wording, and the person it was written for asked
+    **"what is there?"** -- a fair question. "There" is the assistant, and the
+    thing already there is a conversation it already has. Both are nameable, so
+    they are named.
+    """
+    return [
+        (
+            "preview",
+            "Preview it first",
+            "Shows everything that would happen. Nothing is written.",
+        ),
+        (
+            "skip",
+            f"Import, and keep the copy {tool} already has",
+            "Any conversation it already has is left exactly as it is.",
+        ),
+        (
+            "rename",
+            "Import, and keep both copies",
+            "The one from the bundle arrives beside it, under a new id.",
+        ),
+        (
+            "overwrite",
+            f"Import, and replace the copy {tool} already has",
+            "The copy being replaced is saved to your Ferry backups folder first.",
+        ),
+        ("cancel", "Cancel", "Nothing is written."),
+    ]
+
+
 """One screen instead of three.
 
 The options an import takes -- preview or write, and what to do about a
@@ -540,9 +571,9 @@ def _path_remap(ui: UI, bundle: Bundle) -> tuple[tuple[str, str], ...] | None:
     chosen = ui.select(
         "Where should those folders be read as now?",
         [
-            ("here", f"{here} - this machine's home folder"),
-            ("other", "Somewhere else - choose a folder"),
-            ("leave", "Leave them as they are"),
+            ("here", str(here), "This machine's home folder."),
+            ("other", "Somewhere else", "Choose a folder yourself."),
+            ("leave", "Leave them as they are", "The paths inside stay as recorded."),
         ],
         hint="use --path-remap",
     )
@@ -832,41 +863,46 @@ def run_import(ui: UI, adapters: Scanned) -> None:
         _import_from(ui, available, bundle_dir.root)
 
 
-_CROSS_TOOL: list[tuple[str, str]] = [
-    ("skip", "Leave them out - import only what came from this assistant"),
-    (
-        "archive",
-        "Bring them in to read and search - keeps the most detail, "
-        "but you cannot carry on working in them",
-    ),
-    (
-        "continue",
-        "Bring them in to carry on working - drops the assistant's thinking "
-        "and tool output to make that possible",
-    ),
-    ("cancel", "Cancel - nothing is written"),
-]
-"""Four rows on a screen that already existed, rather than a screen of its own.
+def _cross_tool_choices(tool: str, count: int, sources: str) -> list[tuple[str, str, str]]:
+    """What to do about conversations from another assistant.
 
-Leaving them out is first, and is the safe answer. Every other screen in Ferry
-puts the option that writes least under the cursor (the import screen's own
-default is *preview*), and a person who pressed Enter past this one without
-reading it should end up with the conversations they could have had anyway --
-not with a directory of converted transcripts they did not know they asked for.
+    Four rows on a screen that already existed, rather than a screen of its own.
 
-**Every label carries the cost as well as the benefit.** The two middle options
-differ *only* in what they give up, so a label naming just the benefit would
-make them look interchangeable and the choice arbitrary. "Keeps the most detail,
-but you cannot carry on working in them" is the whole decision in one line.
+    **Leaving them out is first, and is the safe answer.** Every other screen in
+    Ferry puts the option that writes least under the cursor, and a person who
+    pressed Enter past this one without reading it should end up with the
+    conversations they could have had anyway.
 
-**No Ferry vocabulary.** "Archive" and "Continue" are names in the spec and in
-the code; they must never reach the screen. Someone here is choosing between
-reading and working, not between two modes with names they have never met.
+    **Each row carries its cost on a second line.** The two middle options
+    differ *only* in what they give up, so a label naming the benefit alone
+    makes them look interchangeable and the choice arbitrary.
 
-The grammar matches :data:`_ACTIONS` -- short imperative, dash, consequence --
-because a screen inventing its own makes the one before it look like a
-different program.
-"""
+    **No Ferry vocabulary.** "Archive" and "Continue" are names in the spec and
+    the code and must never reach the screen; someone here is choosing between
+    reading and working, not between two modes with names they have never met.
+    """
+    return [
+        (
+            "skip",
+            f"Import only the conversations that came from {tool}",
+            f"The {count} from {sources} stay in the bundle. None of them is written.",
+        ),
+        (
+            "archive",
+            "Bring them in so I can read and search them here",
+            "Keeps the most detail. You can read them, but not continue them.",
+        ),
+        (
+            "continue",
+            "Bring them in so I can carry on working in them",
+            "Drops the assistant's thinking and tool output so you can continue.",
+        ),
+        (
+            "cancel",
+            "Cancel",
+            "Nothing is written at all, not even the ones from this assistant.",
+        ),
+    ]
 
 
 def _cross_tool(ui: UI, bundle: Bundle, adapter: Adapter) -> str | None:
@@ -918,7 +954,7 @@ def _cross_tool(ui: UI, bundle: Bundle, adapter: Adapter) -> str | None:
 
     choice = ui.select(
         f"What should Ferry do with the {len(convertible)} from another assistant?",
-        _CROSS_TOOL,
+        _cross_tool_choices(adapter.display_name, len(convertible), sources),
         hint="use --allow-cross-tool",
     )
     if choice is None or choice == "cancel":
@@ -1011,7 +1047,7 @@ def _import_from(ui: UI, available: list[Adapter], bundle_dir: Path) -> None:
         ui.warn(f"This writes into your real {adapter.display_name} history.")
         action = ui.select(
             f"Import {count} conversations?",
-            _ACTIONS,
+            _actions(adapter.display_name),
             hint="use --dry-run / --on-conflict",
         )
         if action is None or action == "cancel":
@@ -1043,7 +1079,7 @@ def _import_from(ui: UI, available: list[Adapter], bundle_dir: Path) -> None:
         try:
             action = ui.select(
                 "Import for real?",
-                [choice for choice in _ACTIONS if choice[0] != "preview"],
+                [choice for choice in _actions(adapter.display_name) if choice[0] != "preview"],
                 hint="use --on-conflict",
             )
         except NonInteractiveError as exc:
@@ -1108,7 +1144,7 @@ them. The title is the variable part, so the title is what gets cut.
 def _conversation_line(summary: ConversationSummary) -> str:
     name = _clip(summary.name, _MAX_TITLE)
     if summary.unreadable:
-        return f"{name}  -  cannot be read: {_clip(summary.unreadable, 40)}"
+        return f"{name}  (cannot be read: {_clip(summary.unreadable, 40)})"
     parts = [count_of(summary.messages, "message"), _when(summary)]
     if summary.attachments:
         parts.append(count_of(summary.attachments, "attachment"))
@@ -1527,15 +1563,15 @@ def _delete_bundle(ui: UI, summary: BundleSummary) -> bool:
 # --------------------------------------------------------------------------
 
 _SHAPE_CHOICES: Final = [
-    ("handoff", "A handoff, to resume this in a new session"),
-    ("said", "Just what I said"),
-    ("done", "What was done - files, commands and errors"),
+    ("handoff", "A handoff, to resume this in a new session", "Everything below, together."),
+    ("said", "Just what I said", "Your own messages, quoted."),
+    ("done", "What was done", "Files touched, commands run, and errors seen."),
 ]
 
 _LENGTH_CHOICES: Final = [
-    ("standard", "Standard - about a page"),
-    ("brief", "Brief - the shortest useful version"),
-    ("full", "Full - everything that survives the cut"),
+    ("standard", "Standard", "About a page."),
+    ("brief", "Brief", "The shortest useful version."),
+    ("full", "Full", "Everything that survives the cut."),
 ]
 
 
@@ -1680,9 +1716,9 @@ def _compact_at(ui: UI, root: Path) -> bool:
         step = "conversation" if outcome == "another" else "length"
 
 
-def _index_of(rows: Sequence[tuple[str, str]], value: str) -> int:
+def _index_of(rows: Sequence[tuple[str, ...]], value: str) -> int:
     """Where a value sits in a list of choices, for restoring the cursor."""
-    return next((n for n, (candidate, _) in enumerate(rows) if candidate == value), 0)
+    return next((n for n, row in enumerate(rows) if row[0] == value), 0)
 
 
 def _compact_document(bundle: Bundle, conversation_id: UUID, *, shape: str, length: str) -> str:
