@@ -23,6 +23,7 @@ import pytest
 from ferry.adapters.base import ImportOptions
 from ferry.adapters.claude_code import ClaudeCodeAdapter
 from ferry.adapters.claude_code.reader import read_session
+from ferry.adapters.claude_code.trust import TrustError
 from ferry.adapters.claude_code.writer import remap_prefix
 from ferry.core import Bundle, sha256_file
 from ferry.ucs import (
@@ -1043,3 +1044,154 @@ class TestTheFolderHasToBeTrustedBeforeItWillOpen:
 
         written = tmp_path / "target" / "projects" / "-home-bob-widget" / f"{BASIC_ID}.jsonl"
         assert written.is_file()
+
+
+class TestGrantingTrustDuringTheImport:
+    """The option that turns twelve trips to the terminal into one keypress.
+
+    Off by default. A programmatic import writes nothing into another tool's
+    configuration; only the interactive screen offers it.
+    """
+
+    REMAP = ((SAMPLE_CWD, "/home/bob/widget"), (EDGE_CWD, "/home/bob/widget"))
+
+    @staticmethod
+    def _settings(tmp_path: Path, projects: dict[str, Any]) -> Path:
+        root = tmp_path / "target"
+        root.mkdir(exist_ok=True)
+        path = root / ".claude.json"
+        path.write_text(json.dumps({"projects": projects, "userID": "keep me"}), encoding="utf-8")
+        return path
+
+    @staticmethod
+    def _trusted(path: Path, folder: str) -> bool:
+        entry = json.loads(path.read_text(encoding="utf-8"))["projects"].get(folder, {})
+        return entry.get("hasTrustDialogAccepted") is True
+
+    def test_asking_for_it_grants_it(
+        self, exported: Path, target: ClaudeCodeAdapter, tmp_path: Path
+    ) -> None:
+        settings = self._settings(tmp_path, {})
+
+        events = list(
+            target.import_(exported, ImportOptions(path_remap=self.REMAP, trust_folders=True))
+        )
+
+        assert self._trusted(settings, "/home/bob/widget")
+        assert any(e.kind == "note" and "may now open" in e.message for e in events)
+        assert not [e for e in events if e.kind == "warning" and "not been told" in e.message]
+
+    def test_not_asking_for_it_leaves_the_settings_alone(
+        self, exported: Path, target: ClaudeCodeAdapter, tmp_path: Path
+    ) -> None:
+        """The default. A warning, and not one byte written outside the history."""
+        settings = self._settings(tmp_path, {})
+        before = settings.read_text(encoding="utf-8")
+
+        events = list(target.import_(exported, ImportOptions(path_remap=self.REMAP)))
+
+        assert settings.read_text(encoding="utf-8") == before
+        assert [e for e in events if e.kind == "warning" and "not been told" in e.message]
+
+    def test_a_preview_never_grants_anything(
+        self, exported: Path, target: ClaudeCodeAdapter, tmp_path: Path
+    ) -> None:
+        """A dry run that changed a security setting would be a dry run in name
+        only, and the screen offering it says nothing below it is written."""
+        settings = self._settings(tmp_path, {})
+        before = settings.read_text(encoding="utf-8")
+
+        list(
+            target.import_(
+                exported,
+                ImportOptions(path_remap=self.REMAP, trust_folders=True, dry_run=True),
+            )
+        )
+
+        assert settings.read_text(encoding="utf-8") == before
+
+    def test_the_rest_of_the_settings_file_survives(
+        self, exported: Path, target: ClaudeCodeAdapter, tmp_path: Path
+    ) -> None:
+        settings = self._settings(tmp_path, {"/somewhere/else": {"allowedTools": ["Bash"]}})
+
+        list(target.import_(exported, ImportOptions(path_remap=self.REMAP, trust_folders=True)))
+
+        after = json.loads(settings.read_text(encoding="utf-8"))
+        assert after["userID"] == "keep me"
+        assert after["projects"]["/somewhere/else"]["allowedTools"] == ["Bash"]
+
+    def test_a_failed_grant_still_reports_what_to_do_by_hand(
+        self, exported: Path, target: ClaudeCodeAdapter, tmp_path: Path, monkeypatch: Any
+    ) -> None:
+        """The import succeeded and only the last step did not.
+
+        Saying just "could not grant trust" would leave someone with
+        conversations written and no idea how to open them, which is the exact
+        situation the whole feature exists to prevent.
+        """
+        self._settings(tmp_path, {})
+
+        def refuse(folders: Any, env: Any = None) -> Any:
+            raise TrustError("settings file is held open by something else")
+
+        monkeypatch.setattr("ferry.adapters.claude_code.adapter.trust_grant", refuse)
+
+        events = list(
+            target.import_(exported, ImportOptions(path_remap=self.REMAP, trust_folders=True))
+        )
+
+        assert any("could not grant trust" in e.message for e in events)
+        assert any("not been told" in e.message for e in events)
+        assert any(e.kind == "progress" for e in events), "the conversations were still written"
+
+    def test_no_settings_file_at_all_says_nothing(
+        self, exported: Path, target: ClaudeCodeAdapter
+    ) -> None:
+        """No trust map to read is "cannot tell", not "not trusted".
+
+        Warning here would mean warning on every machine where the file has
+        not been created yet, about a refusal that may never come.
+        """
+        events = list(
+            target.import_(exported, ImportOptions(path_remap=self.REMAP, trust_folders=True))
+        )
+
+        assert not [e for e in events if "trust" in e.message or "not been told" in e.message]
+
+    def test_the_folders_are_reported_before_anything_is_written(
+        self, exported: Path, target: ClaudeCodeAdapter, tmp_path: Path
+    ) -> None:
+        """`unopenable` answers the question the screen asks, and asking it
+        writes nothing: the flow puts it in front of someone before the import
+        runs, so it cannot depend on the import having run."""
+        settings = self._settings(tmp_path, {})
+        before = settings.read_text(encoding="utf-8")
+
+        folders = target.unopenable(exported, ImportOptions(path_remap=self.REMAP))
+
+        assert folders == ["/home/bob/widget"]
+        assert settings.read_text(encoding="utf-8") == before
+
+    def test_a_folder_already_trusted_is_not_reported(
+        self, exported: Path, target: ClaudeCodeAdapter, tmp_path: Path
+    ) -> None:
+        self._settings(tmp_path, {"/home/bob/widget": {"hasTrustDialogAccepted": True}})
+
+        assert target.unopenable(exported, ImportOptions(path_remap=self.REMAP)) == []
+
+    def test_only_the_folders_of_the_conversations_actually_chosen(
+        self, exported: Path, target: ClaudeCodeAdapter, tmp_path: Path
+    ) -> None:
+        """Trusting a folder for a conversation nobody asked to import would be
+        Ferry widening a security setting on its own initiative."""
+        self._settings(tmp_path, {})
+
+        folders = target.unopenable(
+            exported,
+            ImportOptions(
+                path_remap=((SAMPLE_CWD, "/home/bob/widget"),), only=frozenset({str(BASIC_ID)})
+            ),
+        )
+
+        assert folders == ["/home/bob/widget"]

@@ -154,6 +154,17 @@ class ImportOptions:
     on_conflict: OnConflict = "skip"
     allow_cross_tool: bool = False
     mode: ConversionMode = "archive"
+    trust_folders: bool = False
+    """Let the target open the folders written into, where it needs telling.
+
+    Claude Code refuses to open a conversation in a folder absent from its
+    trust map, so a restore onto a new machine is unopenable until every folder
+    is trusted by hand. Ferry can do that, and **the default is off**: writing
+    into another tool's configuration is a security decision, so a programmatic
+    import never takes it. Only the interactive screen offers it, with the
+    cursor already on yes.
+    """
+
     only: frozenset[str] = frozenset()
     """Conversation ids to import, as strings. Empty means **all of them**.
 
@@ -202,6 +213,21 @@ class Adapter(ABC):
         contract does not require the UCS to have come from this same tool —
         that is what makes cross-tool migration (M7b) possible.
         """
+
+    def unopenable(self, bundle_dir: Path, options: ImportOptions) -> list[str]:
+        """Places this tool will refuse to open until it is told to allow them.
+
+        Writing a conversation is not always the whole job. Claude Code will
+        not open a folder absent from its trust map, and reports those folders
+        here so the flow can offer to sort it out **before** anyone meets the
+        refusal. Purely a question: nothing is written by asking.
+
+        The default is an empty list, which is the honest answer for a tool
+        with no such gate and for a tool whose gate has not been measured yet.
+        Never raises; an adapter that cannot tell reports nothing rather than
+        blocking an import over a question it could not answer.
+        """
+        return []
 
 
 class NotImplementedAdapter(Adapter):

@@ -24,7 +24,7 @@ import shutil
 from collections import Counter
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import ExitStack, contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final, cast
@@ -1049,6 +1049,55 @@ def _choose_conversations(ui: UI, bundle: Bundle, only: frozenset[str]) -> froze
     return frozenset(picked)
 
 
+def _trust_folders(
+    ui: UI, adapter: Adapter, bundle_dir: Path, options: ImportOptions
+) -> bool | None:
+    """Offer to let the target open the folders it is about to be written into.
+
+    Returns whether to grant it, or ``None`` to cancel the import. Says nothing
+    when there is nothing to grant, which is every ordinary restore into
+    folders already in use.
+
+    Asked **after** the write has been agreed to, not before. Before, it is a
+    question about a thing that may not happen; after, it is the last step of
+    something already decided, and the answer applies to exactly the
+    conversations chosen rather than to the whole bundle.
+    """
+    folders = adapter.unopenable(bundle_dir, options)
+    if not folders:
+        return False
+
+    ui.blank()
+    many = len(folders) > 1
+    ui.info(
+        f"{adapter.display_name} will not open a conversation in a folder it has not "
+        f"been told about, and {'these are' if many else 'this one is'} new to it:"
+    )
+    for folder in folders:
+        ui.info(f"  {folder}")
+
+    choice = ui.select(
+        "May Ferry add them to the list it can open?",
+        [
+            (
+                "grant",
+                f"Yes, let {adapter.display_name} open them",
+                "The same thing you would agree to by starting it in each folder yourself. "
+                "Ferry saves the current settings first.",
+            ),
+            (
+                "leave",
+                "No, I will do it myself",
+                "The conversations are still written. Ferry names the folders and you start "
+                f"{adapter.display_name} once in each.",
+            ),
+        ],
+    )
+    if choice is None:
+        return None
+    return choice == "grant"
+
+
 def _import_from(ui: UI, available: list[Adapter], bundle_dir: Path) -> None:
     """Everything after a bundle has been chosen and, if sealed, opened."""
     try:
@@ -1156,19 +1205,27 @@ def _import_from(ui: UI, available: list[Adapter], bundle_dir: Path) -> None:
             ui.blank()
             return
 
+    settled = ImportOptions(
+        on_conflict=_conflict(action),
+        path_remap=remap,
+        allow_cross_tool=mode != "skip",
+        mode="continue" if mode == "continue" else "archive",
+        only=only,
+    )
+    try:
+        trust = _trust_folders(ui, adapter, bundle_dir, settled)
+    except NonInteractiveError as exc:
+        ui.error(str(exc))
+        return
+    if trust is None:
+        ui.info("Nothing was written.")
+        ui.blank()
+        return
+
     ui.blank()
     _report(
         ui,
-        adapter.import_(
-            bundle_dir,
-            ImportOptions(
-                on_conflict=_conflict(action),
-                path_remap=remap,
-                allow_cross_tool=mode != "skip",
-                mode="continue" if mode == "continue" else "archive",
-                only=only,
-            ),
-        ),
+        adapter.import_(bundle_dir, replace(settled, trust_folders=trust)),
         "conversations imported",
         label="Importing",
         total=len(only) if only else count,

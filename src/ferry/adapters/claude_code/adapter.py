@@ -40,8 +40,9 @@ from ferry.adapters.base import (
 from ferry.adapters.census import census, jsonl_holds
 from ferry.adapters.claude_code import paths as cc_paths
 from ferry.adapters.claude_code.reader import MESSAGE_TYPES, read_session
+from ferry.adapters.claude_code.trust import TrustError, is_trusted
 from ferry.adapters.claude_code.trust import advice as trust_advice
-from ferry.adapters.claude_code.trust import is_trusted
+from ferry.adapters.claude_code.trust import grant as trust_grant
 from ferry.adapters.claude_code.writer import (
     SYNTHESIS_NOTES,
     Remap,
@@ -361,26 +362,95 @@ class ClaudeCodeAdapter(Adapter):
         yield ImportEvent(kind="started", message=f"{len(ids)} conversations in bundle")
 
         written = 0
-        # One warning per folder, not per conversation: importing twenty
-        # conversations into the same untrusted folder is one thing to fix, and
-        # saying it twenty times would bury the nineteen other notes.
-        checked: set[str] = set()
+        # Folders Claude Code will refuse to open, gathered once each rather
+        # than once per conversation: twenty conversations landing in the same
+        # untrusted folder are one thing to fix, and saying it twenty times
+        # would bury the nineteen other notes.
+        blocked: list[str] = []
         for conversation_id in ids:
             if options.only and str(conversation_id) not in options.only:
                 continue
-            for event in self._import_one(bundle, conversation_id, options, checked):
+            for event in self._import_one(bundle, conversation_id, options, blocked):
                 if event.kind == "progress":
                     written += 1
                 yield event
+        yield from self._settle_trust(blocked, options)
         verb = "would be written" if options.dry_run else "written"
         yield ImportEvent(kind="done", message=f"{written} of {len(ids)} {verb}")
+
+    @staticmethod
+    def _target_cwd(conversation: Conversation, options: ImportOptions) -> str:
+        """Where this conversation is filed on this machine.
+
+        The bundle's own working directory after remapping, or the directory
+        Ferry is running in when the source never recorded one.
+        """
+        original = conversation.workspace.original_path
+        return remap_prefix(original, options.path_remap) if original else str(Path.cwd())
+
+    def unopenable(self, bundle_dir: Path, options: ImportOptions) -> list[str]:
+        """Folders in this bundle that Claude Code has not been told to open.
+
+        Answered by reading the bundle a second time rather than by
+        remembering what the import found. Asking is a question the flow puts
+        *before* the write screen, and a question that depends on having
+        already written is no use there.
+        """
+        try:
+            bundle = Bundle.open(bundle_dir)
+            ids = bundle.list_conversations()
+        except Exception:  # noqa: BLE001 - a question, never a reason to fail an import
+            return []
+        found: list[str] = []
+        for conversation_id in ids:
+            if options.only and str(conversation_id) not in options.only:
+                continue
+            try:
+                conversation = bundle.load_conversation(conversation_id)
+            except Exception:  # noqa: BLE001 - one unreadable file is not an answer for the rest
+                continue
+            cwd = self._target_cwd(conversation, options)
+            if cwd not in found and is_trusted(cwd, self._env) is False:
+                found.append(cwd)
+        return found
+
+    def _settle_trust(self, blocked: list[str], options: ImportOptions) -> Iterator[ImportEvent]:
+        """Grant trust, or say what is still needed.
+
+        Reported after the writes rather than beside them. Whether a folder
+        needs telling is a property of the run, not of any one conversation,
+        and the answer is the same sentence however many landed there.
+        """
+        if not blocked:
+            return
+        if options.dry_run or not options.trust_folders:
+            for folder in blocked:
+                yield ImportEvent(kind="warning", message=trust_advice(folder))
+            return
+        try:
+            granted = trust_grant(blocked, self._env)
+        except TrustError as exc:
+            # The import itself succeeded; only the last step did not. Saying
+            # so plainly beats a failure that reads as if nothing was written.
+            yield ImportEvent(kind="warning", message=f"could not grant trust: {exc}")
+            for folder in blocked:
+                yield ImportEvent(kind="warning", message=trust_advice(folder))
+            return
+        folders = "folder" if len(granted.folders) == 1 else "folders"
+        yield ImportEvent(
+            kind="note",
+            message=(
+                f"Claude Code may now open {len(granted.folders)} new {folders}; "
+                f"its previous settings were saved to {granted.backup.parent}"
+            ),
+        )
 
     def _import_one(
         self,
         bundle: Bundle,
         conversation_id: UUID,
         options: ImportOptions,
-        checked: set[str] | None = None,
+        blocked: list[str] | None = None,
     ) -> Iterator[ImportEvent]:
         cid = str(conversation_id)
         try:
@@ -408,7 +478,7 @@ class ClaudeCodeAdapter(Adapter):
                 return
 
         original = conversation.workspace.original_path
-        target_cwd = remap_prefix(original, options.path_remap) if original else str(Path.cwd())
+        target_cwd = self._target_cwd(conversation, options)
         if not original:
             yield ImportEvent(
                 kind="warning",
@@ -418,12 +488,9 @@ class ClaudeCodeAdapter(Adapter):
 
         # Asked before the file is written, so the answer arrives with the
         # import rather than days later when someone tries to open it.
-        if checked is not None and target_cwd not in checked:
-            checked.add(target_cwd)
+        if blocked is not None and target_cwd not in blocked:
             if is_trusted(target_cwd, self._env) is False:
-                yield ImportEvent(
-                    kind="warning", conversation_id=cid, message=trust_advice(target_cwd)
-                )
+                blocked.append(target_cwd)
 
         project = cc_paths.project_dir(target_cwd, self._env)
         destination = project / f"{conversation_id}.jsonl"
