@@ -168,10 +168,16 @@ def grant(
     1. **Copy it aside first.** A settings file is not a conversation; losing
        it loses every project's tool permissions and MCP servers along with the
        trust flags. If the copy fails, nothing is written.
-    2. **Write a temporary file and rename it over the original.** A rename is
-       atomic on both filesystems Ferry targets, so a crash or a full disk
-       leaves the old file intact rather than a half-written one. Writing in
-       place is what would produce an unreadable config.
+    2. **Write a temporary file and rename it over the original.**
+       :meth:`Path.replace` is atomic on all three platforms Ferry supports, so
+       a crash or a full disk leaves the old file intact rather than a
+       half-written one. Writing in place is what would produce an unreadable
+       config. **Windows differs in one way that matters**: the rename fails
+       outright if another process holds the file open, where POSIX would let
+       it through. That is a refusal rather than a corruption, and it is the
+       better of the two outcomes, but it means a running VS Code or editor
+       sitting on the settings file turns this into a :class:`TrustError`
+       rather than a silent success.
     3. **Read it back and check.** The whole point of the write is that Claude
        Code will now open these folders, and the only evidence for that is the
        file saying so afterwards.
