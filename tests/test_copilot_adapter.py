@@ -351,12 +351,17 @@ def test_a_conversation_from_another_tool_is_skipped_not_mangled(
     """Writing a Claude Code conversation into Copilot's format would produce
     something neither tool can read.
 
-    M7b measured why, and the reason is not a missing feature: a conversation is
-    invisible in Copilot Chat unless it is also written into the workspace chat
-    index, and deriving that workspace key is unsolved even for Copilot's own
-    conversations. So the refusal is unconditional -- ``allow_cross_tool`` does
-    not open it -- and the message says the blocker rather than naming a
-    milestone that has since arrived."""
+    The refusal is unconditional -- ``allow_cross_tool`` does not open it --
+    and the message must say the blocker rather than name a milestone that has
+    since arrived.
+
+    **The reason has been wrong twice, so this asserts the durable half.** It
+    first blamed the workspace-key derivation, which M6 had already solved. It
+    then blamed the chat index, which Ferry writes and whose every field has an
+    obvious default (#203). What is actually missing is the transcript
+    document: Copilot stores a conversation as a VS Code document and Ferry can
+    only write back one it read. That is the sentence a person can act on, so
+    it is the one checked here."""
     from ferry.adapters.base import ImportOptions
 
     dest = tmp_path / "foreign"
@@ -366,7 +371,10 @@ def test_a_conversation_from_another_tool_is_skipped_not_mangled(
     events = list(CopilotAdapter(target).import_(dest, ImportOptions()))
 
     assert sum(1 for e in events if e.kind == "progress") == 0
-    assert any("chat index" in e.message for e in events if e.kind == "skipped")
+    skipped = [e.message for e in events if e.kind == "skipped"]
+    assert any("transcript document" in message for message in skipped)
+    # Never a milestone name: "this arrives at M7b" was true until M7b arrived.
+    assert not any("M7b" in message for message in skipped)
 
 
 def test_import_reports_a_bundle_it_cannot_open(tmp_path: Path, target) -> None:  # type: ignore[no-untyped-def]

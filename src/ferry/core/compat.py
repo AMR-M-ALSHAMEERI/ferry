@@ -19,11 +19,10 @@ really there* are different claims and only the second is worth shipping.
                         header out of ``source_raw``; a foreign bundle
                         has not got one.
 ``-> copilot``          unsupported **today**, and the nearest to working.
-                        An import must also list the conversation in the
-                        workspace's ``ChatSessionStore.index`` or it is
-                        invisible; Ferry writes that index for Copilot's own
-                        conversations already and does not yet build an entry
-                        for a foreign one.
+                        A conversation is stored as a VS Code transcript
+                        document and Ferry can only write back one it read.
+                        The chat index is *not* the obstacle: Ferry writes it
+                        already and every field in it has an obvious default.
 ``-> antigravity``      unsupported. A conversation is restored *from its
                         original SQLite database*. Ferry can copy one; it
                         cannot generate one.
@@ -42,6 +41,13 @@ folders it had never seen, and ``copilot/paths.py`` implements it. The refusal
 was right and the explanation was invented, which no test can catch. PLAN.md
 records what was expected; PROGRESS records what was found; where they
 disagree, PROGRESS wins.
+
+**It happened twice.** The replacement blamed the chat index, which was true in
+the narrow sense that Ferry does not build one for a foreign conversation, and
+misleading about why: the index is the easy half. Measuring the real documents
+(#203) showed the hard half is the transcript itself, and that an index entry
+can be built from nothing but a title and a timestamp. A reason that points at
+the wrong obstacle sends the next person to fix the wrong thing.
 """
 
 from __future__ import annotations
@@ -97,9 +103,9 @@ _TARGETS: dict[str, Pair] = {
     ),
     "copilot": Pair(
         "unsupported",
-        "A conversation is invisible in Copilot Chat unless it is also listed "
-        "in the workspace chat index, and Ferry does not yet build that entry "
-        "for a conversation that arrived from another tool.",
+        "Copilot Chat stores a conversation as a VS Code transcript document, "
+        "and Ferry can only write back one it read. It cannot yet build one "
+        "for a conversation that came from another tool.",
     ),
     "antigravity": Pair(
         "unsupported",

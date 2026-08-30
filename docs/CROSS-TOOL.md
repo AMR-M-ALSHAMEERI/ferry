@@ -30,7 +30,7 @@ reported success" and "the conversation is really there" are different claims.
 |---|---|---|
 | **Claude Code** | **Yes** | Its transcript is plain JSONL and every envelope field can be rebuilt. All three other tools, every message, 100% of the words. |
 | OpenAI Codex | No | Codex rebuilds a conversation from the `session_meta` header in its own rollout file. A bundle from another tool does not carry one, and the header cannot be invented — Codex rejects the whole file if it is wrong. |
-| GitHub Copilot Chat | Not yet | A conversation is invisible in Copilot Chat unless it is also listed in the workspace chat index. Ferry writes that index for Copilot's own conversations already; it does not yet build an entry for one that arrived from another tool. |
+| GitHub Copilot Chat | Not yet | Copilot Chat stores a conversation as a VS Code transcript document, and Ferry can only write back one it read. It cannot yet build one for a conversation that came from another tool. The chat index is not the obstacle: Ferry already writes it, and every field in it has an obvious default. |
 | Antigravity | No | Antigravity conversations are restored from the original SQLite database they were exported with. Ferry can carry one across; it cannot build one for a conversation that never had it. |
 
 **Importing a tool's own conversations back into it is not a conversion** and is
