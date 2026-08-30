@@ -368,7 +368,7 @@ def test_menu_quits_cleanly_and_returns_zero() -> None:
 
 
 def test_menu_treats_cancel_as_quit() -> None:
-    """questionary returns None when the user presses Ctrl+C."""
+    """A prompt returns None when the user presses escape or Ctrl+C."""
     from ferry.cli.menu import run_menu
 
     ui = _ScriptedUI([None])
