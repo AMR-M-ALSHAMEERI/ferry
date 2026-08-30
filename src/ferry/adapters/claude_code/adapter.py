@@ -40,6 +40,8 @@ from ferry.adapters.base import (
 from ferry.adapters.census import census, jsonl_holds
 from ferry.adapters.claude_code import paths as cc_paths
 from ferry.adapters.claude_code.reader import MESSAGE_TYPES, read_session
+from ferry.adapters.claude_code.trust import advice as trust_advice
+from ferry.adapters.claude_code.trust import is_trusted
 from ferry.adapters.claude_code.writer import (
     SYNTHESIS_NOTES,
     Remap,
@@ -359,10 +361,14 @@ class ClaudeCodeAdapter(Adapter):
         yield ImportEvent(kind="started", message=f"{len(ids)} conversations in bundle")
 
         written = 0
+        # One warning per folder, not per conversation: importing twenty
+        # conversations into the same untrusted folder is one thing to fix, and
+        # saying it twenty times would bury the nineteen other notes.
+        checked: set[str] = set()
         for conversation_id in ids:
             if options.only and str(conversation_id) not in options.only:
                 continue
-            for event in self._import_one(bundle, conversation_id, options):
+            for event in self._import_one(bundle, conversation_id, options, checked):
                 if event.kind == "progress":
                     written += 1
                 yield event
@@ -370,7 +376,11 @@ class ClaudeCodeAdapter(Adapter):
         yield ImportEvent(kind="done", message=f"{written} of {len(ids)} {verb}")
 
     def _import_one(
-        self, bundle: Bundle, conversation_id: UUID, options: ImportOptions
+        self,
+        bundle: Bundle,
+        conversation_id: UUID,
+        options: ImportOptions,
+        checked: set[str] | None = None,
     ) -> Iterator[ImportEvent]:
         cid = str(conversation_id)
         try:
@@ -405,6 +415,15 @@ class ClaudeCodeAdapter(Adapter):
                 conversation_id=cid,
                 message=f"bundle records no working directory; filing under {target_cwd}",
             )
+
+        # Asked before the file is written, so the answer arrives with the
+        # import rather than days later when someone tries to open it.
+        if checked is not None and target_cwd not in checked:
+            checked.add(target_cwd)
+            if is_trusted(target_cwd, self._env) is False:
+                yield ImportEvent(
+                    kind="warning", conversation_id=cid, message=trust_advice(target_cwd)
+                )
 
         project = cc_paths.project_dir(target_cwd, self._env)
         destination = project / f"{conversation_id}.jsonl"

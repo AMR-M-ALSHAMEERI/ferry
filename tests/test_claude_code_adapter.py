@@ -925,3 +925,121 @@ def test_the_first_matching_remap_rule_wins() -> None:
 def test_a_prefix_only_matches_on_a_path_boundary() -> None:
     """``/home/bobby`` is not inside ``/home/bob``."""
     assert remap_prefix("/home/bobby", (("/home/bob", "/new"),)) == "/home/bobby"
+
+
+class TestTheFolderHasToBeTrustedBeforeItWillOpen:
+    """Writing the transcript is not the whole import.
+
+    Found by a person: the conversation appeared in ``claude --resume`` and
+    refused to open. Ferry now says so while the import is happening, when the
+    folder is still on screen, rather than leaving it to be discovered later.
+    """
+
+    @staticmethod
+    def _trust(tmp_path: Path, projects: dict[str, Any]) -> None:
+        root = tmp_path / "target"
+        root.mkdir(exist_ok=True)
+        (root / ".claude.json").write_text(json.dumps({"projects": projects}), encoding="utf-8")
+
+    @staticmethod
+    def _warnings(events: list[Any]) -> list[str]:
+        return [e.message for e in events if e.kind == "warning" and "trust" in e.message]
+
+    def test_an_untrusted_destination_is_reported_during_the_import(
+        self, exported: Path, target: ClaudeCodeAdapter, tmp_path: Path
+    ) -> None:
+        self._trust(tmp_path, {})
+
+        events = list(
+            target.import_(exported, ImportOptions(path_remap=((SAMPLE_CWD, "/home/bob/widget"),)))
+        )
+
+        said = self._warnings(events)
+        assert said, "an import nobody can open should not pass in silence"
+        assert "/home/bob/widget" in said[0]
+
+    def test_a_trusted_destination_says_nothing(
+        self, exported: Path, target: ClaudeCodeAdapter, tmp_path: Path
+    ) -> None:
+        self._trust(tmp_path, {"/home/bob/widget": {"hasTrustDialogAccepted": True}})
+
+        events = list(
+            target.import_(
+                exported,
+                ImportOptions(
+                    path_remap=((SAMPLE_CWD, "/home/bob/widget"), (EDGE_CWD, "/home/bob/widget"))
+                ),
+            )
+        )
+
+        assert self._warnings(events) == []
+
+    def test_nothing_is_said_when_there_is_no_trust_map_to_read(
+        self, exported: Path, target: ClaudeCodeAdapter
+    ) -> None:
+        """No settings file is "cannot tell", not "not trusted"."""
+        events = list(
+            target.import_(exported, ImportOptions(path_remap=((SAMPLE_CWD, "/home/bob/widget"),)))
+        )
+
+        assert self._warnings(events) == []
+
+    def test_the_folder_is_named_once_however_many_conversations_land_in_it(
+        self, exported: Path, target: ClaudeCodeAdapter, tmp_path: Path
+    ) -> None:
+        """One thing to fix is one thing to say.
+
+        Both fixture conversations are sent to the same folder here. Repeating
+        the notice per conversation would bury every other note in the run, and
+        it is still only one command to fix.
+        """
+        self._trust(tmp_path, {})
+
+        events = list(
+            target.import_(
+                exported,
+                ImportOptions(
+                    path_remap=((SAMPLE_CWD, "/home/bob/widget"), (EDGE_CWD, "/home/bob/widget"))
+                ),
+            )
+        )
+
+        assert len(self._warnings(events)) == 1
+
+    def test_two_destinations_are_both_named(
+        self, exported: Path, target: ClaudeCodeAdapter, tmp_path: Path
+    ) -> None:
+        """Deduplication is per folder, not per run.
+
+        The bundle's two conversations carry different working directories, so
+        left alone they land in two folders and both need trusting. Saying it
+        once would leave the second one to be found the hard way.
+        """
+        self._trust(tmp_path, {})
+
+        events = list(
+            target.import_(exported, ImportOptions(path_remap=((SAMPLE_CWD, "/home/bob/widget"),)))
+        )
+
+        said = self._warnings(events)
+        assert len(said) == 2
+        assert any("/home/bob/widget" in line for line in said)
+        assert any(EDGE_CWD in line for line in said)
+
+    def test_the_conversation_is_written_anyway(
+        self, exported: Path, target: ClaudeCodeAdapter, tmp_path: Path
+    ) -> None:
+        """A warning, not a refusal.
+
+        Trust is granted after the fact and takes one command, so withholding
+        the file would turn a thirty second fix into a re-import. Ferry writes
+        it and says what is still needed.
+        """
+        self._trust(tmp_path, {})
+
+        list(
+            target.import_(exported, ImportOptions(path_remap=((SAMPLE_CWD, "/home/bob/widget"),)))
+        )
+
+        written = tmp_path / "target" / "projects" / "-home-bob-widget" / f"{BASIC_ID}.jsonl"
+        assert written.is_file()
