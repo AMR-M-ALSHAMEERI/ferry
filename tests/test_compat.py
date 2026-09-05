@@ -92,7 +92,19 @@ class TestTheMatrix:
         assert pair(source, "copilot").support == "supported"
         assert refusal(source, "copilot") == ""
 
-    @pytest.mark.parametrize("target", ["codex", "antigravity"])
+    @pytest.mark.parametrize("source", ["claude-code", "copilot", "antigravity"])
+    def test_codex_accepts_a_conversation_with_a_header_built_for_it(self, source: str) -> None:
+        """Refused until 2026-09-06, on a measurement taken at Codex 0.98.
+
+        Re-measured at 0.147: eight derived fields are accepted where four and
+        fifteen are both refused, and a header Codex dislikes is rejected by
+        name rather than silently. The refusal was right for its version and
+        wrong for this one.
+        """
+        assert pair(source, "codex").support == "supported"
+        assert refusal(source, "codex") == ""
+
+    @pytest.mark.parametrize("target", ["antigravity"])
     def test_every_other_target_is_refused_with_a_reason(self, target: str) -> None:
         found = pair("claude-code", target)
         assert found.support == "unsupported"

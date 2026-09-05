@@ -25,8 +25,14 @@ from ferry.adapters.codex.paths import (
     thread_id_of,
 )
 from ferry.adapters.codex.reader import parent_thread, read_rollout
-from ferry.adapters.codex.writer import Rebuild, rollout_stamp, session_meta_for
+from ferry.adapters.codex.writer import (
+    SYNTHETIC_HEADER_FIELDS,
+    Rebuild,
+    rollout_stamp,
+    session_meta_for,
+)
 from ferry.core import Bundle
+from ferry.core import provenance as provenance_store
 from ferry.ucs import Conversation, Message, TextBlock, Workspace
 
 FIXTURES = Path(__file__).parent / "fixtures" / "codex"
@@ -492,10 +498,18 @@ def test_a_dry_run_writes_nothing(exported: Path, target: CodexAdapter, tmp_path
     assert sum(1 for e in events if e.kind == "progress") == 2
 
 
-def test_a_conversation_with_no_header_is_refused_rather_than_written_broken(
+def test_a_conversation_with_no_header_gets_one_built(
     target: CodexAdapter, tmp_path: Path, manifest
 ) -> None:
-    """An invalid header makes Codex drop the conversation with no error at all."""
+    """A native conversation whose header did not survive gets one built.
+
+    **This asserted a refusal until 2026-09-06.** The reason was sound when it
+    was written: an invented header was believed to make Codex discard the
+    conversation with no error, and a silent loss is worse than a refusal.
+    Measured again against Codex 0.147, both halves were wrong -- eight derived
+    fields are accepted, and a header Codex dislikes is refused *loudly*, by
+    name (`Model provider `` not found`). See `SYNTHETIC_HEADER_FIELDS`.
+    """
     conversation_id = UUID("019f4444-4444-7444-8444-444444444444")
     bundle = Bundle.create(tmp_path / "thin", manifest)
     bundle.add_conversation(
@@ -511,10 +525,12 @@ def test_a_conversation_with_no_header_is_refused_rather_than_written_broken(
 
     events = list(target.import_(tmp_path / "thin", ImportOptions()))
 
-    assert any(e.kind == "error" and "session_meta" in e.message for e in events)
-    assert (
-        not list((tmp_path / "target").rglob("*.jsonl")) if (tmp_path / "target").exists() else True
-    )
+    assert sum(1 for e in events if e.kind == "progress") == 1
+    written = list((tmp_path / "target").rglob("*.jsonl"))
+    assert written, "a conversation with no header was refused instead of built"
+    first = json.loads(written[0].read_text(encoding="utf-8").splitlines()[0])
+    assert first["type"] == "session_meta"
+    assert set(first["payload"]) == set(SYNTHETIC_HEADER_FIELDS)
 
 
 def test_a_conversation_from_another_tool_is_refused_by_default(
@@ -593,17 +609,14 @@ def test_a_large_session_is_flagged_before_it_is_read(
 def test_a_cross_tool_import_records_where_it_came_from(
     exported: Path, target: CodexAdapter, tmp_path: Path, manifest
 ) -> None:
-    """A foreign conversation has no Codex header, so it cannot be written.
+    """A foreign conversation is written, and says so.
 
-    PLAN.md §3.2 forbids passing a converted conversation off as native; here
-    the format itself refuses, which is a stronger guarantee than a flag.
-
-    Refused now as a **skip with a reason** rather than as an error. The
-    compatibility table answers first, so a person asking for an impossible
-    conversion is told why it cannot work instead of being handed the failure
-    of the attempt. The format-level refusal underneath is unchanged and is
-    covered by :func:`test_the_format_still_refuses_a_headerless_rollout` --
-    the table is the courtesy, not the guarantee.
+    This asserted a refusal until 2026-09-06. Now that Codex accepts a built
+    header, PLAN.md §3.2 is carried by the record instead of by the format's
+    inability: the conversation is written, and a provenance stamp says where
+    it came from and what the conversion cost. **The rule was never "refuse",
+    it was "never pass a conversion off as native"** -- refusing was simply the
+    only way to honour it while the header could not be built.
     """
     conversation_id = UUID("019f6666-6666-7666-8666-666666666666")
     bundle = Bundle.create(tmp_path / "foreign", manifest)
@@ -620,20 +633,25 @@ def test_a_cross_tool_import_records_where_it_came_from(
 
     events = list(target.import_(tmp_path / "foreign", ImportOptions(allow_cross_tool=True)))
 
-    assert sum(1 for e in events if e.kind == "progress") == 0
-    assert any(e.kind == "skipped" and "session_meta" in e.message for e in events)
+    assert sum(1 for e in events if e.kind == "progress") == 1
+    recorded = provenance_store.recall("codex", conversation_id)
+    assert recorded is not None, "a conversion left no record of itself"
+    assert recorded.original_tool == "claude-code"
+    assert recorded.imported_into == "codex"
+    assert recorded.lossy is True
 
 
-def test_the_format_still_refuses_a_headerless_rollout(
+def test_the_writer_builds_the_measured_header_and_no_more(
     exported: Path, target: CodexAdapter, tmp_path: Path, manifest
 ) -> None:
-    """The guarantee under the courtesy.
+    """The writer builds a header, and builds exactly the measured one.
 
-    The compatibility table refuses a foreign conversation before the writer
-    ever sees it, which is the right thing for a person and the wrong thing to
-    rely on: a table is one edit away from being wrong. This calls the writer
-    directly and asserts it produces nothing for a conversation with no Codex
-    header, so the refusal survives the table being loosened by mistake.
+    This asserted the opposite -- that the writer produces nothing without a
+    header -- as a guarantee under the compatibility table. The measurement
+    that justified it has expired, so what is guarded now is the shape rather
+    than the refusal: **eight fields, no more**. Fifteen were refused by Codex
+    where eight were accepted, so a field added here in good faith is a way to
+    break every conversion at once.
     """
     conversation = Conversation(
         id=UUID("019f7777-7777-7777-8777-777777777777"),
@@ -645,7 +663,16 @@ def test_the_format_still_refuses_a_headerless_rollout(
     )
 
     rebuild = Rebuild(cwd="/home/bob/other", thread_id=conversation.id)
-    assert session_meta_for(conversation, rebuild) is None
+    header = session_meta_for(conversation, rebuild)
+
+    assert header is not None
+    assert set(header) == set(SYNTHETIC_HEADER_FIELDS)
+    assert header["id"] == header["session_id"] == str(conversation.id)
+    assert header["cwd"] == "/home/bob/other"
+    # Never dressed as a Codex that wrote it. The field is free text, and
+    # naming Ferry keeps the standing rule that a conversion is not passed off
+    # as native.
+    assert header["cli_version"].startswith("ferry-")
 
 
 def test_detect_survives_an_unreadable_directory(tmp_path: Path, monkeypatch) -> None:
@@ -724,7 +751,14 @@ def test_the_filename_stamp_has_no_colons() -> None:
     assert rollout_stamp(datetime(2026, 8, 1, 9, 30, 15, tzinfo=UTC)) == "2026-08-01T09-30-15"
 
 
-def test_a_missing_header_yields_none_rather_than_a_guess() -> None:
+def test_a_missing_header_is_built_from_the_conversation_and_the_machine() -> None:
+    """Built, not guessed, and the distinction is the whole test.
+
+    Nothing here is copied from another session. A header borrowed wholesale
+    would carry someone else's git state, instructions and context window, and
+    describe work that never happened in this conversation -- which is a
+    different and worse failure than having no header at all.
+    """
     conversation = Conversation(
         id=BASIC_ID,
         source_tool="codex",
@@ -732,7 +766,15 @@ def test_a_missing_header_yields_none_rather_than_a_guess() -> None:
         updated_at=datetime(2026, 8, 1, tzinfo=UTC),
         workspace=Workspace(),
     )
-    assert session_meta_for(conversation, Rebuild(cwd="/x", thread_id=BASIC_ID)) is None
+
+    header = session_meta_for(conversation, Rebuild(cwd="/x", thread_id=BASIC_ID))
+
+    assert header is not None
+    assert set(header) == set(SYNTHETIC_HEADER_FIELDS)
+    assert header["cwd"] == "/x"
+    assert header["timestamp"].startswith("2026-08-01")
+    # Codex named this one itself when it was missing, which is how it got here.
+    assert header["model_provider"] == "openai"
 
 
 # --------------------------------------------------------------------------

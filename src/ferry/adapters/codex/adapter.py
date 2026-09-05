@@ -40,6 +40,7 @@ from ferry.adapters.conflict import reidentify, rename_note
 from ferry.adapters.dedup import compare_duplicate
 from ferry.adapters.formatcheck import FormatCheck
 from ferry.core import Bundle, Manifest, SourceMachine, back_up
+from ferry.core import provenance as provenance_store
 from ferry.core.compat import refusal
 from ferry.core.manifest import OSName
 from ferry.ucs import Attachment, Conversation, Provenance, ToolName
@@ -323,6 +324,11 @@ class CodexAdapter(Adapter):
         for pending in found.attachments:
             bundle.add_attachment_bytes(conversation_id, pending.data, pending.record)
 
+        # Where this conversation came from, if Ferry put it here. A rebuilt
+        # rollout looks native by construction, which is exactly why the record
+        # is kept outside it.
+        found.conversation.provenance = provenance_store.recall(TOOL, conversation_id)
+
         pasted = self._pasted_files(bundle, conversation_id, found)
         bundle.add_conversation(found.conversation)
 
@@ -550,6 +556,14 @@ class CodexAdapter(Adapter):
         except OSError as exc:
             yield ImportEvent(kind="error", conversation_id=cid, message=f"write failed: {exc}")
             return
+
+        if conversation.provenance is not None:
+            provenance_store.record(
+                TOOL,
+                conversation.id,
+                conversation.provenance,
+                written=provenance_store.fingerprint(destination),
+            )
 
         restored = self._restore_pasted(bundle, conversation)
         detail = f"{len(conversation.messages)} messages to {destination.name}"

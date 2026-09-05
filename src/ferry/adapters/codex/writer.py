@@ -25,15 +25,18 @@ import base64
 import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Final
 from uuid import UUID
 
+from ferry import __version__
 from ferry.ucs import Attachment, Conversation, Message
 
 __all__ = [
     "REBUILD_NOTES",
+    "SYNTHETIC_HEADER_FIELDS",
     "Rebuild",
     "rollout_lines",
+    "synthesize_session_meta",
     "rollout_stamp",
     "session_meta_for",
 ]
@@ -65,18 +68,72 @@ def _iso(moment: datetime) -> str:
     return moment.astimezone(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-def session_meta_for(conversation: Conversation, rebuild: Rebuild) -> dict[str, Any] | None:
-    """The header record, taken from the bundle and re-pointed at this machine.
+SYNTHETIC_HEADER_FIELDS: Final = (
+    "id",
+    "session_id",
+    "timestamp",
+    "cwd",
+    "cli_version",
+    "originator",
+    "source",
+    "model_provider",
+)
+"""The header Codex accepts for a conversation that never had one.
 
-    Returns ``None`` when the bundle carries no header — a conversation that
-    came from another tool, or from a Ferry old enough not to have kept one.
-    The caller must treat that as "cannot write a valid rollout" rather than
-    inventing a header, because an invalid one is rejected silently.
+**Measured 2026-09-06 against Codex 0.147.** Four fields (identity, time and
+cwd) were refused outright with *No saved session found*. These eight loaded.
+Fifteen -- these plus `context_window`, `history_mode`, `thread_source`,
+`dynamic_tools` and nulls for `base_instructions` and `git` -- were refused
+again, so **more is not safer here**: every field beyond the set that works is
+another thing to be wrong about.
+
+`model_provider` is in the list because Codex asked for it by name, failing with
+*Model provider `` not found*. Worth recording on its own: the refusal this
+adapter carried said a wrong header is discarded **silently**, which was true at
+0.98 and is not true here. Rejection at this version is loud and names the
+field.
+"""
+
+
+def synthesize_session_meta(conversation: Conversation, rebuild: Rebuild) -> dict[str, Any]:
+    """A header for a conversation that arrived from another tool.
+
+    Every value is derived from the conversation or the machine. Nothing is
+    copied from someone else's session: a header borrowed wholesale would carry
+    another conversation's git state and instructions, and describe work that
+    never happened here.
+    """
+    return {
+        "id": str(rebuild.thread_id),
+        "session_id": str(rebuild.thread_id),
+        "timestamp": _iso(conversation.created_at),
+        "cwd": rebuild.cwd,
+        # The version doing the writing, not a version invented to look native.
+        "cli_version": f"ferry-{__version__}",
+        "originator": "codex_cli_rs",
+        "source": "cli",
+        "model_provider": "openai",
+    }
+
+
+def session_meta_for(conversation: Conversation, rebuild: Rebuild) -> dict[str, Any] | None:
+    """The header record: the conversation's own where there is one, else built.
+
+    A Codex conversation carries its header in ``source_raw`` and it is replayed
+    with only the machine-specific fields re-pointed -- nothing is re-derived, so
+    nothing is lost in re-deriving it.
+
+    A conversation from **another tool** has no header, and until 2026-09-06
+    that meant the import was refused: an invented header was believed to be
+    discarded silently, and a silent loss is worse than a refusal. Measured
+    again at Codex 0.147, both halves of that turned out to be wrong -- a header
+    of eight derived fields is accepted, and a bad one is refused loudly by
+    name. See :data:`SYNTHETIC_HEADER_FIELDS`.
     """
     raw = conversation.source_raw or {}
     header = raw.get("session_meta")
     if not isinstance(header, dict):
-        return None
+        return synthesize_session_meta(conversation, rebuild)
     payload = dict(header)
     previous = payload.get("id")
     payload["id"] = str(rebuild.thread_id)
@@ -121,7 +178,38 @@ def _content_blocks(message: Message, rebuild: Rebuild) -> list[dict[str, Any]]:
     return blocks
 
 
-def _records_for(message: Message, rebuild: Rebuild, ordinal: int) -> list[dict[str, Any]]:
+def _ui_event(message: Message, stamp: str | None) -> dict[str, Any] | None:
+    """The record the Codex interface draws a turn from.
+
+    **Measured 2026-09-06 against Codex 0.147, after a session rebuilt without
+    these opened completely empty.** A rollout holds two parallel accounts of
+    the same conversation: ``response_item`` is what is sent to the model, and
+    ``event_msg`` is what the screen shows. Ferry wrote only the first, so every
+    word was present in a file whose transcript rendered as nothing -- the exact
+    false success this milestone exists to prevent, and invisible to any check
+    that reads the file back rather than opening it.
+
+    ``{type, message}`` and nothing else, because that is the shape that
+    rendered. A variant carrying the optional keys real records also have --
+    ``images``, ``text_elements``, ``phase``, ``memory_citation`` -- as nulls
+    rendered **one** line of two, so one of those values is worse than its
+    absence. The smallest proven shape is the one written.
+    """
+    text = " ".join(
+        block.text for block in message.content if block.type == "text" and block.text.strip()
+    )
+    if not text:
+        return None
+    kind = "user_message" if message.role == "user" else "agent_message"
+    record: dict[str, Any] = {"type": "event_msg", "payload": {"type": kind, "message": text}}
+    if stamp:
+        record["timestamp"] = stamp
+    return record
+
+
+def _records_for(
+    message: Message, rebuild: Rebuild, ordinal: int, *, shown: bool = True
+) -> list[dict[str, Any]]:
     """One UCS message as the Codex records it came from."""
     stamp = _iso(message.timestamp) if message.timestamp else None
     out: list[dict[str, Any]] = []
@@ -143,6 +231,19 @@ def _records_for(message: Message, rebuild: Rebuild, ordinal: int) -> list[dict[
                 "content": content,
             },
         )
+        # And the same turn again, as the interface reads it. Both accounts or
+        # neither: `response_item` alone is a conversation the model can see and
+        # the person cannot.
+        #
+        # `shown=False` for one case only: the first user turn of a conversation
+        # that carries its own typed marker. Codex writes `user_message` for
+        # what the person typed and not for the screens of context it injects as
+        # user turns, and `rollout_lines` replays that marker. Emitting a second
+        # one here would title the conversation after the injected text -- the
+        # bug the marker exists to prevent.
+        event = _ui_event(message, stamp) if shown else None
+        if event is not None:
+            out.append(event)
 
     for block in message.content:
         if block.type == "thinking":
@@ -198,8 +299,30 @@ def rollout_lines(conversation: Conversation, rebuild: Rebuild) -> bytes | None:
     typed = (conversation.source_raw or {}).get("first_typed")
     marker_pending = isinstance(typed, str) and bool(typed)
 
+    # Whether Ferry may say "the person typed this" about a user turn at all.
+    #
+    # Codex writes `user_message` for what someone typed and not for the screens
+    # of context it injects as user turns, so the event is a *claim*, not a
+    # rendering detail. A rollout that carried no such event made no such claim,
+    # and Ferry adding one would assert something about the original it cannot
+    # know -- and would title the conversation after injected text.
+    #
+    # A conversation from another tool is the opposite case: there is no
+    # original claim to contradict, and its user messages are the person's.
+    own_header = isinstance((conversation.source_raw or {}).get("session_meta"), dict)
+    may_show_user = marker_pending or not own_header
+
     for ordinal, message in enumerate(conversation.messages):
-        records.extend(_records_for(message, rebuild, ordinal))
+        records.extend(
+            _records_for(
+                message,
+                rebuild,
+                ordinal,
+                shown=(may_show_user and not (marker_pending and message.role == "user"))
+                if message.role == "user"
+                else True,
+            )
+        )
         if marker_pending and message.role == "user":
             records.append(
                 {

@@ -333,10 +333,10 @@ def check_a_foreign_file_is_not_installed(state: State) -> Result:
 
 
 #: Targets Ferry still refuses. Claude Code was always supported; Copilot
-#: joined it at M7b.2 Phase 2, once VS Code was measured accepting a built
-#: document (#203, #204). Kept as a list rather than hard-coded per check, so
-#: the next target to be finished is moved in one place instead of two.
-REFUSED = ("codex", "antigravity")
+#: joined it at M7b.2 Phase 2 and Codex at Phase 3, each once the real tool was
+#: measured accepting what Ferry builds. Kept as a list rather than hard-coded
+#: per check, so the next target to be finished is moved in one place.
+REFUSED = ("antigravity",)
 
 
 def check_every_refusal_says_why(state: State) -> Result:

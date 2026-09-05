@@ -15,9 +15,10 @@ really there* are different claims and only the second is worth shipping.
 ======================  ==================================================
 ``-> claude-code``      **supported.** All three other tools, every
                         message, 100% of the words read back.
-``-> codex``            unsupported. Its importer needs a ``session_meta``
-                        header out of ``source_raw``; a foreign bundle
-                        has not got one.
+``-> codex``            **supported.** The ``session_meta`` header is built
+                        from eight derived fields, the largest set Codex was
+                        measured to accept, and the transcript carries both
+                        the model's account of each turn and the interface's.
 ``-> copilot``          **supported.** A document is built rather than
                         replayed, to the smallest shape VS Code was measured
                         to accept (#203, #204). Tool calls and their results
@@ -31,6 +32,15 @@ really there* are different claims and only the second is worth shipping.
 Antigravity-as-target to end the milestone this way, and the honest ceiling for
 every pair that does work is a *readable transcript* in the target tool -- not a
 session the target's AI can meaningfully continue.
+
+**A measurement has a version attached to it.** Codex was refused because an
+invented header was measured, at Codex 0.98, to make it discard the whole
+conversation with no error. Re-measured at 0.147 on 2026-09-06, every part of
+that had changed: eight derived fields are accepted, a bad header is refused
+*loudly* and by name, and a rollout Ferry rebuilt opened **completely empty**
+because the interface reads ``event_msg`` records the writer had never emitted.
+Three separate findings from that era expired in one afternoon. Nothing here is
+wrong for having been true; what was missing was the version it was true of.
 
 **A reason here must be a measured one.** The first version of this table said
 Copilot was refused because the workspace-key derivation was unsolved. That was
@@ -95,11 +105,7 @@ class Pair:
 
 _TARGETS: dict[str, Pair] = {
     "claude-code": Pair("supported"),
-    "codex": Pair(
-        "unsupported",
-        "Codex rebuilds a conversation from the session_meta header in its own "
-        "rollout file, and a bundle from another tool does not carry one.",
-    ),
+    "codex": Pair("supported"),
     "copilot": Pair("supported"),
     "antigravity": Pair(
         "unsupported",
