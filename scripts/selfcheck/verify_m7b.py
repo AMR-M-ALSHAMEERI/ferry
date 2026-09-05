@@ -399,6 +399,13 @@ def check_copilot_gets_a_document_it_will_open(state: State) -> Result:
             stray = set(request) & invented
             if stray:
                 return Result(False, f"{source} -> copilot invented {sorted(stray)}")
+            # The question, where VS Code actually draws it. Written after an
+            # import that passed every check above and still showed a column of
+            # answers with no questions: `message.text` alone titles the chat
+            # but renders nothing.
+            message = request.get("message") or {}
+            if message.get("text") and not message.get("parts"):
+                return Result(False, f"{source} -> copilot built a question VS Code will not draw")
 
         listed = index_lists(cp_paths.global_storage(store) / "state.vscdb")
         if str(item.id) not in listed:
@@ -409,7 +416,7 @@ def check_copilot_gets_a_document_it_will_open(state: State) -> Result:
 
     if not built:
         return Result(None, "only Copilot has conversations on this machine")
-    return Result(True, f"{built} conversations built, listed, and nothing invented")
+    return Result(True, f"{built} conversations built, listed, readable, nothing invented")
 
 
 CHECKS = [

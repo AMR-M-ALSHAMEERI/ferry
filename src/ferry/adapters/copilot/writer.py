@@ -296,6 +296,35 @@ def _rendered(block: Any, source_tool: str) -> str:
     return ""
 
 
+def _message(text: str) -> dict[str, Any]:
+    """One question, in the shape VS Code draws a question bubble from.
+
+    **`text` alone is not enough, and it fails silently in the worst way.**
+    Ferry first wrote text with an empty ``parts``, which VS Code accepts and
+    parses -- it read ``text`` to title the conversation -- but the bubble it
+    renders is built from ``parts``, so every question came out blank while
+    every answer was there. Measured afterwards on the real store: of eleven
+    requests VS Code wrote itself, eleven carry exactly one part; of seventeen
+    Ferry wrote, all seventeen carried none.
+
+    The part is the same text twice over, once as characters and once as editor
+    coordinates, both derived from the text rather than invented.
+    """
+    lines = text.splitlines() or [""]
+    part = {
+        "kind": "text",
+        "text": text,
+        "range": {"start": 0, "endExclusive": len(text)},
+        "editorRange": {
+            "startLineNumber": 1,
+            "startColumn": 1,
+            "endLineNumber": len(lines),
+            "endColumn": len(lines[-1]) + 1,
+        },
+    }
+    return {"text": text, "parts": [part] if text else []}
+
+
 def _ids(conversation_id: UUID, ordinal: int) -> dict[str, str]:
     """Stable request and response ids for one exchange.
 
@@ -335,7 +364,7 @@ def _exchanges(conversation: Conversation) -> list[dict[str, Any]]:
             requests.append(
                 {
                     **_ids(conversation.id, len(requests)),
-                    "message": {"text": "\n\n".join(p for p in pieces if p.strip()), "parts": []},
+                    "message": _message("\n\n".join(p for p in pieces if p.strip())),
                     "response": [],
                 }
             )
@@ -344,7 +373,7 @@ def _exchanges(conversation: Conversation) -> list[dict[str, Any]]:
                 requests.append(
                     {
                         **_ids(conversation.id, 0),
-                        "message": {"text": "", "parts": []},
+                        "message": _message(""),
                         "response": [],
                     }
                 )

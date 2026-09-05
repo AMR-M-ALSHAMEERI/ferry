@@ -511,6 +511,38 @@ class TestBuildingADocumentForAForeignConversation:
         assert set(first) >= {"requestId", "responseId", "message", "response"}
         assert "parts" in first["message"]
 
+    def test_the_question_is_carried_where_vs_code_draws_it(  # type: ignore[no-untyped-def]
+        self, tmp_path: Path, target, manifest, conversation
+    ) -> None:
+        """The defect this test was written for, and the hole it fell through.
+
+        Ferry wrote the question into `message.text` and left `parts` empty.
+        VS Code accepted the document and titled the chat from `text`, so every
+        check passed -- while on screen every question bubble was blank and only
+        the answers showed. The old assertion here was `"parts" in message`,
+        which an empty list satisfies. **Checking that a field exists is not
+        checking that it carries anything**, and the difference was the whole
+        conversation from the reader's side.
+        """
+        document, _ = self._written(tmp_path, target, manifest, conversation)
+
+        asked = [r for r in document["requests"] if r["message"]["text"]]
+        assert asked, "the fixture must contain at least one question"
+        for request in asked:
+            message = request["message"]
+            parts = message["parts"]
+            assert len(parts) == 1, "VS Code writes exactly one text part per question"
+            part = parts[0]
+            assert part["kind"] == "text"
+            assert part["text"] == message["text"], "the part is the question, not a summary"
+            assert part["range"] == {"start": 0, "endExclusive": len(message["text"])}
+            assert set(part["editorRange"]) == {
+                "startLineNumber",
+                "startColumn",
+                "endLineNumber",
+                "endColumn",
+            }
+
     def test_no_telemetry_is_invented(  # type: ignore[no-untyped-def]
         self, tmp_path: Path, target, manifest, conversation
     ) -> None:
