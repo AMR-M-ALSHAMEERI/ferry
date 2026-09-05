@@ -274,7 +274,9 @@ class TestAskingBeforeWriting:
 
 
 class TestWhatWasWrittenSaysWhereItCameFrom:
-    def test_provenance_records_the_notes_the_person_was_shown(self, tmp_path: Path) -> None:
+    def test_provenance_records_the_notes_the_person_was_shown(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """PLAN §3.2: never present a converted conversation as native.
 
         The notes recorded are the assessment's *and* the rebuild's. A
@@ -283,6 +285,7 @@ class TestWhatWasWrittenSaysWhereItCameFrom:
         actually read.
         """
         from ferry.adapters.claude_code.adapter import TOOL
+        from ferry.core import provenance as provenance_store
         from ferry.core.compat import assess as assess_loss
 
         item = conversation("codex", signed=2, calls=3)
@@ -291,6 +294,25 @@ class TestWhatWasWrittenSaysWhereItCameFrom:
         assert loss.lossy
         assert loss.degraded == 8
         assert len(loss.notes) >= 4
+
+        # Everything above is about `assess`. **This test used to stop there**,
+        # under a name promising it checked provenance, while the provenance
+        # block was built on import and then thrown away -- which is how a
+        # broken promise survived a green suite. The record is now read back
+        # from where it durably lives and compared against the notes the
+        # screen would have shown.
+        root = tmp_path / "bundle"
+        made = Bundle.create(root, manifest())
+        made.add_conversation(item)
+        monkeypatch.setenv(provenance_store.ROOT_ENV, str(tmp_path / "ferry"))
+        env = {"CLAUDE_CONFIG_DIR": str(tmp_path / "store")}
+        list(ClaudeCodeAdapter(env).import_(root, ImportOptions(allow_cross_tool=True)))
+
+        recorded = provenance_store.recall(TOOL, item.id)
+        assert recorded is not None, "the conversion left no record of itself"
+        assert recorded.original_tool == "codex"
+        for note in loss.notes:
+            assert note in recorded.conversion_notes, f"the record omits: {note}"
 
 
 class TestAConvertedCallIsNotWrittenAsACall:

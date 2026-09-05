@@ -50,6 +50,7 @@ from ferry.adapters.copilot.writer import (
 from ferry.adapters.dedup import compare_duplicate
 from ferry.adapters.formatcheck import FormatCheck
 from ferry.core import Bundle, Manifest, SourceMachine, back_up
+from ferry.core import provenance as provenance_store
 from ferry.core.compat import assess, refusal
 from ferry.core.continuable import prepare
 from ferry.core.manifest import OSName
@@ -279,6 +280,11 @@ class CopilotAdapter(Adapter):
             )
             return
 
+        # Where this conversation came from, if Ferry put it here. Copilot's
+        # document names the source tool in `responderUsername`, but that is a
+        # display field, not a record of the conversion or of what it cost.
+        found.conversation.provenance = provenance_store.recall(TOOL, conversation_id)
+
         for image in found.images:
             bundle.add_attachment_bytes(conversation_id, image.data, image.record)
         bundle.add_conversation(found.conversation)
@@ -488,6 +494,11 @@ class CopilotAdapter(Adapter):
         temporary = transcript.with_suffix(".jsonl.ferry-tmp")
         temporary.write_text(line + "\n", encoding="utf-8", newline="\n")
         temporary.replace(transcript)
+
+        if conversation.provenance is not None:
+            # After the write, not before: a stamp for a conversion that failed
+            # would describe a conversation that is not there.
+            provenance_store.record(TOOL, conversation.id, conversation.provenance)
 
         yield ImportEvent(
             kind="progress",

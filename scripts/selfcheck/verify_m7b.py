@@ -26,6 +26,7 @@ Two checks carry the weight:
 from __future__ import annotations
 
 import json
+import os
 import platform
 import shutil
 import sys
@@ -44,6 +45,7 @@ from ferry.adapters.copilot import CopilotAdapter
 from ferry.adapters.copilot import paths as cp_paths
 from ferry.adapters.copilot.writer import index_lists
 from ferry.core import Bundle, Manifest, SourceMachine, sha256_file
+from ferry.core import provenance as provenance_store
 from ferry.core.compat import CEILING, assess, pair
 from ferry.ucs import Conversation
 
@@ -94,6 +96,12 @@ def _build(tool: str, env: dict[str, str] | None) -> Adapter:
 
 
 def _scratch(tool: str, where: Path) -> dict[str, str]:
+    """A redirected environment for one target.
+
+    Ferry's *own* directory is redirected once for the whole process instead;
+    see the top of ``main``. An adapter's environment says where its tool keeps
+    things and nothing about where Ferry's files belong.
+    """
     where.mkdir(parents=True, exist_ok=True)
     return {name: str(where) for name in REDIRECT[tool]}
 
@@ -282,10 +290,20 @@ def check_a_pair_really_migrates(state: State) -> Result:
                 f"{source} -> claude-code added {added} blocks of text where "
                 f"{expected} calls and results were flattened",
             )
+        # A conversion that comes back claiming to be native is the failure
+        # A7b.8 was written for: the transcript outlives the screen that
+        # explained it.
+        if came.provenance is None:
+            return Result(False, f"{source} -> claude-code came back with no record of the move")
+        if came.provenance.original_tool != source:
+            return Result(
+                False,
+                f"{source} -> claude-code came back claiming {came.provenance.original_tool}",
+            )
         worked.append(source)
     if not worked:
         return Result(None, "only one tool has conversations on this machine")
-    return Result(True, f"{len(worked)} pairs round-tripped whole: {', '.join(worked)}")
+    return Result(True, f"{len(worked)} pairs round-tripped whole and marked: {', '.join(worked)}")
 
 
 def check_a_foreign_file_is_not_installed(state: State) -> Result:
@@ -483,7 +501,11 @@ CHECKS = [
 
 
 def main() -> int:
+    # Ferry's own provenance store, pointed at the workspace before anything
+    # runs. Without this a scratch run writes records into the real ~/.ferry:
+    # the store reads the process environment, not the per-adapter one.
     state = State()
+    os.environ[provenance_store.ROOT_ENV] = str(state.workspace / "provenance")
     print("Ferry self-check - M7b (cross-tool migration)")
     passed = failed = skipped = 0
     try:

@@ -56,6 +56,7 @@ from ferry.adapters.conflict import reidentify, rename_note
 from ferry.adapters.dedup import compare_duplicate
 from ferry.adapters.formatcheck import FormatCheck
 from ferry.core import Bundle, Manifest, SourceMachine, back_up
+from ferry.core import provenance as provenance_store
 from ferry.core.compat import assess, refusal
 from ferry.core.continuable import prepare
 from ferry.core.manifest import OSName
@@ -309,6 +310,11 @@ class ClaudeCodeAdapter(Adapter):
                 message=found.notes[0] if found.notes else "no messages",
             )
             return
+
+        # Where this conversation came from, if Ferry put it here. The reader
+        # cannot know: the transcript looks native, which is the whole reason
+        # the record is kept separately at all.
+        found.conversation.provenance = provenance_store.recall(TOOL, conversation_id)
 
         # Attachments and the original bytes land before the UCS file does, so
         # a crash mid-export leaves a conversation missing rather than a
@@ -591,6 +597,13 @@ class ClaudeCodeAdapter(Adapter):
         except OSError as exc:
             yield ImportEvent(kind="error", conversation_id=cid, message=f"write failed: {exc}")
             return
+
+        if conversation.provenance is not None:
+            # Written only now, after the transcript is really on disk. A stamp
+            # recorded before the write would outlive a write that failed, and
+            # would then describe a conversion of a conversation that is not
+            # there.
+            provenance_store.record(TOOL, conversation_id, conversation.provenance)
 
         detail = f"{len(conversation.messages)} messages to {project.name}"
         if restored:

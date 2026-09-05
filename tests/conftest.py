@@ -6,6 +6,7 @@ from uuid import UUID
 import pytest
 
 from ferry.core import Manifest, SourceMachine
+from ferry.core import provenance as provenance_store
 from ferry.ucs import (
     Attachment,
     Conversation,
@@ -28,6 +29,10 @@ def _isolate_user_config(tmp_path_factory, monkeypatch):
     """
     fake = tmp_path_factory.mktemp("ferry-config") / "config.json"
     monkeypatch.setattr("ferry.config.CONFIG_PATH", fake)
+    # Ferry's provenance store lives under the same `~/.ferry`, and an import
+    # writes into it. Without this the suite left records in the developer's
+    # own home -- thirteen of them, the first time the feature ran under it.
+    monkeypatch.setenv(provenance_store.ROOT_ENV, str(fake.parent / "provenance"))
     return fake
 
 

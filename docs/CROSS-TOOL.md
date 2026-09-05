@@ -85,14 +85,27 @@ conversation produces no file at all.
 
 ## How a converted conversation is marked
 
-Every cross-tool write records a `provenance` block in the conversation's UCS
-record: where it came from, what it was written into, which version of Ferry
-did it, and the full list of what was lost. The notes recorded are the same
-notes you were shown before agreeing.
+Every cross-tool write records a `provenance` block: where the conversation
+came from, what it was written into, which version of Ferry did it, and the
+full list of what was lost. The notes recorded are the same notes you were
+shown before agreeing.
 
 This matters more than it sounds. A converted conversation that looked native
 would, months later, be indistinguishable from one that really happened in that
 tool — including its tool calls, which never ran there.
+
+**The record is kept by Ferry, in `~/.ferry/provenance/`, not inside the other
+tool's file.** That is a deliberate limit rather than a shortcut. The transcript
+belongs to the tool you imported into, and that tool rewrites it whenever you
+resume the conversation; a field of Ferry's own would very likely be dropped by
+the first such rewrite, leaving the conversation unmarked with nothing to say
+it had ever been marked. A record that vanishes the first time you use the
+conversation is worse than one that never claimed to exist.
+
+What follows from that: exporting through Ferry carries the origin with it,
+because the export reads the record back. Copying a transcript out of the tool
+by hand does not — the file itself says nothing, and Ferry cannot make it say
+anything it will keep.
 
 ## If you are restoring, not converting
 

@@ -72,10 +72,19 @@ assistant *said*. Ferry does not edit that.
 directory into a filename, that encoding is usually lossy. Compute the new name
 from the new working directory; never try to decode the old one.
 
-**Populate `provenance` on cross-tool writes.** If `source_tool` differs from
-the tool being written into, `provenance` is mandatory and `conversion_notes`
-must list every lossy conversion. Silently passing a converted conversation off
-as native is a correctness bug.
+**Populate `provenance` on cross-tool writes, and persist it.** If
+`source_tool` differs from the tool being written into, `provenance` is
+mandatory and `conversion_notes` must list every lossy conversion. Silently
+passing a converted conversation off as native is a correctness bug.
+
+Setting the field is only half of it, and the half that was done for months
+while the other half was missing: call `ferry.core.provenance.record()` after
+the write succeeds, and `recall()` on export. An adapter that sets the field
+and stops has written to an object that is about to be discarded, and every
+document promising provenance is then untrue.
+
+Pass no `env` to either. An adapter's environment says where *its tool* keeps
+things; Ferry's own directory is resolved from the process environment.
 
 **Beware a format that records every turn twice.** Codex writes a canonical
 record and an interface event for the same turn; reading both doubles the
