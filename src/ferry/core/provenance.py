@@ -33,13 +33,27 @@ Ferry does carry it, because the export reads it back.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 from ferry.ucs import Provenance
 
-__all__ = ["ROOT_ENV", "forget", "recall", "record", "root"]
+__all__ = [
+    "ROOT_ENV",
+    "Written",
+    "fingerprint",
+    "forget",
+    "recall",
+    "record",
+    "root",
+    "untouched_since_import",
+    "written_file",
+]
 
 ROOT_ENV = "FERRY_PROVENANCE_DIR"
 """Redirects the store, so a test never writes into the developer's own.
@@ -77,11 +91,48 @@ def _path(
     return root(env) / tool / f"{conversation_id}.json"
 
 
+@dataclass(frozen=True)
+class Written:
+    """The file Ferry wrote, and what it looked like when Ferry left it.
+
+    **Kept for a feature that does not exist yet, and that is the point.** A
+    later "remove the conversations Ferry put here" needs to answer a question
+    the provenance stamp alone cannot: *has the person worked in this since?* A
+    migrated conversation that was then continued holds real work, and deleting
+    it because Ferry once created it would destroy exactly what the tool is for.
+
+    The fingerprint answers it. Unchanged since the import means Ferry's own
+    output and nothing else; changed or missing means the tool or the person has
+    been there, and a delete has to say so instead of proceeding.
+
+    It is recorded now rather than when that feature is built, because it cannot
+    be recovered afterwards: every conversation migrated before the field
+    existed would be one a delete could never safely offer.
+    """
+
+    path: str
+    sha256: str
+    bytes: int
+
+    def as_json(self) -> dict[str, str | int]:
+        return {"path": self.path, "sha256": self.sha256, "bytes": self.bytes}
+
+
+def fingerprint(path: Path) -> Written | None:
+    """What ``path`` holds right now, or ``None`` if it cannot be read."""
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return None
+    return Written(path=str(path), sha256=hashlib.sha256(data).hexdigest(), bytes=len(data))
+
+
 def record(
     tool: str,
     conversation_id: UUID,
     provenance: Provenance,
     env: os._Environ[str] | dict[str, str] | None = None,
+    written: Written | None = None,
 ) -> Path:
     """Write the stamp for one converted conversation.
 
@@ -89,11 +140,21 @@ def record(
     puts on disk: a half-written provenance record read back later would say
     something false about where a conversation came from, and being confidently
     wrong about that is worse than having no record at all.
+
+    The file holds more than the UCS ``Provenance`` block, deliberately. This is
+    Ferry's own record, not part of a bundle, so ``written`` can be kept here
+    without touching the conversation schema -- which would mean a UCS version
+    bump and every bundle already exported becoming unreadable, for a field that
+    describes an operation on this machine rather than anything about the
+    conversation.
     """
     destination = _path(tool, conversation_id, env)
     destination.parent.mkdir(parents=True, exist_ok=True)
+    document: dict[str, Any] = {"provenance": provenance.model_dump(mode="json")}
+    if written is not None:
+        document["written"] = written.as_json()
     temporary = destination.with_suffix(".json.ferry-tmp")
-    temporary.write_text(provenance.model_dump_json(indent=2), encoding="utf-8")
+    temporary.write_text(json.dumps(document, indent=2), encoding="utf-8")
     temporary.replace(destination)
     return destination
 
@@ -109,13 +170,68 @@ def recall(
     conversation came from, and refusing to export the conversation at all
     would punish the user for damage to a note about it.
     """
+    document = _read(tool, conversation_id, env)
+    if document is None:
+        return None
+    try:
+        return Provenance.model_validate(document["provenance"])
+    except (KeyError, ValueError):
+        return None
+
+
+def _read(
+    tool: str, conversation_id: UUID, env: os._Environ[str] | dict[str, str] | None = None
+) -> dict[str, Any] | None:
     path = _path(tool, conversation_id, env)
     if not path.is_file():
         return None
     try:
-        return Provenance.model_validate_json(path.read_text(encoding="utf-8"))
+        document = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
+    return document if isinstance(document, dict) else None
+
+
+def written_file(
+    tool: str, conversation_id: UUID, env: os._Environ[str] | dict[str, str] | None = None
+) -> Written | None:
+    """What Ferry wrote for this conversation, as it left it.
+
+    ``None`` when there is no record, or when the record predates this being
+    kept. **A caller must treat "no record" as "cannot tell", never as "safe"**
+    -- the whole value of the fingerprint is refusing to act when it is absent.
+    """
+    document = _read(tool, conversation_id, env)
+    if document is None:
+        return None
+    found = document.get("written")
+    if not isinstance(found, dict):
+        return None
+    try:
+        return Written(
+            path=str(found["path"]), sha256=str(found["sha256"]), bytes=int(found["bytes"])
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def untouched_since_import(
+    tool: str, conversation_id: UUID, env: os._Environ[str] | dict[str, str] | None = None
+) -> bool | None:
+    """Whether the file still holds exactly what Ferry wrote.
+
+    ``True`` unchanged, ``False`` changed or gone, and **``None`` meaning
+    cannot tell** -- no record, or one written before fingerprints were kept.
+    Three states rather than two on purpose: a delete offered on a guess is the
+    failure this is here to prevent, and "I do not know" has to be sayable.
+    """
+    was = written_file(tool, conversation_id, env)
+    if was is None:
+        return None
+    now = fingerprint(Path(was.path))
+    if now is None:
+        return False
+    return now.sha256 == was.sha256
 
 
 def forget(

@@ -603,7 +603,16 @@ class ClaudeCodeAdapter(Adapter):
             # recorded before the write would outlive a write that failed, and
             # would then describe a conversion of a conversation that is not
             # there.
-            provenance_store.record(TOOL, conversation_id, conversation.provenance)
+            provenance_store.record(
+                TOOL,
+                conversation_id,
+                conversation.provenance,
+                # Fingerprinted from the file as it now stands, not from the
+                # payload in hand. They are the same bytes today; if some future
+                # step ever writes more, the record still describes the file
+                # rather than an intention about it.
+                written=provenance_store.fingerprint(destination),
+            )
 
         detail = f"{len(conversation.messages)} messages to {project.name}"
         if restored:

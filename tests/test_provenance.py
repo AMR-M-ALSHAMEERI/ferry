@@ -211,6 +211,100 @@ class TestTheStoreItself:
         assert second.original_tool == "antigravity"
 
 
+class TestWhatFerryWroteIsRemembered:
+    """Groundwork for deleting migrated conversations, added before it exists.
+
+    A future "remove what Ferry put here" has to answer a question the stamp
+    alone cannot: **has the person worked in this since?** A migrated
+    conversation that was then continued holds real work, and deleting it
+    because Ferry once created it destroys the thing the tool exists to protect.
+
+    Recorded now because it cannot be recovered later. Every conversation
+    migrated before the fingerprint existed is one such a feature could never
+    safely offer, so the cost of adding it late is paid by the user's oldest
+    migrations -- exactly the ones they are least likely to remember.
+    """
+
+    def test_the_import_remembers_the_file_it_wrote(
+        self, tmp_path: Path, env: dict[str, str]
+    ) -> None:
+        item = conversation("antigravity")
+        _converted(tmp_path, env, item)
+
+        written = provenance_store.written_file("claude-code", item.id)
+
+        assert written is not None, "the import kept no record of what it wrote"
+        assert Path(written.path).is_file()
+        assert written.bytes > 0
+        assert len(written.sha256) == 64
+
+    def test_an_untouched_conversation_reads_as_untouched(
+        self, tmp_path: Path, env: dict[str, str]
+    ) -> None:
+        item = conversation("antigravity")
+        _converted(tmp_path, env, item)
+
+        assert provenance_store.untouched_since_import("claude-code", item.id) is True
+
+    def test_a_conversation_worked_in_since_is_not_untouched(
+        self, tmp_path: Path, env: dict[str, str]
+    ) -> None:
+        """The case the whole field exists for.
+
+        A person continuing a migrated conversation is the success story of this
+        project, and it is also the one case where deleting would be worst.
+        """
+        item = conversation("antigravity")
+        _converted(tmp_path, env, item)
+        written = provenance_store.written_file("claude-code", item.id)
+        assert written is not None
+        path = Path(written.path)
+        path.write_text(path.read_text(encoding="utf-8") + '{"type":"user"}\n', encoding="utf-8")
+
+        assert provenance_store.untouched_since_import("claude-code", item.id) is False
+
+    def test_a_missing_file_is_not_reported_as_untouched(
+        self, tmp_path: Path, env: dict[str, str]
+    ) -> None:
+        item = conversation("antigravity")
+        _converted(tmp_path, env, item)
+        written = provenance_store.written_file("claude-code", item.id)
+        assert written is not None
+        Path(written.path).unlink()
+
+        assert provenance_store.untouched_since_import("claude-code", item.id) is False
+
+    def test_no_record_says_cannot_tell_rather_than_safe(self, tmp_path: Path) -> None:
+        """Three states, not two.
+
+        `None` has to be distinguishable from `False`, and both from `True`. A
+        delete that read "no record" as "nothing to worry about" would be at its
+        most confident exactly where it knows least.
+        """
+        env = {provenance_store.ROOT_ENV: str(tmp_path)}
+
+        assert provenance_store.untouched_since_import("claude-code", uuid4(), env) is None
+
+    def test_an_older_record_without_a_fingerprint_says_cannot_tell(self, tmp_path: Path) -> None:
+        """Records written before this field existed still load, and still
+        answer honestly about what they do not know."""
+        env = {provenance_store.ROOT_ENV: str(tmp_path)}
+        conversation_id = uuid4()
+        stamp = Provenance(
+            original_tool="codex",
+            imported_into="claude-code",
+            imported_at=datetime(2026, 9, 6, tzinfo=UTC),
+            ferry_version="0.1.0",
+            lossy=True,
+            conversion_notes=[],
+        )
+        provenance_store.record("claude-code", conversation_id, stamp, env)
+
+        assert provenance_store.recall("claude-code", conversation_id, env) is not None
+        assert provenance_store.written_file("claude-code", conversation_id, env) is None
+        assert provenance_store.untouched_since_import("claude-code", conversation_id, env) is None
+
+
 def test_the_suite_never_touches_the_real_store() -> None:
     """A guard on the harness rather than on the product.
 

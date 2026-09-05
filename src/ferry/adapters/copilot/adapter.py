@@ -498,7 +498,12 @@ class CopilotAdapter(Adapter):
         if conversation.provenance is not None:
             # After the write, not before: a stamp for a conversion that failed
             # would describe a conversation that is not there.
-            provenance_store.record(TOOL, conversation.id, conversation.provenance)
+            provenance_store.record(
+                TOOL,
+                conversation.id,
+                conversation.provenance,
+                written=provenance_store.fingerprint(transcript),
+            )
 
         yield ImportEvent(
             kind="progress",
