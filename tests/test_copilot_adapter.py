@@ -8,6 +8,7 @@ person's history must not change it.**
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 from uuid import UUID
 
@@ -342,26 +343,19 @@ def test_an_existing_chat_list_is_added_to_not_replaced(exported: Path, target) 
     assert "keep-me" in index_lists(database)
 
 
-def test_a_conversation_from_another_tool_is_skipped_not_mangled(
+def test_a_conversation_from_another_tool_needs_asking_for(  # type: ignore[no-untyped-def]
     tmp_path: Path,
-    target,  # type: ignore[no-untyped-def]
+    target,
     manifest,
     conversation,
 ) -> None:
-    """Writing a Claude Code conversation into Copilot's format would produce
-    something neither tool can read.
+    """Cross-tool is refused unless it is asked for, exactly as elsewhere.
 
-    The refusal is unconditional -- ``allow_cross_tool`` does not open it --
-    and the message must say the blocker rather than name a milestone that has
-    since arrived.
-
-    **The reason has been wrong twice, so this asserts the durable half.** It
-    first blamed the workspace-key derivation, which M6 had already solved. It
-    then blamed the chat index, which Ferry writes and whose every field has an
-    obvious default (#203). What is actually missing is the transcript
-    document: Copilot stores a conversation as a VS Code document and Ferry can
-    only write back one it read. That is the sentence a person can act on, so
-    it is the one checked here."""
+    Copilot was ``unsupported`` as a target until M7b.2 Phase 2, and the reason
+    was wrong twice on the way (#193, #203). It is supported now because the
+    document is built rather than replayed, so what is left to protect is the
+    rule that nobody converts anything by accident.
+    """
     from ferry.adapters.base import ImportOptions
 
     dest = tmp_path / "foreign"
@@ -372,7 +366,7 @@ def test_a_conversation_from_another_tool_is_skipped_not_mangled(
 
     assert sum(1 for e in events if e.kind == "progress") == 0
     skipped = [e.message for e in events if e.kind == "skipped"]
-    assert any("transcript document" in message for message in skipped)
+    assert any("must be asked for explicitly" in message for message in skipped)
     # Never a milestone name: "this arrives at M7b" was true until M7b arrived.
     assert not any("M7b" in message for message in skipped)
 
@@ -474,3 +468,108 @@ def test_the_files_a_tool_named_survive_a_round_trip(tmp_path: Path, monkeypatch
     assert [[b.model_dump() for b in m.content] for m in rebuilt.messages] == [
         [b.model_dump() for b in m.content] for m in original.messages
     ]
+
+
+class TestBuildingADocumentForAForeignConversation:
+    """M7b.2 Phase 2: writing a conversation Copilot never had.
+
+    The shape asserted here is the one VS Code was **measured** to accept
+    (PROGRESS #203, #204): it listed the conversation, took the title out of
+    the document rather than the index, and rendered the reply. A real Copilot
+    request carries 24 fields including the extension's own manifest, token
+    counts and credits. None of that is written, because writing it would mean
+    inventing telemetry about a conversation that never happened in VS Code.
+    """
+
+    @staticmethod
+    def _written(tmp_path: Path, target, manifest, conversation):  # type: ignore[no-untyped-def]
+        from ferry.adapters.base import ImportOptions
+
+        dest = tmp_path / "foreign"
+        bundle = Bundle.create(dest, manifest)
+        bundle.add_conversation(conversation)
+        events = list(CopilotAdapter(target).import_(dest, ImportOptions(allow_cross_tool=True)))
+        # Asked of the adapter's own path resolver, and looked up by id. Both
+        # halves were wrong first: a hand-built path found the *real* store on
+        # this machine, and "the first file" would have read one of the
+        # fixture's other sessions and asserted nothing.
+        written = cp.empty_window_dir(target) / f"{conversation.id}.jsonl"
+        assert written.is_file(), "nothing was written for this conversation"
+        record = json.loads(written.read_text(encoding="utf-8").splitlines()[0])
+        return record["v"], events
+
+    def test_the_document_has_the_shape_vs_code_accepted(  # type: ignore[no-untyped-def]
+        self, tmp_path: Path, target, manifest, conversation
+    ) -> None:
+        document, _ = self._written(tmp_path, target, manifest, conversation)
+
+        assert document["version"] == 3
+        assert document["sessionId"] == str(conversation.id)
+        assert isinstance(document["creationDate"], int)
+        assert document["requests"], "a conversation with messages has requests"
+        first = document["requests"][0]
+        assert set(first) >= {"requestId", "responseId", "message", "response"}
+        assert "parts" in first["message"]
+
+    def test_no_telemetry_is_invented(  # type: ignore[no-untyped-def]
+        self, tmp_path: Path, target, manifest, conversation
+    ) -> None:
+        """The point of the experiment, asserted.
+
+        A token count, a credit figure or a model id written here would be a
+        number Ferry made up about work that was never done in VS Code.
+        """
+        document, _ = self._written(tmp_path, target, manifest, conversation)
+
+        invented = {
+            "promptTokens",
+            "completionTokens",
+            "copilotCredits",
+            "modelId",
+            "modelState",
+            "agent",
+            "promptTokenDetails",
+            "elapsedMs",
+        }
+        for request in document["requests"]:
+            assert not (set(request) & invented), f"invented: {set(request) & invented}"
+
+    def test_it_is_not_presented_as_copilot_s_own(  # type: ignore[no-untyped-def]
+        self, tmp_path: Path, target, manifest, conversation
+    ) -> None:
+        """Ferry's standing rule, in the one field that names the responder."""
+        document, _ = self._written(tmp_path, target, manifest, conversation)
+
+        assert document["responderUsername"] == conversation.source_tool
+        assert document["responderUsername"] != "GitHub Copilot"
+
+    def test_the_conversation_s_own_title_survives(  # type: ignore[no-untyped-def]
+        self, tmp_path: Path, target, manifest, conversation
+    ) -> None:
+        """Without `customTitle`, VS Code names the chat after the first
+        message. That is what it did to the bare probe, and it is how we
+        learned it had parsed the document at all."""
+        document, _ = self._written(tmp_path, target, manifest, conversation)
+
+        assert document["customTitle"] == conversation.title
+
+    def test_the_import_says_what_it_cost(  # type: ignore[no-untyped-def]
+        self, tmp_path: Path, target, manifest, conversation
+    ) -> None:
+        _, events = self._written(tmp_path, target, manifest, conversation)
+
+        assert any("readable text" in e.message for e in events if e.kind == "warning")
+
+    def test_the_same_conversation_imported_twice_gets_the_same_ids(  # type: ignore[no-untyped-def]
+        self, tmp_path: Path, target, manifest, conversation
+    ) -> None:
+        """Random ids would make a re-import look like a different
+        conversation to anything comparing two exports."""
+        from ferry.adapters.copilot.writer import synthesize_document
+
+        first = synthesize_document(conversation)
+        second = synthesize_document(conversation)
+
+        assert [r["requestId"] for r in first["requests"]] == [
+            r["requestId"] for r in second["requests"]
+        ]

@@ -13,8 +13,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
-import pytest
-
 from ferry.adapters.copilot.writer import (
     INDEX_KEY,
     index_entry,
@@ -63,11 +61,20 @@ def test_the_internal_id_is_forced_to_match_the_filename() -> None:
     assert record["v"]["sessionId"] == str(CONV)
 
 
-def test_a_conversation_with_no_original_document_is_refused() -> None:
-    """Cross-tool import into Copilot is M7b. Guessing the document now would
-    write something neither tool can read."""
-    with pytest.raises(ValueError, match="M7b"):
-        snapshot_line(conversation(source_raw=None))
+def test_a_conversation_with_no_original_document_gets_one_built() -> None:
+    """Was a refusal until M7b.2 Phase 2, and is now the whole feature.
+
+    The refusal was right while Ferry could only replay a document it had
+    read. Once VS Code was measured accepting a built one (#203, #204), the
+    same input has an answer instead of an error.
+    """
+    document = json.loads(snapshot_line(conversation(source_raw=None)))["v"]
+
+    assert document["version"] == 3
+    assert document["sessionId"] == str(CONV)
+    # Never dressed as Copilot's own work: the rule that a converted
+    # conversation is not presented as native.
+    assert document["responderUsername"] != "GitHub Copilot"
 
 
 def test_the_index_entry_carries_what_vs_code_sorts_by() -> None:

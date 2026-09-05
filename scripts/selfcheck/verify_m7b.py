@@ -25,6 +25,7 @@ Two checks carry the weight:
 
 from __future__ import annotations
 
+import json
 import platform
 import shutil
 import sys
@@ -40,6 +41,8 @@ from ferry.adapters.base import Adapter, ImportOptions
 from ferry.adapters.claude_code import ClaudeCodeAdapter
 from ferry.adapters.codex import CodexAdapter
 from ferry.adapters.copilot import CopilotAdapter
+from ferry.adapters.copilot import paths as cp_paths
+from ferry.adapters.copilot.writer import index_lists
 from ferry.core import Bundle, Manifest, SourceMachine, sha256_file
 from ferry.core.compat import CEILING, assess, pair
 from ferry.ucs import Conversation
@@ -264,12 +267,19 @@ def check_a_foreign_file_is_not_installed(state: State) -> Result:
     return Result(True, "reported nothing written, and wrote nothing")
 
 
+#: Targets Ferry still refuses. Claude Code was always supported; Copilot
+#: joined it at M7b.2 Phase 2, once VS Code was measured accepting a built
+#: document (#203, #204). Kept as a list rather than hard-coded per check, so
+#: the next target to be finished is moved in one place instead of two.
+REFUSED = ("codex", "antigravity")
+
+
 def check_every_refusal_says_why(state: State) -> Result:
     """A refusal with no reason leaves someone with nowhere to go."""
     if not state.bundle:
         return Result(None, "nothing exported")
     checked = 0
-    for target in ("codex", "copilot", "antigravity"):
+    for target in REFUSED:
         for source, item in state.smallest.items():
             if source == target:
                 continue
@@ -291,7 +301,7 @@ def check_nothing_is_half_written(state: State) -> Result:
     if not state.bundle or not state.smallest:
         return Result(None, "nothing exported")
     empty = 0
-    for target in ("codex", "copilot", "antigravity"):
+    for target in REFUSED:
         pair_dir = state.workspace / f"clean-{target}"
         store = pair_dir / "store"
         source, item = next(iter(sorted(state.smallest.items())))
@@ -336,11 +346,81 @@ def check_nothing_moved(state: State) -> Result:
     return Result(True, f"all {len(after)} checksums match")
 
 
+def check_copilot_gets_a_document_it_will_open(state: State) -> Result:
+    """A conversation built for Copilot is written, listed, and the right shape.
+
+    Deliberately **not** a word-for-word round trip like the Claude Code check.
+    That one can demand every word back because the transcript is replayed;
+    here the document is *built*, tool calls become readable text and results
+    are clipped, so equality would be the wrong question and would fail on a
+    conversion working exactly as designed.
+
+    What is asserted instead is what was measured on a real VS Code (#203,
+    #204): the fields it accepted, and nothing invented on top of them.
+    """
+    if not state.bundle:
+        return Result(None, "nothing exported")
+
+    invented = {
+        "promptTokens",
+        "completionTokens",
+        "copilotCredits",
+        "modelId",
+        "modelState",
+        "agent",
+        "promptTokenDetails",
+        "elapsedMs",
+    }
+    built = 0
+    for source, item in sorted(state.smallest.items()):
+        if source == "copilot":
+            continue
+        pair_dir = state.workspace / f"{source}-to-copilot"
+        held = _one_conversation_bundle(state.bundle, item, pair_dir / "in")
+        store = _scratch("copilot", pair_dir / "store")
+        adapter = _build("copilot", store)
+        wrote = sum(
+            1
+            for event in adapter.import_(held, ImportOptions(allow_cross_tool=True, backup=False))
+            if event.kind == "progress"
+        )
+        if not wrote:
+            return Result(False, f"{source} -> copilot wrote nothing")
+
+        written = cp_paths.empty_window_dir(store) / f"{item.id}.jsonl"
+        if not written.is_file():
+            return Result(False, f"{source} -> copilot wrote no transcript for {item.id}")
+        document = json.loads(written.read_text(encoding="utf-8").splitlines()[0])["v"]
+        if document.get("version") != 3 or not document.get("requests"):
+            return Result(False, f"{source} -> copilot built a document VS Code would not read")
+        if document.get("responderUsername") == "GitHub Copilot":
+            return Result(False, f"{source} -> copilot presented a conversion as native")
+        for request in document["requests"]:
+            stray = set(request) & invented
+            if stray:
+                return Result(False, f"{source} -> copilot invented {sorted(stray)}")
+
+        listed = index_lists(cp_paths.global_storage(store) / "state.vscdb")
+        if str(item.id) not in listed:
+            # A transcript VS Code does not list is invisible, which looks
+            # exactly like the import having silently failed.
+            return Result(False, f"{source} -> copilot wrote a transcript nothing lists")
+        built += 1
+
+    if not built:
+        return Result(None, "only Copilot has conversations on this machine")
+    return Result(True, f"{built} conversations built, listed, and nothing invented")
+
+
 CHECKS = [
     ("export a real bundle", check_export),
     ("every pair has an answer, every refusal a reason", check_the_table_is_complete),
     ("a supported pair migrates and reads back whole", check_a_pair_really_migrates),
     ("a foreign file is never installed as a database", check_a_foreign_file_is_not_installed),
+    (
+        "a built Copilot document is listed and invents nothing",
+        check_copilot_gets_a_document_it_will_open,
+    ),
     ("an unsupported pair is refused, with a reason", check_every_refusal_says_why),
     ("a refused import leaves nothing behind", check_nothing_is_half_written),
     ("what a conversion costs is counted", check_the_cost_is_counted),

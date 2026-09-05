@@ -38,6 +38,7 @@ from ferry.adapters.copilot import paths as cp_paths
 from ferry.adapters.copilot.deltas import replay_lines
 from ferry.adapters.copilot.reader import read_session
 from ferry.adapters.copilot.writer import (
+    SYNTHESIS_NOTES,
     SessionStoreLocked,
     index_entry,
     index_lists,
@@ -49,9 +50,10 @@ from ferry.adapters.copilot.writer import (
 from ferry.adapters.dedup import compare_duplicate
 from ferry.adapters.formatcheck import FormatCheck
 from ferry.core import Bundle, Manifest, SourceMachine, back_up
-from ferry.core.compat import refusal
+from ferry.core.compat import assess, refusal
+from ferry.core.continuable import prepare
 from ferry.core.manifest import OSName
-from ferry.ucs import Conversation, ToolName
+from ferry.ucs import Conversation, Provenance, ToolName
 
 __all__ = ["TESTED_VERSION", "TOOL", "CopilotAdapter"]
 
@@ -356,19 +358,50 @@ class CopilotAdapter(Adapter):
         saved_files: list[Path] | None = None,
     ) -> Iterator[ImportEvent]:
         conversation = bundle.load_conversation(conversation_id)
-        if conversation.source_tool != TOOL:
-            # Refused whether or not the flag was passed, and the reason comes
-            # from the compatibility table rather than from here: "this arrives
-            # at M7b" was true until M7b arrived and measured it. The blocker is
-            # real and is not a missing feature, so it is stated as what it is.
-            yield ImportEvent(
-                kind="skipped",
-                conversation_id=str(conversation_id),
-                message=refusal(conversation.source_tool, TOOL),
-            )
-            return
-
         cid = str(conversation_id)
+        flattened = None
+        if conversation.source_tool != TOOL:
+            if not options.allow_cross_tool:
+                yield ImportEvent(
+                    kind="skipped",
+                    conversation_id=cid,
+                    message=(
+                        f"came from {conversation.source_tool}; "
+                        "cross-tool import must be asked for explicitly"
+                    ),
+                )
+                return
+            why = refusal(conversation.source_tool, TOOL)
+            if why:
+                # The flag says the person accepts a lossy conversion. It does
+                # not make an impossible one work.
+                yield ImportEvent(kind="skipped", conversation_id=cid, message=why)
+                return
+            # Before the document is built, not after: the mode changes what
+            # the conversation *is*, and a document built from the full one
+            # would be the thing written while the notes described something
+            # else.
+            conversation, flattened = prepare(conversation, TOOL, options.mode)
+            if flattened.anything:
+                yield ImportEvent(
+                    kind="note",
+                    conversation_id=cid,
+                    message=(
+                        f"converted to continue: {flattened.thinking} thinking blocks and "
+                        f"{flattened.results} tool results dropped, {flattened.calls} calls "
+                        f"kept as text"
+                    ),
+                )
+            if flattened.dropped:
+                yield ImportEvent(
+                    kind="warning",
+                    conversation_id=cid,
+                    message=(
+                        f"{flattened.dropped} earlier messages left out to fit; they are "
+                        "still in the bundle"
+                    ),
+                )
+
         destination, database, where = self._destination(conversation)
         written_id = conversation_id
         transcript = destination / f"{conversation_id}.jsonl"
@@ -396,6 +429,21 @@ class CopilotAdapter(Adapter):
         except ValueError as exc:
             yield ImportEvent(kind="skipped", conversation_id=cid, message=str(exc))
             return
+
+        loss = assess(conversation, TOOL)
+        if conversation.source_tool != TOOL:
+            for note in SYNTHESIS_NOTES:
+                yield ImportEvent(kind="warning", conversation_id=cid, message=note)
+            # The notes recorded are the notes the person was shown before
+            # agreeing, plus what this particular rebuild turned out to cost.
+            conversation.provenance = Provenance(
+                original_tool=conversation.source_tool,
+                imported_into=TOOL,
+                imported_at=datetime.now(UTC),
+                ferry_version=__version__,
+                lossy=True,
+                conversion_notes=[*loss.notes, *SYNTHESIS_NOTES],
+            )
 
         if options.dry_run:
             yield ImportEvent(

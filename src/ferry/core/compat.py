@@ -18,11 +18,10 @@ really there* are different claims and only the second is worth shipping.
 ``-> codex``            unsupported. Its importer needs a ``session_meta``
                         header out of ``source_raw``; a foreign bundle
                         has not got one.
-``-> copilot``          unsupported **today**, and the nearest to working.
-                        A conversation is stored as a VS Code transcript
-                        document and Ferry can only write back one it read.
-                        The chat index is *not* the obstacle: Ferry writes it
-                        already and every field in it has an obvious default.
+``-> copilot``          **supported.** A document is built rather than
+                        replayed, to the smallest shape VS Code was measured
+                        to accept (#203, #204). Tool calls and their results
+                        become readable text, never Copilot tool invocations.
 ``-> antigravity``      unsupported. A conversation is restored *from its
                         original SQLite database*. Ferry can copy one; it
                         cannot generate one.
@@ -101,12 +100,7 @@ _TARGETS: dict[str, Pair] = {
         "Codex rebuilds a conversation from the session_meta header in its own "
         "rollout file, and a bundle from another tool does not carry one.",
     ),
-    "copilot": Pair(
-        "unsupported",
-        "Copilot Chat stores a conversation as a VS Code transcript document, "
-        "and Ferry can only write back one it read. It cannot yet build one "
-        "for a conversation that came from another tool.",
-    ),
+    "copilot": Pair("supported"),
     "antigravity": Pair(
         "unsupported",
         "Antigravity conversations are restored from the original SQLite "

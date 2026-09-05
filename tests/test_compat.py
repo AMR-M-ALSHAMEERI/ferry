@@ -79,7 +79,18 @@ class TestTheMatrix:
         assert pair(source, "claude-code").support == "supported"
         assert refusal(source, "claude-code") == ""
 
-    @pytest.mark.parametrize("target", ["codex", "copilot", "antigravity"])
+    @pytest.mark.parametrize("source", [t for t in TOOLS if t != "copilot"])
+    def test_copilot_accepts_all_three_others(self, source: str) -> None:
+        """Measured at M7b.2 Phase 2.
+
+        The document is built rather than replayed, to the smallest shape VS
+        Code was proven to accept: it listed the conversation, read the title
+        out of the document itself, and rendered the reply (#203, #204).
+        """
+        assert pair(source, "copilot").support == "supported"
+        assert refusal(source, "copilot") == ""
+
+    @pytest.mark.parametrize("target", ["codex", "antigravity"])
     def test_every_other_target_is_refused_with_a_reason(self, target: str) -> None:
         found = pair("claude-code", target)
         assert found.support == "unsupported"

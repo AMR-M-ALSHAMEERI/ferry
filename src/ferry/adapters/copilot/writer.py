@@ -29,9 +29,10 @@ import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Any
-from uuid import UUID
+from typing import Any, Final
+from uuid import UUID, uuid5
 
+from ferry.compact.catalogue import describe
 from ferry.ucs import Conversation
 
 __all__ = [
@@ -62,6 +63,11 @@ def _epoch_ms(when: datetime) -> int:
     return int(when.timestamp() * 1000)
 
 
+_REQUEST_NAMESPACE: Final = UUID("f0d6c8b2-3f4a-5e6d-8c9b-0a1b2c3d4e5f")
+"""Namespace for request and response ids, so re-importing the same
+conversation produces the same ids rather than a fresh set each time."""
+
+
 def snapshot_line(conversation: Conversation) -> str:
     """The whole conversation as one ``kind: 0`` record.
 
@@ -73,10 +79,18 @@ def snapshot_line(conversation: Conversation) -> str:
     file, but a transcript whose internal id disagrees with its name is the
     kind of thing that works until it suddenly does not.
     """
-    document = _document_of(conversation)
-    document = dict(document)
+    document = dict(_document_of(conversation)) if _has_document(conversation) else None
+    if document is None:
+        # No original to replay, so one is built. See `synthesize_document`.
+        document = synthesize_document(conversation)
     document["sessionId"] = str(conversation.id)
     return json.dumps({"kind": 0, "v": document}, ensure_ascii=False)
+
+
+def _has_document(conversation: Conversation) -> bool:
+    """Whether this conversation carries the document it came from."""
+    raw = conversation.source_raw or {}
+    return isinstance(raw.get("document"), dict)
 
 
 def _document_of(conversation: Conversation) -> dict[str, Any]:
@@ -104,7 +118,7 @@ def index_entry(conversation: Conversation) -> dict[str, Any]:
     §4.2. ``timing.created`` is required -- VS Code sorts the list by it, and
     an entry without one sorts unpredictably rather than failing visibly.
     """
-    document = _document_of(conversation)
+    document = _document_of(conversation) if _has_document(conversation) else {}
     created = document.get("creationDate")
     created_ms = created if isinstance(created, int) else _epoch_ms(conversation.created_at)
     last_ms = _epoch_ms(conversation.updated_at)
@@ -234,3 +248,136 @@ def vs_code_is_running(env: os._Environ[str] | dict[str, str] | None = None) -> 
 def session_id_strings(ids: list[UUID]) -> set[str]:
     """Ids as the strings the index keys on."""
     return {str(value) for value in ids}
+
+
+# --------------------------------------------------------------------------
+# building a document for a conversation that never had one
+# --------------------------------------------------------------------------
+
+SYNTHESIS_NOTES: Final = (
+    "rebuilt as a VS Code chat document; tool calls and their results are kept "
+    "as readable text, not as calls Copilot can re-run",
+)
+"""What is unavoidably lost when a document is built rather than replayed."""
+
+_RESULT_LIMIT: Final = 2_000
+"""Characters of one tool result kept. A result is the largest thing in a
+conversation by far and the least useful to read in full; the whole of it is
+still in the bundle."""
+
+
+def _rendered(block: Any, source_tool: str) -> str:
+    """One UCS block as the markdown a person will read.
+
+    **Nothing is fabricated as a Copilot construct.** VS Code has typed parts
+    for tool invocations and for thinking, and Ferry does not emit them: they
+    carry ids, timings and invocation state for calls that happened in another
+    tool, and a call presented as one Copilot could re-run would be a lie the
+    interface makes on Ferry's behalf. They are written as text, and marked.
+    """
+    kind = getattr(block, "type", "")
+    if kind == "text":
+        return str(block.text)
+    if kind == "thinking":
+        return f"> **[{source_tool}] thinking**\n>\n> " + str(block.text).replace("\n", "\n> ")
+    if kind == "tool_use":
+        call = describe(source_tool, block.name, block.input)
+        detail = call.command or ", ".join(call.paths)
+        return f"`[{block.name}]`" + (f" {detail}" if detail else "")
+    if kind == "tool_result":
+        text = block.output if isinstance(block.output, str) else json.dumps(block.output)
+        clipped = text[:_RESULT_LIMIT]
+        tail = (
+            "\n(truncated; the whole result is in the bundle)" if len(text) > _RESULT_LIMIT else ""
+        )
+        return f"```\n{clipped}{tail}\n```"
+    if kind == "image":
+        return "`[image]`"
+    return ""
+
+
+def _ids(conversation_id: UUID, ordinal: int) -> dict[str, str]:
+    """Stable request and response ids for one exchange.
+
+    Derived from the conversation id rather than randomly, so re-importing the
+    same conversation produces the same ids instead of a fresh set each time.
+    """
+    seed = f"{conversation_id}:{ordinal}"
+    return {
+        "requestId": f"request_{uuid5(_REQUEST_NAMESPACE, seed)}",
+        "responseId": f"response_{uuid5(_REQUEST_NAMESPACE, 'r' + seed)}",
+    }
+
+
+def _exchanges(conversation: Conversation) -> list[dict[str, Any]]:
+    """UCS messages regrouped as Copilot's question-and-answer pairs.
+
+    UCS is a flat ordered list; a Copilot document is a list of *requests*,
+    each one question with everything that answered it. An assistant message
+    arriving before any question opens a request with an empty one rather than
+    being dropped, because a conversation that starts with an answer is odd but
+    it is still the person's conversation.
+    """
+    tool = conversation.source_tool
+    requests: list[dict[str, Any]] = []
+    answers: list[str] = []
+
+    def close() -> None:
+        if requests:
+            body = "\n\n".join(part for part in answers if part.strip())
+            requests[-1]["response"] = [{"value": body}] if body else []
+
+    for message in conversation.messages:
+        pieces = [_rendered(block, tool) for block in message.content]
+        if message.role == "user":
+            close()
+            answers = []
+            requests.append(
+                {
+                    **_ids(conversation.id, len(requests)),
+                    "message": {"text": "\n\n".join(p for p in pieces if p.strip()), "parts": []},
+                    "response": [],
+                }
+            )
+        else:
+            if not requests:
+                requests.append(
+                    {
+                        **_ids(conversation.id, 0),
+                        "message": {"text": "", "parts": []},
+                        "response": [],
+                    }
+                )
+            answers.extend(pieces)
+    close()
+    return requests
+
+
+def synthesize_document(conversation: Conversation) -> dict[str, Any]:
+    """Build a VS Code chat document for a conversation from another tool.
+
+    **Every field here was measured, and the shape is the smallest one proven
+    to work** (PROGRESS #203, #204). A real document carries 24 fields per
+    request, including the Copilot extension's own manifest, token counts,
+    credits spent and model state. Ferry writes none of that: it would be
+    inventing telemetry about a conversation that never happened in VS Code,
+    and the experiment showed VS Code neither needs nor asks for it.
+
+    What is written is the document proven to render, plus ``customTitle``,
+    which appears in real documents and carries the conversation's real name
+    instead of letting VS Code fall back to the first message.
+
+    ``responderUsername`` deliberately does **not** say "GitHub Copilot". The
+    measured values are that and the empty string, and it is free text; naming
+    the tool that actually answered keeps Ferry's rule that a converted
+    conversation is never presented as native.
+    """
+    return {
+        "version": 3,
+        "sessionId": str(conversation.id),
+        "creationDate": _epoch_ms(conversation.created_at),
+        "requesterUsername": "",
+        "responderUsername": conversation.source_tool,
+        "customTitle": conversation.title or "Imported conversation",
+        "requests": _exchanges(conversation),
+    }
