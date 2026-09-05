@@ -41,7 +41,7 @@ from ferry.compact.catalogue import describe
 from ferry.compact.prune import error_line, failed
 from ferry.ucs import Conversation, Message, TextBlock
 
-__all__ = ["Flattened", "continuable", "prepare"]
+__all__ = ["Flattened", "call_line", "continuable", "prepare"]
 
 
 @dataclass(frozen=True)
@@ -96,7 +96,7 @@ def _clip(text: str) -> str:
     return line if len(line) <= MAX_LINE else line[: MAX_LINE - 3] + "..."
 
 
-def _call_line(source_tool: str, name: str, arguments: object) -> str:
+def call_line(source_tool: str, name: str, arguments: object) -> str:
     """One tool call as a line a person and a model both read the same way.
 
     Built through :func:`ferry.compact.catalogue.describe`, which already knows
@@ -147,7 +147,7 @@ def continuable(
             elif block.type == "tool_use":
                 calls += 1
                 content.append(
-                    TextBlock(text=_call_line(conversation.source_tool, block.name, block.input))
+                    TextBlock(text=call_line(conversation.source_tool, block.name, block.input))
                 )
             elif block.type == "tool_result":
                 results += 1

@@ -35,6 +35,7 @@ from typing import Any
 from uuid import UUID, uuid5
 
 from ferry.adapters.claude_code.paths import basename
+from ferry.core.continuable import call_line
 from ferry.ucs import Attachment, Conversation, Message
 
 __all__ = [
@@ -133,7 +134,23 @@ def _blocks_for(
     conversation_id: UUID,
     counter: list[int],
     images: Mapping[UUID, dict[str, Any]],
+    *,
+    foreign: str = "",
 ) -> list[Any]:
+    """The message's blocks as Claude Code records them.
+
+    ``foreign`` names the tool the conversation came from, and is empty for a
+    restore. **It changes what a tool call becomes.** A restore writes the call
+    back as a call, which is what it was. A conversion cannot: the call was made
+    by another assistant, to a tool Claude Code does not have, and writing it as
+    a native ``tool_use`` puts a call Claude Code never made into its transcript
+    in the exact shape of one it did. It also contradicts the sentence shown
+    before the person agreed -- *kept as readable text, not as tool calls Claude
+    Code can run* -- and of those two documents, the file is the one that lasts.
+
+    The line is built by the same function Continue mode uses, so the two modes
+    describe a call identically rather than drifting apart.
+    """
     blocks: list[Any] = []
     for block in message.content:
         if block.type == "text":
@@ -148,6 +165,9 @@ def _blocks_for(
             )
         elif block.type == "tool_use":
             counter[0] += 1
+            if foreign:
+                blocks.append({"type": "text", "text": call_line(foreign, block.name, block.input)})
+                continue
             blocks.append(
                 {
                     "type": "tool_use",
@@ -160,6 +180,13 @@ def _blocks_for(
                 }
             )
         elif block.type == "tool_result":
+            if foreign:
+                # Kept whole rather than clipped: archive mode's whole promise
+                # is that it holds the most detail, and a result is where the
+                # detail is. What changes is its shape, not its content.
+                text = block.output if isinstance(block.output, str) else json.dumps(block.output)
+                blocks.append({"type": "text", "text": text})
+                continue
             blocks.append(
                 {
                     "type": "tool_result",
@@ -205,6 +232,7 @@ def synthesize_records(
     cwd: str,
     version: str,
     image_bytes: Mapping[UUID, bytes] | None = None,
+    target: str = "",
 ) -> list[dict[str, Any]]:
     """Build transcript records from UCS alone.
 
@@ -236,7 +264,15 @@ def synthesize_records(
         role = message.role
         payload: dict[str, Any] = {
             "role": "assistant" if role == "assistant" else "user",
-            "content": _blocks_for(message, conversation.id, counter, images),
+            "content": _blocks_for(
+                message,
+                conversation.id,
+                counter,
+                images,
+                foreign=""
+                if not target or conversation.source_tool == target
+                else conversation.source_tool,
+            ),
         }
         if message.model:
             payload["model"] = message.model

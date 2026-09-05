@@ -116,6 +116,33 @@ def _words(item: Conversation) -> str:
     return " ".join(" ".join(parts).split())
 
 
+def _said(item: Conversation) -> list[str]:
+    """Each spoken block on its own, normalised. Whole blocks, not a bag of
+    words: a comparison of joined text cannot tell a missing message from a
+    reordered one."""
+    return [
+        " ".join(block.text.split())
+        for message in item.messages
+        for block in message.content
+        if block.type in ("text", "thinking")
+        if block.text.strip()
+    ]
+
+
+def _text_blocks(item: Conversation) -> int:
+    return sum(1 for message in item.messages for block in message.content if block.type == "text")
+
+
+def _machinery(item: Conversation) -> int:
+    """Calls and results, each of which becomes exactly one line of text."""
+    return sum(
+        1
+        for message in item.messages
+        for block in message.content
+        if block.type in ("tool_use", "tool_result")
+    )
+
+
 def _one_conversation_bundle(source: Bundle, item: Conversation, where: Path) -> Path:
     where.mkdir(parents=True, exist_ok=True)
     made = Bundle.create(
@@ -228,12 +255,32 @@ def check_a_pair_really_migrates(state: State) -> Result:
         if not ids:
             return Result(False, f"{source} -> claude-code wrote, but nothing came back")
         came = returned.load_conversation(ids[0])
-        before, after = _words(item), _words(came)
-        if len(came.messages) != len(item.messages) or after != before:
+        if len(came.messages) != len(item.messages):
             return Result(
                 False,
                 f"{source} -> claude-code came back with "
                 f"{len(came.messages)}/{len(item.messages)} messages",
+            )
+        # **Not word-for-word, and not merely "close enough" either.** This
+        # asked for exact equality until a conversion started writing tool calls
+        # as readable lines, at which point it reported a loss where a promise
+        # had just been kept. Loosened to containment it would stop catching
+        # anything, so it is exact in both directions instead: every word said
+        # survives, and the words *added* are accounted for one per call and one
+        # per result. Anything else is content nobody can source.
+        after = _words(came)
+        lost = [text for text in _said(item) if text not in after]
+        if lost:
+            return Result(
+                False, f"{source} -> claude-code lost {len(lost)} blocks of what was said"
+            )
+        added = _text_blocks(came) - _text_blocks(item)
+        expected = _machinery(item)
+        if added != expected:
+            return Result(
+                False,
+                f"{source} -> claude-code added {added} blocks of text where "
+                f"{expected} calls and results were flattened",
             )
         worked.append(source)
     if not worked:

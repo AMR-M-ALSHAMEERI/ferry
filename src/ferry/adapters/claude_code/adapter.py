@@ -641,8 +641,12 @@ class ClaudeCodeAdapter(Adapter):
         if absent:
             notes.append(f"{len(absent)} image blocks dropped: their bytes are not in the bundle")
         records = synthesize_records(
-            conversation, cwd=target_cwd, version=version, image_bytes=image_bytes
+            conversation, cwd=target_cwd, version=version, image_bytes=image_bytes, target=TOOL
         )
+        if conversation.source_tool != TOOL:
+            notes.append(
+                "tool calls and results written as readable text, not as calls Claude Code can run"
+            )
         return session_lines(records), notes
 
     @staticmethod

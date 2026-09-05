@@ -13,6 +13,7 @@ probe existed at all.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -22,6 +23,7 @@ import pytest
 from ferry.adapters.antigravity import AntigravityAdapter
 from ferry.adapters.antigravity import paths as ag_paths
 from ferry.adapters.base import ImportOptions
+from ferry.adapters.claude_code import ClaudeCodeAdapter
 from ferry.core import Bundle, Manifest, SourceMachine
 from ferry.core.compat import CEILING, assess, pair, refusal
 from ferry.ucs import (
@@ -289,3 +291,82 @@ class TestWhatWasWrittenSaysWhereItCameFrom:
         assert loss.lossy
         assert loss.degraded == 8
         assert len(loss.notes) >= 4
+
+
+class TestAConvertedCallIsNotWrittenAsACall:
+    """The line between a converted transcript and a forgery.
+
+    Found by rehearsing A7b.4 against real data, not by a failing test: a
+    conversation converted into Claude Code carried a native ``tool_use`` block
+    named after an **Antigravity** tool, complete with an id and an input, in
+    the exact shape of a call Claude Code had made. Nothing had run. The screen
+    shown before the person agreed said the opposite -- *kept as readable text,
+    not as tool calls Claude Code can run* -- and of those two documents the
+    transcript is the one that lasts.
+
+    Continue mode had always flattened calls to text. Archive mode had not, and
+    the synthesis path could not tell the two situations apart: rebuilding a
+    *Claude Code* conversation from UCS should write its calls back as calls,
+    because that is what they were.
+    """
+
+    @staticmethod
+    def _written(tmp_path: Path, item: Conversation) -> list[dict]:
+        root = tmp_path / "bundle"
+        made = Bundle.create(root, manifest())
+        made.add_conversation(item)
+        store = {"CLAUDE_CONFIG_DIR": str(tmp_path / "store")}
+        list(ClaudeCodeAdapter(store).import_(root, ImportOptions(allow_cross_tool=True)))
+        found = sorted((tmp_path / "store").rglob("*.jsonl"))
+        assert found, "nothing was written"
+        return [
+            json.loads(line)
+            for path in found
+            for line in path.read_text(encoding="utf-8").splitlines()
+        ]
+
+    @staticmethod
+    def _blocks(records: list[dict]) -> list[dict]:
+        return [
+            block
+            for record in records
+            for block in (record.get("message") or {}).get("content") or []
+            if isinstance(block, dict)
+        ]
+
+    def test_a_foreign_call_becomes_text(self, tmp_path: Path) -> None:
+        item = conversation("antigravity", calls=2)
+
+        blocks = self._blocks(self._written(tmp_path, item))
+
+        assert not [b for b in blocks if b.get("type") == "tool_use"], (
+            "a call another assistant made was written as one Claude Code made"
+        )
+        assert not [b for b in blocks if b.get("type") == "tool_result"]
+        assert [b for b in blocks if b.get("type") == "text"]
+
+    def test_a_restore_still_writes_a_call_as_a_call(self, tmp_path: Path) -> None:
+        """The half that must not change.
+
+        Rebuilding a Claude Code conversation from UCS is not a conversion. Its
+        calls were made by Claude Code, to tools Claude Code has, and flattening
+        them would be losing detail for no reason at all.
+        """
+        item = conversation("claude-code", calls=2)
+
+        blocks = self._blocks(self._written(tmp_path, item))
+
+        assert [b for b in blocks if b.get("type") == "tool_use"]
+
+    def test_the_import_says_it_did_this(self, tmp_path: Path) -> None:
+        """Said out loud, not done quietly. A conversion that silently changes
+        the shape of the transcript is the same failure in a smaller place."""
+        item = conversation("codex", calls=1)
+        root = tmp_path / "bundle"
+        made = Bundle.create(root, manifest())
+        made.add_conversation(item)
+        store = {"CLAUDE_CONFIG_DIR": str(tmp_path / "store")}
+
+        events = list(ClaudeCodeAdapter(store).import_(root, ImportOptions(allow_cross_tool=True)))
+
+        assert any("readable text" in e.message for e in events if e.kind == "warning")
