@@ -34,6 +34,7 @@ from ferry.adapters.base import (
 from ferry.adapters.census import census, count_of, jsonl_holds
 from ferry.adapters.claude_code.writer import remap_prefix
 from ferry.adapters.codex import paths as cx_paths
+from ferry.adapters.codex.index import ThreadIndexLocked, thread_row, upsert_thread_row
 from ferry.adapters.codex.reader import SessionRead, parent_thread, read_rollout
 from ferry.adapters.codex.writer import REBUILD_NOTES, Rebuild, rollout_lines, rollout_stamp
 from ferry.adapters.conflict import reidentify, rename_note
@@ -58,6 +59,15 @@ _OS_NAMES: dict[str, OSName] = {"Windows": "win32", "Darwin": "darwin", "Linux":
 
 
 _MESSAGE_ROLES = frozenset({"user", "assistant"})
+
+
+def _first_text(conversation: Conversation) -> str:
+    """The first thing said, for the picker's preview column."""
+    for message in conversation.messages:
+        for block in message.content:
+            if block.type == "text" and block.text.strip():
+                return block.text
+    return ""
 
 
 def _threads(count: int) -> str:
@@ -556,6 +566,37 @@ class CodexAdapter(Adapter):
         except OSError as exc:
             yield ImportEvent(kind="error", conversation_id=cid, message=f"write failed: {exc}")
             return
+
+        # The row that makes it findable. Written after the transcript, so a
+        # failed write never leaves a row pointing at a file that is not there,
+        # and reported rather than raised: the conversation *is* on disk and
+        # openable by id, so a picker that does not list it is a real loss but
+        # not the loss of the conversation.
+        databases = cx_paths.state_databases(self._env)
+        if databases:
+            try:
+                upsert_thread_row(
+                    databases[-1],
+                    thread_row(
+                        conversation_id=conversation.id,
+                        rollout_path=destination,
+                        cwd=target_cwd,
+                        title=conversation.title or "Imported conversation",
+                        first_message=_first_text(conversation),
+                        created_at=conversation.created_at,
+                        updated_at=conversation.updated_at,
+                        cli_version=f"ferry-{__version__}",
+                    ),
+                )
+            except ThreadIndexLocked as exc:
+                yield ImportEvent(
+                    kind="warning",
+                    conversation_id=cid,
+                    message=(
+                        f"written, but not added to Codex's session list: {exc}. "
+                        f"Open it with: codex resume {conversation.id}"
+                    ),
+                )
 
         if conversation.provenance is not None:
             provenance_store.record(
