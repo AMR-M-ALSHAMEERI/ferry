@@ -6,19 +6,24 @@ page is what it costs and what works, because both answers are narrower than
 
 ## What you get
 
-**A readable transcript in the target tool. Not a session its assistant can
-pick up and continue.**
+**A conversation you can open, search, and keep working in.**
 
-That is the honest ceiling and it is worth reading twice. Converting a Claude
-Code conversation into another tool gives you something you can open, scroll and
-search there. It does not give that tool's assistant a session it can resume:
-the tool calls in it were made by a different assistant against a different set
-of tools, and no amount of format translation changes that.
+That ceiling used to be lower. This page said a converted conversation was a
+readable transcript and nothing more, because that is what had been measured at
+the time. It has since been tested in all three targets — someone typed into a
+converted conversation in Claude Code, in Copilot Chat and in Codex, and the
+assistant answered from the history it had been given.
 
-If what you want is your history preserved and searchable, conversion does that.
-If what you want is to hand a half-finished task to a different assistant,
-[Compact](../README.md) is the better tool — it produces a handoff document you
-can paste into any of them.
+**What does not come with it is the session.** The tool calls in a converted
+conversation were made by a different assistant against a different set of
+tools; Ferry carries them as readable text and does not present them as calls
+the new tool can re-run. Nothing reconnects to a shell, a file watcher or an
+MCP server that was live somewhere else.
+
+So: if you want your history preserved, searchable and live in a new tool,
+conversion does that. If you want a short handoff to paste as the first message
+of a fresh session rather than the whole history,
+[Compact](../README.md) still does that better.
 
 ## What works
 
@@ -29,29 +34,32 @@ reported success" and "the conversation is really there" are different claims.
 | Into | Works | Why |
 |---|---|---|
 | **Claude Code** | **Yes** | Its transcript is plain JSONL and every envelope field can be rebuilt. All three other tools, every message, 100% of the words. |
-| OpenAI Codex | No | Codex rebuilds a conversation from the `session_meta` header in its own rollout file. A bundle from another tool does not carry one, and the header cannot be invented — Codex rejects the whole file if it is wrong. |
-| GitHub Copilot Chat | Not yet | Copilot Chat stores a conversation as a VS Code transcript document, and Ferry can only write back one it read. It cannot yet build one for a conversation that came from another tool. The chat index is not the obstacle: Ferry already writes it, and every field in it has an obvious default. |
+| **GitHub Copilot Chat** | **Yes** | Ferry builds a VS Code chat document rather than replaying one it read, and writes the workspace chat index entry that makes it appear in the list. A question is carried in the document's `parts`, not only its `text`, because that is what VS Code draws. |
+| **OpenAI Codex** | **Yes** | The `session_meta` header *can* be synthesised — measured, not assumed. Codex also needs a row in its `threads` table to offer the conversation in the picker, the interface events it draws each turn as well as the records it sends the model, and a timestamp on every record. All four are written. |
 | Antigravity | No | Antigravity conversations are restored from the original SQLite database they were exported with. Ferry can carry one across; it cannot build one for a conversation that never had it. |
 
 **Importing a tool's own conversations back into it is not a conversion** and is
 unaffected by any of this. That is an ordinary restore and it works for all
 four tools.
 
-### Why some say "no" and one says "not yet"
+### Why the one "no" is a no
 
-Codex and Antigravity are refused because of how those tools store their data,
-not because of a missing feature in Ferry: Codex rejects a rollout whose header
-it did not write, and an Antigravity conversation is restored from a database
-that has to already exist.
+Antigravity is refused because of how that tool stores its data, not because of
+a missing feature in Ferry: a conversation there is restored from a database
+that has to already exist, and Ferry will not invent one.
 
-**Copilot is different, and the table says so.** Nothing there is unsolved —
-Ferry already derives the workspace key and writes the chat index for Copilot's
-own conversations. What is missing is the step that builds an index entry for a
-conversation that came from somewhere else. That is work, not a wall.
+**Two of these rows used to say no.** Codex was refused on the grounds that its
+header could not be invented, and Copilot on the grounds that Ferry could only
+write back a document it had read. Both turned out to be work rather than
+walls, and both took a measurement to find out — which is the reason this table
+distinguishes a tool's own storage from a gap in Ferry, and the reason the
+Antigravity row is worth re-testing rather than treating as permanent.
 
-The distinction is kept because a person deciding what to do with their history
-is served by a straight answer, and "cannot" and "not yet" are different
-answers.
+Every one of the three that works needed something **after** the file was
+written before the tool would admit it existed: a Copilot chat index entry, a
+trusted folder in Claude Code, a `threads` row in Codex. In each case the
+conversation was complete on disk and the tool's list was empty, which looks
+exactly like the import having failed.
 
 ## What is lost
 

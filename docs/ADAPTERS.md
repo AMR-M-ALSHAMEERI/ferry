@@ -86,6 +86,32 @@ document promising provenance is then untrue.
 Pass no `env` to either. An adapter's environment says where *its tool* keeps
 things; Ferry's own directory is resolved from the process environment.
 
+**Find the gate that comes after the write.** Three tools, three times: a
+Copilot transcript is invisible without an entry in the workspace chat index, a
+Claude Code conversation cannot be opened from an untrusted folder, and a Codex
+rollout with no row in `threads` is offered by nothing. In each case the file
+was complete and correct on disk and the tool's list was empty —
+indistinguishable from the import having failed. **Locating that gate is part
+of writing the adapter**, not a defect found afterwards, and it is the first
+thing to go looking for in a tool that is new to Ferry.
+
+**Verify the way a person will use it.** The Codex path was checked with
+`resume <id>`, which works with the index empty, so the check passed while the
+picker showed nothing. A verification that takes a shortcut no user has proves
+the shortcut.
+
+**Write the record the interface reads, not only the one the model reads.** A
+format may keep two accounts of the same turn — Codex keeps `response_item`
+for the model and `event_msg` for the screen. Write one and the conversation
+resumes with half of it missing.
+
+**Fill a required field even when the source has nothing to put in it.** UCS
+makes `Message.timestamp` optional because Copilot genuinely records none;
+Codex requires a time on every record. The middle format is deliberately
+permissive, so **each writer copes with what its own tool demands** rather than
+trusting UCS to have supplied it. A field written only when the source happens
+to carry it is a bug waiting for the first source that does not.
+
 **Beware a format that records every turn twice.** Codex writes a canonical
 record and an interface event for the same turn; reading both doubles the
 conversation, and reading only the canonical one loses the parts it does not

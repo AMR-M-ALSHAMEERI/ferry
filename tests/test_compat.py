@@ -144,8 +144,8 @@ class TestWhatAConversionCosts:
         """The honest-scope claim, said wherever a conversion is offered.
 
         It is the sentence someone needs *before* spending an evening
-        converting a year of history: what they get is a readable transcript,
-        not a session that can be continued.
+        converting a year of history: the conversation can be continued, and
+        the tool calls in it are text rather than calls the target can run.
         """
         for source in TOOLS:
             if source == "claude-code":

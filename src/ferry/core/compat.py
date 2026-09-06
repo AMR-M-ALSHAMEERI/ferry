@@ -29,9 +29,16 @@ really there* are different claims and only the second is worth shipping.
 ======================  ==================================================
 
 **Unsupported is an answer, not a failure.** PLAN section 5 M7b permits
-Antigravity-as-target to end the milestone this way, and the honest ceiling for
-every pair that does work is a *readable transcript* in the target tool -- not a
-session the target's AI can meaningfully continue.
+Antigravity-as-target to end the milestone this way.
+
+**The ceiling moved once, upward, and only because it was tested.** Every pair
+that works was described here as a *readable transcript* and nothing more.
+Then a person typed into a converted conversation in Claude Code, in Copilot
+Chat and in Codex, and the assistant answered from the history it had been
+given (PROGRESS #201, #219). What remains true is narrower and still worth
+saying: the tool calls in a converted conversation were made by another
+assistant against another set of tools, and they are carried as text rather
+than as calls the target can run.
 
 **A measurement has a version attached to it.** Codex was refused because an
 invented header was measured, at Codex 0.98, to make it discard the whole
@@ -82,8 +89,9 @@ only case that needs no permission. The other three are ordered by how much of
 the conversation survives, and only ``unsupported`` is refused outright."""
 
 CEILING = (
-    "A converted conversation is a readable transcript in the target tool, "
-    "not a session its assistant can pick up and continue."
+    "A converted conversation can be opened and continued in the target tool, "
+    "but its tool calls are carried as readable text, not as calls that tool "
+    "can run."
 )
 """The claim Ferry is willing to make, stated wherever a conversion is offered.
 

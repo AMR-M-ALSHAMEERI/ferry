@@ -10,18 +10,17 @@ assistant entirely — across **Claude Code**, **OpenAI Codex**,
 ## Cross-tool migration
 
 Ferry's Universal Conversation Schema is designed so a conversation is not
-locked to the tool that created it. **Into Claude Code, that works today**: a
-conversation from Codex, Copilot Chat or Antigravity is written into Claude
-Code's history with every message and every word intact.
+locked to the tool that created it. **Three of the four tools are targets
+today** — Claude Code, GitHub Copilot Chat and OpenAI Codex. A conversation
+from any of the four is written into any of those three with every message and
+every word intact, listed where that tool lists its own conversations, and
+openable from the same place.
 
-The other three directions are refused today, and the reasons differ. Codex
-rebuilds a conversation from a header only its own rollout files carry, and
-Antigravity restores from an original SQLite database Ferry can copy but cannot
-invent — both are properties of those tools. **Copilot Chat is closer:** a
-conversation is invisible there unless it is also listed in the workspace chat
-index, and Ferry builds that index for Copilot's own conversations already —
-it does not yet build an entry for one that arrived from elsewhere. Each
-refusal names its own reason.
+**Antigravity is refused**, and the reason is a property of that tool rather
+than a missing feature: an Antigravity conversation is restored from the
+original SQLite database it was exported with, and Ferry can carry one across
+but cannot build one for a conversation that never had it. The refusal names
+that reason on screen.
 
 Conversion is **off by default**. When a bundle holds conversations from
 another tool, Ferry counts what converting them would cost — signatures that
@@ -29,9 +28,16 @@ cannot be reissued, tool calls that become text — and asks, with the option
 that converts nothing under the cursor. The result is marked as converted in
 its `provenance` record rather than passed off as native.
 
-**What you get is a readable transcript in the target tool, not a session that
-tool's assistant can pick up and continue.** If your goal is to *continue* the
-work elsewhere, use **Compact** — it is the better tool for that job.
+**You can open a migrated conversation and keep working in it.** That was not
+true when this was first written, and it was tested rather than assumed:
+someone typed into a converted conversation in each of the three targets and
+the assistant replied, reading the history it had been given.
+
+What does not come with it is the *session* — the tool calls in a converted
+conversation were made by a different assistant against a different set of
+tools, and they are carried as readable text, not as calls the new tool can
+re-run. If you want a short handoff to paste into a fresh session instead of
+the whole history, **Compact** still does that better.
 
 See [docs/CROSS-TOOL.md](docs/CROSS-TOOL.md) for the full table and what each
 conversion costs.
@@ -52,9 +58,10 @@ your conversation word for word or counted from it. What it gives up in
 exchange is narrative. It can quote you the three facts; it cannot write the
 sentence that joins them.
 
-This applies doubly to cross-tool migration, which is why the section above
-says the same thing: it gives you a readable transcript in the target tool, not
-a session that tool's AI can pick up and continue.
+This applies to cross-tool migration too. A migrated conversation can be
+continued — the assistant reads the transcript it was given and answers from
+it — but nothing re-loads a whole history into a model's context on your
+behalf, in any tool, converted or not.
 
 ## Install
 

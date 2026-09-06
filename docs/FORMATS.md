@@ -244,14 +244,34 @@ URI is the only surviving copy.
 440 records, but `dictation-history/` holds 177 files, so audio input exists on
 this machine and simply did not reach a rollout. **Unverified, not absent.**
 
-### Resuming
+### Resuming, and being *offered* to resume
 
-`codex exec resume <id>` resolves the transcript **from disk** — verified by
-writing a rebuilt rollout into a scratch `CODEX_HOME` with an empty `threads`
-table and watching Codex load it. `codex.exe` does contain
-`SELECT rollout_path FROM threads WHERE id = ? AND archived = 0`, so the
-database is presumably what the interactive picker and the Desktop list read;
-that path is **untested**, because the picker cannot be driven headlessly.
+**Two different things, and the difference cost a phase.** Measured at Codex
+0.147; the paragraph this replaces was measured at 0.98 and had expired.
+
+`codex exec resume <id>` resolves the transcript **from disk**, with the
+`threads` table empty. That was true then and is true now — and it is why a
+verification done by id passed while the feature was broken.
+
+**The picker reads the database.** Ten rollouts on disk against six rows: the
+six were exactly what Codex offered. A rollout with no row can be opened only
+by someone who knows its uuid, which nobody migrating their history does. The
+row is what makes a conversation *findable*, and writing one is part of writing
+a conversation.
+
+Four things a rebuilt rollout needs before Codex will show it:
+
+| What | Why |
+|---|---|
+| A row in `threads` | The picker and the desktop list read the database, not the date tree. |
+| `event_msg` records | A rollout keeps two parallel accounts of a turn: `response_item` is what is sent to the model, `event_msg` is what the interface **draws**. Write only the first and the conversation resumes with the screen half empty. |
+| A turn around each exchange | `task_started` and `task_complete`, sharing a `turn_id` that the assistant message repeats in `internal_chat_message_metadata_passthrough`. An assistant message in no turn belongs to nothing the app can draw. Its `phase` field decides visibility. |
+| A `timestamp` on **every** record | Not only the ones whose message carried a time. Copilot records no per-message timestamps at all, so a conversation converted from it produced records with the field missing — and Codex reads none of them. |
+
+`session_meta` can be **synthesised** rather than borrowed from a real session:
+the strictness described above is about the *shape* of `base_instructions` and
+`context_window`, not about provenance. Codex does not check that it wrote the
+header itself.
 
 ### Size
 

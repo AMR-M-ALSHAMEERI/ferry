@@ -1839,7 +1839,7 @@ def test_a_mixed_bundle_says_what_converting_would_cost(foreign_bundle: Path) ->
 
     assert "from codex" in ui.text
     # The honest ceiling, said before the choice rather than in the release notes.
-    assert "not a session its assistant can pick up and continue" in ui.text
+    assert "not as calls that tool can run" in ui.text
     # And the reassurance that makes the choice safe to get wrong.
     assert "your backup is not changed" in ui.text
 
