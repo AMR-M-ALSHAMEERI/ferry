@@ -26,7 +26,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Final
-from uuid import UUID
+from uuid import UUID, uuid5
 
 from ferry import __version__
 from ferry.ucs import Attachment, Conversation, Message
@@ -40,6 +40,10 @@ __all__ = [
     "rollout_stamp",
     "session_meta_for",
 ]
+
+_TURN_NAMESPACE: Final = UUID("b7f3c1a4-2e5d-4f6a-9b8c-1d2e3f4a5b6c")
+"""Namespace for turn ids, so re-importing a conversation produces the same
+turns rather than a fresh set each time."""
 
 REBUILD_NOTES = (
     "records rebuilt from UCS: token counts, window state, turn context and "
@@ -200,18 +204,60 @@ def _ui_event(message: Message, stamp: str | None) -> dict[str, Any] | None:
     )
     if not text:
         return None
-    kind = "user_message" if message.role == "user" else "agent_message"
-    record: dict[str, Any] = {"type": "event_msg", "payload": {"type": kind, "message": text}}
+    if message.role == "user":
+        payload: dict[str, Any] = {"type": "user_message", "message": text}
+    else:
+        # `phase` decides whether the desktop app shows the message at all.
+        #
+        # Measured across this machine's own sessions: 1,387 agent messages
+        # carry `{memory_citation, message, phase, type}` with a phase of
+        # `commentary` or `final_answer`, and 50 older ones carry `{message,
+        # type}` alone. The CLI renders both shapes, so a rebuilt conversation
+        # read correctly there while the desktop app showed **only the user's
+        # side** -- every reply present in the file and absent from the screen.
+        #
+        # `final_answer` because that is what a completed reply is. Ferry is not
+        # replaying a turn in progress: the conversation being migrated is over.
+        # `memory_citation` is null in all 1,437 real events, so null is what
+        # Codex itself writes rather than a value invented to fill the key.
+        payload = {
+            "type": "agent_message",
+            "message": text,
+            "phase": "final_answer",
+            "memory_citation": None,
+        }
+    record: dict[str, Any] = {"type": "event_msg", "payload": payload}
     if stamp:
         record["timestamp"] = stamp
     return record
 
 
 def _records_for(
-    message: Message, rebuild: Rebuild, ordinal: int, *, shown: bool = True
+    message: Message,
+    rebuild: Rebuild,
+    ordinal: int,
+    *,
+    shown: bool = True,
+    turn_id: str = "",
+    when: datetime | None = None,
 ) -> list[dict[str, Any]]:
     """One UCS message as the Codex records it came from."""
-    stamp = _iso(message.timestamp) if message.timestamp else None
+    # **Every record carries a timestamp, always.** A UCS message need not have
+    # one -- a Copilot conversation carries none at all -- and this used to omit
+    # the field when it was missing, which produced a rollout Codex would not
+    # render: the assistant's side was absent in both the CLI and the desktop
+    # app while every word sat in the file.
+    #
+    # It took five rounds of testing to find, because a conversation *with*
+    # timestamps rendered perfectly and every spike had them. The difference
+    # between the working spike and the failing conversation was eight records
+    # missing one key.
+    #
+    # `when` is the turn's own time, and the conversation's before that. Not a
+    # time invented to fill the field: the best thing actually known about when
+    # this message happened.
+    moment = message.timestamp or when
+    stamp = _iso(moment) if moment else None
     out: list[dict[str, Any]] = []
 
     def emit(record_type: str, payload: dict[str, Any]) -> None:
@@ -229,6 +275,17 @@ def _records_for(
                 "id": f"msg_ferry_{ordinal}",
                 "role": message.role if message.role in {"user", "assistant"} else "user",
                 "content": content,
+                # A reply is bound to its turn, and marked as a finished one.
+                # Without both, the desktop app has a message belonging to
+                # nothing it can draw, and shows the user talking to nobody.
+                **(
+                    {
+                        "phase": "final_answer",
+                        "internal_chat_message_metadata_passthrough": {"turn_id": turn_id},
+                    }
+                    if message.role == "assistant" and turn_id
+                    else {}
+                ),
             },
         )
         # And the same turn again, as the interface reads it. Both accounts or
@@ -274,6 +331,31 @@ def _records_for(
     return out
 
 
+def _turns(conversation: Conversation) -> list[tuple[int, int]]:
+    """The conversation as exchanges: each user turn and the replies to it.
+
+    A turn opens at a user message and runs to just before the next one. A
+    conversation that opens with a reply -- odd, but it is still someone's
+    conversation -- gets a turn from the start rather than losing its first
+    messages to a turn that never opened.
+    """
+    starts = [i for i, message in enumerate(conversation.messages) if message.role == "user"]
+    if not starts or starts[0] != 0:
+        starts.insert(0, 0)
+    ends = [*starts[1:], len(conversation.messages)]
+    return list(zip(starts, ends, strict=True))
+
+
+def _last_reply(conversation: Conversation, start: int, end: int) -> str:
+    """The reply a turn ended on, which `task_complete` repeats."""
+    for message in reversed(conversation.messages[start:end]):
+        if message.role == "assistant":
+            for block in message.content:
+                if block.type == "text" and block.text.strip():
+                    return block.text
+    return ""
+
+
 def rollout_lines(conversation: Conversation, rebuild: Rebuild) -> bytes | None:
     """The whole rollout as JSONL, or ``None`` if no header was available."""
     header = session_meta_for(conversation, rebuild)
@@ -312,32 +394,78 @@ def rollout_lines(conversation: Conversation, rebuild: Rebuild) -> bytes | None:
     own_header = isinstance((conversation.source_raw or {}).get("session_meta"), dict)
     may_show_user = marker_pending or not own_header
 
-    for ordinal, message in enumerate(conversation.messages):
-        records.extend(
-            _records_for(
-                message,
-                rebuild,
-                ordinal,
-                shown=(may_show_user and not (marker_pending and message.role == "user"))
-                if message.role == "user"
-                else True,
-            )
+    for start_at, end_at in _turns(conversation):
+        # **The turn is what makes a reply visible.** Measured 2026-09-06: a
+        # rebuilt conversation read correctly in the Codex CLI and showed only
+        # the user's side in the desktop app, every reply present in the file.
+        # Real sessions wrap each exchange in `task_started` / `task_complete`
+        # sharing a `turn_id`, and a reply belonging to no turn is one the
+        # interface cannot place.
+        #
+        # Only what Ferry can know goes in. Real events also carry
+        # `duration_ms` and `time_to_first_token_ms` -- how long a model took
+        # to answer, on a day this machine was not there for. The experiment
+        # covered a turn with those and a turn without, and both rendered, so
+        # nothing is invented here.
+        turn_id = str(uuid5(_TURN_NAMESPACE, f"{conversation.id}:{start_at}"))
+        opened = conversation.messages[start_at].timestamp or conversation.created_at
+        closed = conversation.messages[end_at - 1].timestamp or opened
+        records.append(
+            {
+                "type": "event_msg",
+                "timestamp": _iso(opened),
+                "payload": {
+                    "type": "task_started",
+                    "turn_id": turn_id,
+                    "started_at": int(opened.timestamp()),
+                },
+            }
         )
-        if marker_pending and message.role == "user":
-            records.append(
-                {
-                    "type": "event_msg",
-                    "timestamp": _iso(message.timestamp or conversation.created_at),
-                    "payload": {
-                        "type": "user_message",
-                        "message": typed,
-                        "images": [],
-                        "local_images": [],
-                        "text_elements": [],
-                    },
-                }
+
+        for ordinal in range(start_at, end_at):
+            message = conversation.messages[ordinal]
+            records.extend(
+                _records_for(
+                    message,
+                    rebuild,
+                    ordinal,
+                    turn_id=turn_id,
+                    when=opened,
+                    shown=(may_show_user and not (marker_pending and message.role == "user"))
+                    if message.role == "user"
+                    else True,
+                )
             )
-            marker_pending = False
+            if marker_pending and message.role == "user":
+                records.append(
+                    {
+                        "type": "event_msg",
+                        "timestamp": _iso(message.timestamp or conversation.created_at),
+                        "payload": {
+                            "type": "user_message",
+                            "message": typed,
+                            "images": [],
+                            "local_images": [],
+                            "text_elements": [],
+                        },
+                    }
+                )
+                marker_pending = False
+
+        records.append(
+            {
+                "type": "event_msg",
+                "timestamp": _iso(closed),
+                "payload": {
+                    "type": "task_complete",
+                    "turn_id": turn_id,
+                    # Codex's own duplication of the reply, not Ferry's.
+                    "last_agent_message": _last_reply(conversation, start_at, end_at),
+                    "started_at": int(opened.timestamp()),
+                    "completed_at": int(closed.timestamp()),
+                },
+            }
+        )
 
     return "".join(json.dumps(record, ensure_ascii=False) + "\n" for record in records).encode(
         "utf-8"

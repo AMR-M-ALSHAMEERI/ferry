@@ -849,3 +849,101 @@ def test_pasted_files_survive_the_round_trip(
     after = second.load_conversation(EDGE_ID)
     assert [a.filename for a in before.attachments] == [a.filename for a in after.attachments]
     assert [a.sha256 for a in before.attachments] == [a.sha256 for a in after.attachments]
+
+
+def test_an_assistant_reply_is_marked_so_the_interface_shows_it(
+    exported: Path, target: CodexAdapter, tmp_path: Path, manifest
+) -> None:
+    """The defect a passing suite could not have caught.
+
+    A migrated conversation read correctly in the Codex CLI and showed **only
+    the user's side** in the desktop app: every reply present in the file,
+    absent from the screen. The `phase` field decides whether an agent message
+    is displayed, and Ferry was not writing it.
+
+    Measured on this machine: 1,387 real agent messages carry a phase of
+    `commentary` or `final_answer`; 50 older ones carry none, which is why the
+    CLI renders the bare shape and a newer client does not. **Rendering in one
+    client is not rendering**, and only a person opening the other one could
+    have found it.
+    """
+    conversation_id = UUID("019f8888-8888-7888-8888-888888888888")
+    bundle = Bundle.create(tmp_path / "reply", manifest)
+    bundle.add_conversation(
+        Conversation(
+            id=conversation_id,
+            source_tool="claude-code",
+            created_at=datetime(2026, 9, 1, tzinfo=UTC),
+            updated_at=datetime(2026, 9, 1, tzinfo=UTC),
+            workspace=Workspace(original_path="/home/bob/work"),
+            messages=[
+                Message(role="user", content=[TextBlock(text="why pnpm?")]),
+                Message(role="assistant", content=[TextBlock(text="because of the lockfile")]),
+            ],
+        )
+    )
+
+    list(target.import_(tmp_path / "reply", ImportOptions(allow_cross_tool=True)))
+
+    written = list((tmp_path / "target").rglob("*.jsonl"))
+    assert written
+    events = [
+        json.loads(line)
+        for line in written[0].read_text(encoding="utf-8").splitlines()
+        if json.loads(line)["type"] == "event_msg"
+    ]
+    shown = [e["payload"] for e in events if e["payload"].get("type") == "agent_message"]
+    assert shown, "the assistant's reply has no record the interface reads"
+    assert shown[0]["phase"] == "final_answer", (
+        "an unmarked reply is present in the file and invisible on screen"
+    )
+    # Both sides, or the conversation is half a conversation.
+    asked = [e["payload"] for e in events if e["payload"].get("type") == "user_message"]
+    assert asked, "the question has no record the interface reads"
+
+
+def test_every_record_carries_a_time_even_when_the_message_has_none(
+    exported: Path, target: CodexAdapter, tmp_path: Path, manifest
+) -> None:
+    """The defect that took five rounds of testing to find.
+
+    A UCS message need not have a timestamp -- a Copilot conversation carries
+    none at all -- and the writer used to omit the field when it was missing.
+    Codex will not render such a rollout: the assistant's side was absent in
+    both the CLI and the desktop app, with every word present in the file.
+
+    It hid because **every spike had timestamps**. A synthetic conversation
+    rendered perfectly while the real one failed, and the whole difference was
+    eight records missing one key. The fix is not to invent a time but to fall
+    back to the turn's, and then the conversation's -- the best thing actually
+    known about when the message happened.
+    """
+    conversation_id = UUID("019f9999-9999-7999-8999-999999999999")
+    bundle = Bundle.create(tmp_path / "timeless", manifest)
+    bundle.add_conversation(
+        Conversation(
+            id=conversation_id,
+            source_tool="copilot",
+            created_at=datetime(2026, 9, 1, tzinfo=UTC),
+            updated_at=datetime(2026, 9, 1, tzinfo=UTC),
+            workspace=Workspace(original_path="/home/bob/work"),
+            messages=[
+                # No timestamps anywhere, which is what a Copilot export looks
+                # like and what no spike of mine ever reproduced.
+                Message(role="user", content=[TextBlock(text="why pnpm?")]),
+                Message(role="assistant", content=[TextBlock(text="the lockfile")]),
+            ],
+        )
+    )
+
+    list(target.import_(tmp_path / "timeless", ImportOptions(allow_cross_tool=True)))
+
+    written = list((tmp_path / "target").rglob("*.jsonl"))
+    assert written
+    records = [json.loads(line) for line in written[0].read_text(encoding="utf-8").splitlines()]
+    timeless = [r for r in records if "timestamp" not in r]
+    assert not timeless, f"{len(timeless)} records Codex will not render"
+    for record in records:
+        assert record["timestamp"].startswith("2026-09-01"), (
+            "a record was stamped with a time nothing in the conversation supports"
+        )
