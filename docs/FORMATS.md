@@ -266,7 +266,14 @@ Four things a rebuilt rollout needs before Codex will show it:
 | A row in `threads` | The picker and the desktop list read the database, not the date tree. |
 | `event_msg` records | A rollout keeps two parallel accounts of a turn: `response_item` is what is sent to the model, `event_msg` is what the interface **draws**. Write only the first and the conversation resumes with the screen half empty. |
 | A turn around each exchange | `task_started` and `task_complete`, sharing a `turn_id` that the assistant message repeats in `internal_chat_message_metadata_passthrough`. An assistant message in no turn belongs to nothing the app can draw. Its `phase` field decides visibility. |
+| A `cwd` spelt Codex's way | The CLI picker offers the sessions belonging to the folder you are in, and matches on the stored string. On Windows Codex writes the extended-length form, `\\?\C:\...`, in 7 of 7 rows measured. A plain `C:\...` is the same directory and a different string: the picker matches nothing and shows an empty list. |
 | A `timestamp` on **every** record | Not only the ones whose message carried a time. Copilot records no per-message timestamps at all, so a conversation converted from it produced records with the field missing — and Codex reads none of them. |
+
+**The row can be perfect and still be invisible**, which is the sharpest
+version of this lesson the project has met. The `cwd` finding was measured only
+because somebody imported through the menu into a scratch home and opened the
+picker: a test that writes a row and reads it back agrees with itself about the
+spelling, and every automated check did.
 
 `session_meta` can be **synthesised** rather than borrowed from a real session:
 the strictness described above is about the *shape* of `base_instructions` and

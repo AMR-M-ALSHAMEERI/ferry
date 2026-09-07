@@ -1,4 +1,4 @@
-"""The row that makes a written conversation findable.
+r"""The row that makes a written conversation findable.
 
 **A rollout file with no row in ``threads`` is invisible**, and this project has
 now learned that in three different tools: a Copilot transcript missing from the
@@ -29,6 +29,22 @@ written at the cautious end:
     writable, network restricted. A migrated transcript needs no permissions at
     all -- it is a record of work already done -- and anything the person wants
     to grant afterwards, they can grant knowingly.
+
+**And ``cwd`` has to be spelt the way Codex spells it.** The CLI picker offers
+the sessions belonging to the folder you are standing in, and it matches on the
+stored string. Codex writes a Windows working directory in the extended-length
+form -- ``\\?\C:\...`` -- in **7 of 7** rows measured, its own new
+sessions included. Ferry wrote a plain ``C:\...``, which is the same directory
+and a different string, so the picker matched nothing and showed an empty list
+over four conversations that were complete on disk and correctly indexed.
+
+Confirmed by changing one row and watching the conversation appear. **The
+fourth time this project has met the same shape of gate**, after Copilot's chat
+index, Claude Code's trusted folder, and the missing ``threads`` row above -- and
+the first where the row existed and was still not enough.
+
+``rollout_path`` is deliberately left alone: Codex's own rows carry both
+spellings, so there is no measured form to match.
 """
 
 from __future__ import annotations
@@ -42,6 +58,7 @@ from uuid import UUID
 
 __all__ = [
     "APPROVAL_MODE",
+    "canonical_cwd",
     "SANDBOX_POLICY",
     "ThreadIndexLocked",
     "thread_row",
@@ -109,6 +126,26 @@ class ThreadIndexLocked(RuntimeError):
     """
 
 
+EXTENDED_PREFIX: Final = "\\\\?\\"
+"""How Windows spells an absolute path when it wants no length limit."""
+
+
+def canonical_cwd(cwd: str) -> str:
+    r"""A working directory spelt the way Codex spells it, so the picker matches.
+
+    Only a drive-letter path is touched, and the shape is the test rather than
+    the running platform: a ``C:\...`` string means the same thing whichever
+    machine reads the row, and a rule written against `os.name` would go
+    unexercised on eleven of the twelve CI legs.
+    """
+    if cwd.startswith(EXTENDED_PREFIX):
+        return cwd
+    drive_letter = len(cwd) >= 3 and cwd[0].isalpha() and cwd[1] == ":" and cwd[2] in ("/", "\\")
+    if not drive_letter:
+        return cwd
+    return EXTENDED_PREFIX + cwd.replace("/", "\\")
+
+
 def _first_line(text: str, limit: int = 200) -> str:
     line = " ".join(text.split())
     return line[:limit]
@@ -138,7 +175,7 @@ def thread_row(
         # rebuilt header says wrote the rollout, and the two must agree.
         "source": "cli",
         "model_provider": "openai",
-        "cwd": cwd,
+        "cwd": canonical_cwd(cwd),
         "title": shown,
         "sandbox_policy": SANDBOX_POLICY,
         "approval_mode": APPROVAL_MODE,

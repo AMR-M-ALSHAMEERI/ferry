@@ -95,6 +95,8 @@ indistinguishable from the import having failed. **Locating that gate is part
 of writing the adapter**, not a defect found afterwards, and it is the first
 thing to go looking for in a tool that is new to Ferry.
 
+**Write a value in the tool's own spelling, not merely in a correct one.** Codex's picker matches the working directory as a string, and it stores a Windows path in the extended-length form (`\\?\C:\...`). Ferry stored the same directory spelt plainly, and the picker matched nothing -- a row that was correct in every field and invisible anyway. Where a tool will compare a value rather than resolve it, copy the spelling it uses.
+
 **Verify the way a person will use it.** The Codex path was checked with
 `resume <id>`, which works with the index empty, so the check passed while the
 picker showed nothing. A verification that takes a shortcut no user has proves

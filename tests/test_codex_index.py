@@ -28,6 +28,7 @@ from ferry.adapters.codex.index import (
     COLUMNS,
     SANDBOX_POLICY,
     ThreadIndexLocked,
+    canonical_cwd,
     thread_row,
     upsert_thread_row,
 )
@@ -166,6 +167,50 @@ class TestTheSafetyChoices:
         assert "model" not in COLUMNS
         assert "reasoning_effort" not in COLUMNS
         assert not [name for name in COLUMNS if name.startswith("git_")]
+
+
+class TestTheWorkingDirectoryIsSpeltTheWayCodexSpellsIt:
+    r"""A row can be perfect and still be invisible.
+
+    The CLI picker offers the sessions belonging to the folder you are standing
+    in, and matches on the stored string. Codex writes a Windows working
+    directory as ``\\?\C:\...`` -- 7 of 7 rows measured, its own new sessions
+    included -- and Ferry wrote a plain ``C:\...``: the same directory, a
+    different string, and an empty list over four conversations that were on
+    disk and correctly indexed.
+
+    Found by importing through the menu into a scratch Codex home and looking
+    at the picker, which no test could have done: a suite that writes a row and
+    reads it back agrees with itself about the spelling.
+    """
+
+    def test_a_windows_directory_is_stored_the_way_the_picker_matches(self) -> None:
+        row = thread_row(
+            conversation_id=uuid4(),
+            rollout_path=Path("/store/rollout.jsonl"),
+            cwd=r"C:\Users\Dell\Desktop\Ferry",
+            title="a migrated conversation",
+            first_message="what did you do?",
+            created_at=datetime(2026, 9, 1, tzinfo=UTC),
+            updated_at=datetime(2026, 9, 2, tzinfo=UTC),
+            cli_version="ferry-0.1.0",
+        )
+
+        assert row["cwd"] == r"\\?\C:\Users\Dell\Desktop\Ferry"
+
+    def test_a_directory_already_spelt_that_way_is_left_alone(self) -> None:
+        assert canonical_cwd(r"\\?\C:\work") == r"\\?\C:\work"
+
+    def test_a_unix_directory_is_untouched(self) -> None:
+        """The prefix means nothing outside Windows, and inventing one there
+        would break the row on the two platforms that do not use it."""
+        assert canonical_cwd("/home/bob/work") == "/home/bob/work"
+        assert canonical_cwd("relative/path") == "relative/path"
+
+    def test_forward_slashes_become_the_separator_codex_writes(self) -> None:
+        """An extended-length path is passed to the filesystem unparsed, so a
+        forward slash in one is not the separator it is everywhere else."""
+        assert canonical_cwd("C:/Users/Dell/Ferry") == r"\\?\C:\Users\Dell\Ferry"
 
 
 class TestWhenItCannotBeWritten:
