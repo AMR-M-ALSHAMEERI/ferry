@@ -78,8 +78,14 @@ ferry            # launch the interactive menu
 ferry --version  # print the installed version
 ```
 
-Full export → bundle → import walkthrough will be documented here once the
-adapters are implemented.
+Arrow keys move, Enter chooses, Escape backs out of any screen without doing
+anything. Ferry finds your assistants, and everything else is two steps:
+**export to a bundle**, then **import from it** — on this machine, another
+machine, or into a different assistant.
+
+**[docs/GUIDE.md](docs/GUIDE.md) is the walkthrough**: every screen, what each
+option does, and what it costs. Worth reading before the first import, because
+that is the one part of Ferry that writes into your real conversation history.
 
 ## Supported tools
 
