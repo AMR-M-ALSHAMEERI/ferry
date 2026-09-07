@@ -42,7 +42,7 @@ from ferry.adapters.dedup import compare_duplicate
 from ferry.adapters.formatcheck import FormatCheck
 from ferry.core import Bundle, Manifest, SourceMachine, back_up
 from ferry.core import provenance as provenance_store
-from ferry.core.compat import refusal
+from ferry.core.compat import assess, refusal
 from ferry.core.manifest import OSName
 from ferry.ucs import Attachment, Conversation, Provenance, ToolName
 
@@ -530,13 +530,20 @@ class CodexAdapter(Adapter):
             yield ImportEvent(kind="warning", conversation_id=cid, message=note)
 
         if conversation.source_tool != TOOL:
+            # The notes recorded are the notes the person was shown before
+            # agreeing -- the assessment's, then what this rebuild costs. This
+            # recorded only the rebuild half until P3.10 exported a converted
+            # conversation and read it back: the confirmation screen counted
+            # thinking signatures and tool calls, and the provenance block,
+            # which is the copy that outlives the screen, mentioned neither.
+            # Claude Code and Copilot had it right; this adapter did not.
             conversation.provenance = Provenance(
                 original_tool=conversation.source_tool,
                 imported_into=TOOL,
                 imported_at=datetime.now(UTC),
                 ferry_version=__version__,
                 lossy=True,
-                conversion_notes=list(REBUILD_NOTES),
+                conversion_notes=[*assess(conversation, TOOL).notes, *REBUILD_NOTES],
             )
 
         if options.dry_run:

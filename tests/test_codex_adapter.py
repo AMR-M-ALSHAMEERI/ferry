@@ -33,7 +33,14 @@ from ferry.adapters.codex.writer import (
 )
 from ferry.core import Bundle
 from ferry.core import provenance as provenance_store
-from ferry.ucs import Conversation, Message, TextBlock, Workspace
+from ferry.ucs import (
+    Conversation,
+    Message,
+    TextBlock,
+    ThinkingBlock,
+    ToolUseBlock,
+    Workspace,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures" / "codex"
 BASIC_ID = UUID("019f1111-1111-7111-8111-111111111111")
@@ -639,6 +646,51 @@ def test_a_cross_tool_import_records_where_it_came_from(
     assert recorded.original_tool == "claude-code"
     assert recorded.imported_into == "codex"
     assert recorded.lossy is True
+
+
+def test_the_record_says_what_the_person_was_shown(
+    exported: Path, target: CodexAdapter, tmp_path: Path, manifest
+) -> None:
+    """The provenance block and the confirmation screen must not disagree.
+
+    The screen counts thinking signatures that cannot be reissued and tool
+    calls that become text, and that count is what someone agreed to. The
+    record is the copy that outlives the screen, so a record listing less is
+    the more durable of the two documents contradicting the one a person
+    actually read. This adapter stored only its rebuild notes until an export
+    of a converted conversation was read back and the difference showed.
+    """
+    conversation_id = UUID("019f7777-7777-7777-8777-777777777777")
+    bundle = Bundle.create(tmp_path / "foreign", manifest)
+    bundle.add_conversation(
+        Conversation(
+            id=conversation_id,
+            source_tool="claude-code",
+            created_at=datetime(2026, 8, 1, tzinfo=UTC),
+            updated_at=datetime(2026, 8, 1, tzinfo=UTC),
+            workspace=Workspace(original_path="/home/bob/other"),
+            messages=[
+                Message(role="user", content=[TextBlock(text="hello")]),
+                Message(
+                    role="assistant",
+                    content=[
+                        ThinkingBlock(text="considering", signature="sig-from-another-vendor"),
+                        ToolUseBlock(id="call_1", name="read_file", input={"path": "a.py"}),
+                    ],
+                ),
+            ],
+        )
+    )
+
+    list(target.import_(tmp_path / "foreign", ImportOptions(allow_cross_tool=True)))
+
+    recorded = provenance_store.recall("codex", conversation_id)
+    assert recorded is not None
+    notes = " | ".join(recorded.conversion_notes)
+    assert "signature" in notes, f"the signature it counted on screen is unrecorded: {notes}"
+    assert "tool call" in notes, f"the tool call it counted on screen is unrecorded: {notes}"
+    # And still says what rebuilding itself costs.
+    assert "rebuilt from UCS" in notes
 
 
 def test_the_writer_builds_the_measured_header_and_no_more(
