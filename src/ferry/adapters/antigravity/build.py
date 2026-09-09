@@ -52,6 +52,7 @@ from ferry.ucs import (
 )
 
 __all__ = [
+    "BUILD_NOTES",
     "SCHEMA",
     "assistant_payload",
     "build_database",
@@ -61,6 +62,18 @@ __all__ = [
     "trajectory_blob",
     "user_payload",
 ]
+
+BUILD_NOTES = (
+    "written as an Antigravity conversation rather than restored from one: "
+    "checkpoints, file snapshots and the agent's own working state are not carried",
+    "tool calls are written as text, never as steps Antigravity is shown as having run",
+)
+"""What building a conversation costs, said in the record as well as on screen.
+
+The provenance block is the copy that outlives the confirmation screen, so it
+carries the assessment's notes and these -- the same rule Codex learned at
+ledger #220 when it stored only half of them.
+"""
 
 USER_INPUT: Final = 14
 PLANNER_RESPONSE: Final = 15

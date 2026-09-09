@@ -9,6 +9,7 @@ watching it not appear.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
@@ -16,7 +17,9 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from ferry.adapters.antigravity import paths as ag_paths
 from ferry.adapters.antigravity import reader, wire
+from ferry.adapters.antigravity.adapter import AntigravityAdapter
 from ferry.adapters.antigravity.build import (
     PLANNER_RESPONSE,
     USER_INPUT,
@@ -29,6 +32,10 @@ from ferry.adapters.antigravity.index import (
     entry_for,
     upsert_entry,
 )
+from ferry.adapters.base import ImportOptions
+from ferry.core import Bundle
+from ferry.core import provenance as provenance_store
+from ferry.core.manifest import Manifest, SourceMachine
 from ferry.ucs import (
     Conversation,
     Message,
@@ -275,3 +282,79 @@ class TestTheSecondStore:
 
         with pytest.raises(AntigravityIndexLocked):
             upsert_entry(tmp_path / "absent.pb", conversation_id, self.an_entry(conversation_id))
+
+
+class TestTheRecordOfAConversion:
+    """A converted conversation that looked native would be indistinguishable,
+    months later, from one that really happened in Antigravity."""
+
+    def a_store(self, tmp_path: Path) -> dict[str, str]:
+        store = tmp_path / "store"
+        store.mkdir(parents=True)
+        (store / "agyhub_summaries_proto.pb").write_bytes(b"")
+        projects = tmp_path / "config" / "projects"
+        projects.mkdir(parents=True)
+        (projects / f"{PROJECT}.json").write_text(
+            json.dumps(
+                {
+                    "id": PROJECT,
+                    "name": "work",
+                    "projectResources": {
+                        "resources": [{"gitFolder": {"folderUri": "file:///c%3A/work"}}]
+                    },
+                    "updatedAt": "2026-09-01T00:00:00Z",
+                }
+            ),
+            encoding="utf-8",
+        )
+        return {ag_paths.DATA_DIR_ENV: str(store)}
+
+    def a_bundle(self, tmp_path: Path, item: Conversation) -> Path:
+        root = tmp_path / "bundle"
+        Bundle.create(
+            root,
+            Manifest(
+                bundle_version="1.0",
+                created_at=datetime(2026, 9, 1, tzinfo=UTC),
+                created_by="ferry",
+                source_machine=SourceMachine(hostname="h", os="win32"),
+                tools_included=["codex"],
+                conversation_count=1,
+            ),
+        ).add_conversation(item)
+        return root
+
+    def test_a_built_conversation_says_where_it_came_from(self, tmp_path: Path) -> None:
+        """The field was set on an object and dropped once before (A7b.8), and
+        recorded without the costs once after (#220). Both halves, both times."""
+        item = a_conversation(
+            source_tool="codex",
+            messages=[
+                Message(role="user", content=[TextBlock(text="read it")]),
+                Message(
+                    role="assistant",
+                    content=[
+                        TextBlock(text="Reading."),
+                        ToolUseBlock(id="c1", name="shell", input={"command": ["ls"]}),
+                        ToolResultBlock(tool_use_id="c1", output=[{"text": "a.py"}]),
+                    ],
+                ),
+            ],
+        )
+        env = self.a_store(tmp_path)
+
+        events = list(
+            AntigravityAdapter(env).import_(
+                self.a_bundle(tmp_path, item), ImportOptions(allow_cross_tool=True)
+            )
+        )
+
+        assert sum(1 for e in events if e.kind == "progress") == 1
+        recorded = provenance_store.recall("antigravity", item.id)
+        assert recorded is not None, "a conversion left no record of itself"
+        assert recorded.original_tool == "codex"
+        assert recorded.imported_into == "antigravity"
+        assert recorded.lossy is True
+        notes = " | ".join(recorded.conversion_notes)
+        assert "tool call" in notes, f"the cost the screen counted is unrecorded: {notes}"
+        assert "never as steps Antigravity is shown as having run" in notes

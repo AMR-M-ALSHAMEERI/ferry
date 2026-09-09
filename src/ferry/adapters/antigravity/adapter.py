@@ -32,7 +32,7 @@ from uuid import UUID
 from ferry import __version__
 from ferry.adapters.antigravity import paths as ag_paths
 from ferry.adapters.antigravity import schema, wire
-from ferry.adapters.antigravity.build import build_database, model_identifier
+from ferry.adapters.antigravity.build import BUILD_NOTES, build_database, model_identifier
 from ferry.adapters.antigravity.index import (
     AntigravityIndexLocked,
     entry_for,
@@ -65,9 +65,9 @@ from ferry.adapters.dedup import compare_duplicate
 from ferry.adapters.formatcheck import FormatCheck
 from ferry.core import Bundle, Manifest, SourceMachine, back_up
 from ferry.core import provenance as provenance_store
-from ferry.core.compat import refusal
+from ferry.core.compat import assess, refusal
 from ferry.core.manifest import OSName
-from ferry.ucs import Conversation, ToolName
+from ferry.ucs import Conversation, Provenance, ToolName
 
 __all__ = ["TESTED_VERSION", "TOOL", "AntigravityAdapter"]
 
@@ -753,13 +753,25 @@ class AntigravityAdapter(Adapter):
                 message=f"written, but not added to Antigravity's list: {exc}",
             )
 
-        if conversation.provenance is not None:
-            provenance_store.record(
-                TOOL,
-                conversation.id,
-                conversation.provenance,
-                written=provenance_store.fingerprint(destination),
-            )
+        # Set here rather than assumed to exist. A7b.8 was a whole phase spent
+        # on a field that was populated onto an object and then discarded, and
+        # ledger #220 was the same lesson again: setting the field and
+        # recording it are two halves, and a document promising provenance is
+        # untrue without both.
+        conversation.provenance = Provenance(
+            original_tool=conversation.source_tool,
+            imported_into=TOOL,
+            imported_at=datetime.now(UTC),
+            ferry_version=__version__,
+            lossy=True,
+            conversion_notes=[*assess(conversation, TOOL).notes, *BUILD_NOTES],
+        )
+        provenance_store.record(
+            TOOL,
+            conversation.id,
+            conversation.provenance,
+            written=provenance_store.fingerprint(destination),
+        )
 
         yield ImportEvent(
             kind="progress",
