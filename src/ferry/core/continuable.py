@@ -41,7 +41,7 @@ from ferry.compact.catalogue import describe
 from ferry.compact.prune import error_line, failed
 from ferry.ucs import Conversation, Message, TextBlock
 
-__all__ = ["Flattened", "call_line", "continuable", "prepare"]
+__all__ = ["Flattened", "as_text", "call_line", "continuable", "prepare"]
 
 
 @dataclass(frozen=True)
@@ -155,7 +155,7 @@ def continuable(
                 # A failure is the exception: it is why the next thing happened,
                 # so the line that says so is kept and nothing else is.
                 if failed(block.output):
-                    line = error_line(_as_text(block.output))
+                    line = error_line(as_text(block.output))
                     if line:
                         content.append(TextBlock(text=_clip(f"[failed] {line}")))
             elif block.type == "image":
@@ -220,16 +220,21 @@ def _within(messages: list[Message], budget: int) -> tuple[list[Message], int]:
     return kept, dropped
 
 
-def _as_text(output: object) -> str:
-    """A tool result as text, however the adapter recorded it."""
+def as_text(output: object) -> str:
+    """A tool result as text, however the adapter recorded it.
+
+    Public because a target that writes **readable text** needs exactly this,
+    and Antigravity is the third to need it. A second flattener written beside
+    it would be a second place to keep correct.
+    """
     if isinstance(output, str):
         return output
     if isinstance(output, list):
-        return "\n".join(_as_text(item) for item in output)
+        return "\n".join(as_text(item) for item in output)
     if isinstance(output, dict):
         for key in ("text", "content", "output", "stdout"):
             if key in output:
-                return _as_text(output[key])
+                return as_text(output[key])
     return str(output) if output is not None else ""
 
 

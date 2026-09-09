@@ -134,6 +134,30 @@ class TestWhatIsNotWritten:
         assert set(types) <= {USER_INPUT, PLANNER_RESPONSE}
         assert 5 not in types, "a CODE_ACTION step would claim Antigravity ran it"
 
+    def test_a_tool_result_that_is_not_a_string_is_still_written(self) -> None:
+        """`ToolResultBlock.output` is `Any`, and Codex records a list of blocks.
+
+        A real import of six Codex conversations failed with
+        `'list' object has no attribute 'strip'` -- 0 of 6 written, because this
+        assumed a string. Every adapter that has met this settled it the same
+        way, and now they share the one flattener.
+        """
+        message = Message(
+            role="assistant",
+            content=[
+                ToolUseBlock(id="c1", name="Read", input={"file_path": "a.py"}),
+                ToolResultBlock(
+                    tool_use_id="c1",
+                    output=[{"type": "text", "text": "first"}, {"type": "text", "text": "second"}],
+                ),
+            ],
+        )
+
+        said = said_by(message, "codex")
+
+        assert "first" in said
+        assert "second" in said
+
     def test_thinking_is_dropped_rather_than_written_unsigned(self) -> None:
         message = Message(
             role="assistant",

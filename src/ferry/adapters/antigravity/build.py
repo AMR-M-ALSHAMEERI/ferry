@@ -42,7 +42,7 @@ from typing import Final
 from uuid import UUID
 
 from ferry.adapters.antigravity import wire
-from ferry.core.continuable import call_line
+from ferry.core.continuable import as_text, call_line
 from ferry.ucs import (
     Conversation,
     Message,
@@ -127,7 +127,10 @@ def said_by(message: Message, source_tool: str) -> str:
         elif isinstance(block, ToolUseBlock):
             parts.append(call_line(source_tool, block.name, block.input))
         elif isinstance(block, ToolResultBlock):
-            output = (block.output or "").strip()
+            # `output` is `Any`: a string from one tool, a list of content
+            # blocks from another. Flattened through the one helper that
+            # already knows every shape of it.
+            output = as_text(block.output).strip()
             if output:
                 parts.append(output)
     return "\n\n".join(p for p in parts if p.strip())
