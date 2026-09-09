@@ -324,6 +324,26 @@ class TestTheRecordOfAConversion:
         ).add_conversation(item)
         return root
 
+    def test_the_origin_survives_being_exported_again(self, tmp_path: Path) -> None:
+        """Exporting reads the record back, or the origin stops at this machine.
+
+        A built conversation looks native on the way out - that is why the
+        record lives in Ferry's own store and not in Antigravity's file. The
+        other three adapters have always recalled it on export; this one did
+        not, which made the promise in CROSS-TOOL.md untrue of Antigravity.
+        Found by sweeping all four for a defect discovered in one.
+        """
+        item = a_conversation(source_tool="codex")
+        env = self.a_store(tmp_path)
+        adapter = AntigravityAdapter(env)
+
+        list(adapter.import_(self.a_bundle(tmp_path, item), ImportOptions(allow_cross_tool=True)))
+        list(adapter.export(tmp_path / "out"))
+
+        exported = Bundle.open(tmp_path / "out").load_conversation(item.id)
+        assert exported.provenance is not None, "the export forgot where it came from"
+        assert exported.provenance.original_tool == "codex"
+
     def test_a_built_conversation_says_where_it_came_from(self, tmp_path: Path) -> None:
         """The field was set on an object and dropped once before (A7b.8), and
         recorded without the costs once after (#220). Both halves, both times."""

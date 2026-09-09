@@ -439,6 +439,13 @@ class AntigravityAdapter(Adapter):
             )
             return
 
+        # A conversation Ferry built here looks native on the way back out --
+        # that is the whole reason the record is kept in Ferry's own store
+        # rather than in Antigravity's file. Reading it back is what carries the
+        # origin across an export, and the other three adapters have always done
+        # it; this one did not, which made `docs/CROSS-TOOL.md` untrue of it.
+        found.conversation.provenance = provenance_store.recall(TOOL, conversation_id)
+
         for pending in found.attachments:
             bundle.add_attachment(conversation_id, pending.source, pending.record)
         bundle.add_conversation(found.conversation)
