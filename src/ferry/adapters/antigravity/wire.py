@@ -23,9 +23,18 @@ on.
 
 So this codec never claims to understand a message. It keeps **the original
 bytes of every field it did not touch** and re-encodes only the chain from the
-root down to the one string that changed. An unmodified blob is returned
-unexamined, byte-identical by construction rather than by test. The tests
-confirm it on real blobs anyway.
+root down to the one string that changed.
+
+An unmodified blob is returned unexamined, byte-identical by construction
+rather than by test. The tests confirm it on real blobs anyway.
+
+**It can now also build one, and that is a smaller addition than it sounds.**
+Writing an Antigravity conversation needs ``number``, ``block``, ``string`` and
+``moment`` -- four functions over the only two wire types this format uses,
+measured across every blob in a conversation: varint and length-delimited, no
+fixed-width fields and no groups. What made writing a conversation hard was
+never the encoding. It was knowing which fields to write, which is
+``schema.py``'s job and was answered by measurement.
 
 That also settles PLAN.md section 8 open question 2 -- ship a compiled
 ``_pb2.py`` or compile at install time -- by removing the question. There is no
@@ -43,8 +52,12 @@ __all__ = [
     "MAX_DEPTH",
     "Field",
     "Rewriter",
+    "block",
+    "moment",
+    "number",
     "parse",
     "rewrite",
+    "string",
     "strings",
 ]
 
@@ -118,6 +131,30 @@ def _write_varint(value: int) -> bytes:
         out.append(byte | 0x80 if value else byte)
         if not value:
             return bytes(out)
+
+
+def number(field: int, value: int) -> bytes:
+    """One varint field: ``field: value``."""
+    return _write_varint(field << 3) + _write_varint(value)
+
+
+def block(field: int, payload: bytes) -> bytes:
+    """One length-delimited field: a nested message, a string, or raw bytes."""
+    return _write_varint((field << 3) | LEN) + _write_varint(len(payload)) + payload
+
+
+def string(field: int, value: str) -> bytes:
+    """One length-delimited field holding UTF-8 text."""
+    return block(field, value.encode("utf-8"))
+
+
+def moment(field: int, seconds: int, nanos: int = 0) -> bytes:
+    """A timestamp, which this format writes the same way everywhere.
+
+    ``{1: seconds, 2: nanos}`` -- in a step's ``metadata``, in a trajectory's
+    metadata blob, and three times in an index entry.
+    """
+    return block(field, number(1, seconds) + number(2, nanos))
 
 
 def parse(data: bytes) -> list[Field] | None:

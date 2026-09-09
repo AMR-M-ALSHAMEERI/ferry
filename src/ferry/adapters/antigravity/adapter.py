@@ -32,6 +32,13 @@ from uuid import UUID
 from ferry import __version__
 from ferry.adapters.antigravity import paths as ag_paths
 from ferry.adapters.antigravity import schema, wire
+from ferry.adapters.antigravity.build import build_database, model_identifier
+from ferry.adapters.antigravity.index import (
+    AntigravityIndexLocked,
+    entry_for,
+    index_path,
+    upsert_entry,
+)
 from ferry.adapters.antigravity.reader import (
     SessionRead,
     parent_conversation,
@@ -57,9 +64,10 @@ from ferry.adapters.conflict import RENAME_NOT_POSSIBLE
 from ferry.adapters.dedup import compare_duplicate
 from ferry.adapters.formatcheck import FormatCheck
 from ferry.core import Bundle, Manifest, SourceMachine, back_up
+from ferry.core import provenance as provenance_store
 from ferry.core.compat import refusal
 from ferry.core.manifest import OSName
-from ferry.ucs import ToolName
+from ferry.ucs import Conversation, ToolName
 
 __all__ = ["TESTED_VERSION", "TOOL", "AntigravityAdapter"]
 
@@ -547,6 +555,11 @@ class AntigravityAdapter(Adapter):
                 # instruction rather than the intent.
                 yield ImportEvent(kind="skipped", conversation_id=identifier, message=why)
                 return
+            # A conversation from another tool has no original database, so it
+            # is built rather than restored. Everything below this point is the
+            # restore path and needs one.
+            yield from self._build_one(conversation, options)
+            return
 
         original = bundle.source_raw_path(conversation_id)
         if not original.is_file():
@@ -612,6 +625,147 @@ class AntigravityAdapter(Adapter):
             return
 
         yield ImportEvent(kind="progress", conversation_id=identifier, message=written)
+
+    def _project_for(self, conversation: Conversation) -> str | None:
+        """Which project a built conversation belongs to.
+
+        Antigravity groups conversations by project, and a conversation with no
+        project is one the list has nowhere to put. Preferred is the project
+        whose folder is the one this conversation happened in; failing that, any
+        project with a folder, so it lands somewhere a person will look.
+        """
+        found = ag_paths.projects(self._env)
+        if not found:
+            return None
+        workspace = (conversation.workspace.original_path or "").replace("\\", "/").lower()
+        if workspace:
+            for project in found.values():
+                folder = (project.folder or "").replace("\\", "/").lower()
+                if folder and (folder.endswith(workspace) or workspace.endswith(folder)):
+                    return project.id
+        with_folder = [p for p in found.values() if p.folder]
+        return (with_folder or list(found.values()))[0].id
+
+    def _identifier(self) -> bytes:
+        """The model identifier, copied from a conversation that already has one."""
+        for database in ag_paths.conversation_databases(self._env):
+            found = model_identifier(database)
+            if found:
+                return found
+        return b""
+
+    def _build_one(
+        self, conversation: Conversation, options: ImportOptions
+    ) -> Iterator[ImportEvent]:
+        """Write a conversation from another tool as an Antigravity conversation.
+
+        Two stores, and the second one is the whole reason this works: the
+        database holds the conversation, and the entry in
+        ``agyhub_summaries_proto.pb`` is what makes Antigravity know it exists.
+        A database with no entry is a conversation nothing lists -- measured by
+        cloning one Antigravity *does* list and watching it not appear.
+        """
+        identifier = str(conversation.id)
+        destination = self._destination(conversation.id)
+
+        if destination.exists():
+            if options.on_conflict == "skip":
+                yield ImportEvent(
+                    kind="skipped", conversation_id=identifier, message="already in Antigravity"
+                )
+                return
+            if options.on_conflict == "rename":
+                yield ImportEvent(
+                    kind="skipped", conversation_id=identifier, message=RENAME_NOT_POSSIBLE
+                )
+                return
+
+        project_id = self._project_for(conversation)
+        if project_id is None:
+            yield ImportEvent(
+                kind="skipped",
+                conversation_id=identifier,
+                message=(
+                    "Antigravity has no projects on this machine yet, and a conversation "
+                    "belongs to one; open a folder in Antigravity once and import again"
+                ),
+            )
+            return
+
+        if options.dry_run:
+            yield ImportEvent(
+                kind="progress",
+                conversation_id=identifier,
+                message=f"would build {destination.name} and list it in {index_path().name}",
+            )
+            return
+
+        if options.backup and destination.exists():
+            back_up(destination, TOOL)
+
+        staged = destination.with_name(destination.name + ".ferry-tmp")
+        if staged.exists():
+            staged.unlink()
+        try:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            steps = build_database(
+                staged,
+                conversation,
+                project_id=project_id,
+                identifier=self._identifier(),
+            )
+            staged.replace(destination)
+        except Exception as exc:  # noqa: BLE001 - reported, never raised at the CLI
+            if staged.exists():
+                staged.unlink()
+            yield ImportEvent(kind="error", conversation_id=identifier, message=str(exc))
+            return
+
+        for suffix in ("-wal", "-shm"):
+            stale = destination.with_name(destination.name + suffix)
+            if stale.exists():
+                stale.unlink()
+
+        created = conversation.created_at or conversation.updated_at
+        updated = conversation.updated_at or created
+        try:
+            upsert_entry(
+                index_path(self._env),
+                conversation.id,
+                entry_for(
+                    conversation.id,
+                    title=conversation.title or "Imported conversation",
+                    project_id=project_id,
+                    identifier=self._identifier(),
+                    steps=steps,
+                    created=int(created.timestamp()) if created else 0,
+                    updated=int(updated.timestamp()) if updated else 0,
+                ),
+                running=antigravity_is_running(),
+            )
+        except AntigravityIndexLocked as exc:
+            # The conversation is on disk and complete. Saying "imported" and
+            # leaving it unlisted would be the exact failure this milestone was
+            # built to prevent, so it is reported instead.
+            yield ImportEvent(
+                kind="warning",
+                conversation_id=identifier,
+                message=f"written, but not added to Antigravity's list: {exc}",
+            )
+
+        if conversation.provenance is not None:
+            provenance_store.record(
+                TOOL,
+                conversation.id,
+                conversation.provenance,
+                written=provenance_store.fingerprint(destination),
+            )
+
+        yield ImportEvent(
+            kind="progress",
+            conversation_id=identifier,
+            message=f"built {destination.name} from {conversation.source_tool}, {steps} steps",
+        )
 
     def _write(
         self,

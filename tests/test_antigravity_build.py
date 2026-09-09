@@ -1,0 +1,253 @@
+"""Writing an Antigravity conversation, which was refused until it was measured.
+
+Two stores have to agree before a person sees anything: the database holds the
+conversation, and an entry in ``agyhub_summaries_proto.pb`` is what makes
+Antigravity know it exists. A database with no entry is invisible -- proved by
+cloning a conversation Antigravity *does* list, changing only its ids, and
+watching it not appear.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+from datetime import UTC, datetime
+from pathlib import Path
+from uuid import UUID, uuid4
+
+import pytest
+
+from ferry.adapters.antigravity import reader, wire
+from ferry.adapters.antigravity.build import (
+    PLANNER_RESPONSE,
+    USER_INPUT,
+    build_database,
+    said_by,
+    trajectory_blob,
+)
+from ferry.adapters.antigravity.index import (
+    AntigravityIndexLocked,
+    entry_for,
+    upsert_entry,
+)
+from ferry.ucs import (
+    Conversation,
+    Message,
+    TextBlock,
+    ThinkingBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+    Workspace,
+)
+
+IDENTIFIER = b"models/some/resource/name/here"
+PROJECT = "31bdc1d1-6c93-4c25-b66f-b98c6d439809"
+
+#: Both root conversations on the probe machine carried exactly these.
+ROOT_FIELDS = [1, 2, 3, 6, 7, 10, 18]
+
+#: A real index entry's summary, measured across all six.
+SUMMARY_FIELDS = [1, 2, 3, 4, 5, 7, 9, 10, 15, 16, 17, 22]
+
+
+def a_conversation(**kwargs: object) -> Conversation:
+    defaults: dict[str, object] = {
+        "id": uuid4(),
+        "source_tool": "claude-code",
+        "workspace": Workspace(original_path="/home/bob/work"),
+        "title": "A migrated conversation",
+        "created_at": datetime(2026, 9, 1, tzinfo=UTC),
+        "updated_at": datetime(2026, 9, 2, tzinfo=UTC),
+        "messages": [
+            Message(role="user", content=[TextBlock(text="what did you do?")]),
+            Message(role="assistant", content=[TextBlock(text="I read a file.")]),
+        ],
+    }
+    defaults.update(kwargs)
+    return Conversation(**defaults)  # type: ignore[arg-type]
+
+
+def fields_of(blob: bytes) -> dict[int, bytes]:
+    return {f.number: f.value for f in (wire.parse(blob) or [])}
+
+
+class TestTheConversationCanBeReadBack:
+    def test_ferry_reads_what_ferry_wrote(self, tmp_path: Path) -> None:
+        item = a_conversation()
+        path = tmp_path / f"{item.id}.db"
+
+        steps = build_database(path, item, project_id=PROJECT, identifier=IDENTIFIER)
+
+        assert steps == 2
+        read = reader.read_conversation(path).conversation
+        assert read is not None
+        assert [m.role for m in read.messages] == ["user", "assistant"]
+        said = [b.text for m in read.messages for b in m.content if isinstance(b, TextBlock)]
+        assert said == ["what did you do?", "I read a file."]
+
+    def test_the_question_is_written_where_the_interface_draws_it(self, tmp_path: Path) -> None:
+        """A real USER_INPUT step carries the same bytes at 19.2 **and** 19.3.1.
+
+        Writing only 19.2 produced a conversation whose title bar held the
+        question and whose bubble was empty. One is what is sent to the model,
+        the other is what is drawn -- the third tool to keep two copies of a
+        turn, after Copilot's ``parts`` and Codex's ``event_msg``.
+        """
+        item = a_conversation()
+        path = tmp_path / f"{item.id}.db"
+        build_database(path, item, project_id=PROJECT, identifier=IDENTIFIER)
+
+        connection = sqlite3.connect(path)
+        payload = connection.execute(
+            "SELECT step_payload FROM steps WHERE step_type = ?", (USER_INPUT,)
+        ).fetchone()[0]
+        connection.close()
+
+        found = dict(wire.strings(payload))
+        assert found.get((19, 2)) == "what did you do?"
+        assert found.get((19, 3, 1)) == "what did you do?", "the bubble would be empty"
+
+
+class TestWhatIsNotWritten:
+    def test_a_tool_call_becomes_text_not_a_step_antigravity_could_have_run(
+        self, tmp_path: Path
+    ) -> None:
+        """CODE_ACTION is Antigravity doing something. It did not do this."""
+        item = a_conversation(
+            messages=[
+                Message(role="user", content=[TextBlock(text="read it")]),
+                Message(
+                    role="assistant",
+                    content=[
+                        TextBlock(text="Reading."),
+                        ToolUseBlock(id="c1", name="Read", input={"file_path": "a.py"}),
+                        ToolResultBlock(tool_use_id="c1", output="print(1)"),
+                    ],
+                ),
+            ]
+        )
+        path = tmp_path / f"{item.id}.db"
+        build_database(path, item, project_id=PROJECT, identifier=IDENTIFIER)
+
+        connection = sqlite3.connect(path)
+        types = [row[0] for row in connection.execute("SELECT step_type FROM steps")]
+        connection.close()
+        assert set(types) <= {USER_INPUT, PLANNER_RESPONSE}
+        assert 5 not in types, "a CODE_ACTION step would claim Antigravity ran it"
+
+    def test_thinking_is_dropped_rather_than_written_unsigned(self) -> None:
+        message = Message(
+            role="assistant",
+            content=[
+                ThinkingBlock(text="considering the options", signature="from-another-vendor"),
+                TextBlock(text="Here is the answer."),
+            ],
+        )
+
+        said = said_by(message, "claude-code")
+
+        assert said == "Here is the answer."
+        assert "considering" not in said
+
+    def test_a_built_conversation_is_never_a_subagent(self) -> None:
+        """Field 5 names a parent, and Antigravity never lists a conversation
+        that has one. Two rounds of this milestone were lost to a template
+        borrowed from a subagent."""
+        blob = trajectory_blob(uuid4(), PROJECT, 1788000000, IDENTIFIER)
+
+        assert 5 not in fields_of(blob)
+        assert sorted(fields_of(blob)) == ROOT_FIELDS
+
+    def test_the_undecoded_field_is_left_out_rather_than_invented(self) -> None:
+        """Field 15 is 352-380 bytes that do not parse and differ per
+        conversation. A conversation without it opens and reads."""
+        assert 15 not in fields_of(trajectory_blob(uuid4(), PROJECT, 1788000000, IDENTIFIER))
+
+
+class TestTheSecondStore:
+    def an_index(self, tmp_path: Path, *entries: bytes) -> Path:
+        path = tmp_path / "agyhub_summaries_proto.pb"
+        path.write_bytes(b"".join(entries))
+        return path
+
+    def an_entry(self, conversation_id: UUID, title: str = "A migrated conversation") -> bytes:
+        return entry_for(
+            conversation_id,
+            title=title,
+            project_id=PROJECT,
+            identifier=IDENTIFIER,
+            steps=2,
+            created=1788000000,
+            updated=1788000100,
+        )
+
+    def test_an_entry_has_the_shape_a_real_one_has(self) -> None:
+        entry = self.an_entry(uuid4())
+
+        inner = fields_of(wire.parse(entry)[0].value)
+        assert sorted(fields_of(inner[2])) == SUMMARY_FIELDS
+
+    def test_the_step_count_is_what_the_summary_carries(self) -> None:
+        """Field 2 matched the database exactly in all six real entries."""
+        entry = entry_for(
+            uuid4(),
+            title="t",
+            project_id=PROJECT,
+            identifier=IDENTIFIER,
+            steps=17,
+            created=1,
+            updated=2,
+        )
+
+        summary = fields_of(fields_of(wire.parse(entry)[0].value)[2])
+        assert summary[2] == bytes([17])
+
+    def test_a_conversation_is_added_to_the_list(self, tmp_path: Path) -> None:
+        path = self.an_index(tmp_path)
+        conversation_id = uuid4()
+
+        upsert_entry(path, conversation_id, self.an_entry(conversation_id))
+
+        entries = [f for f in wire.parse(path.read_bytes()) or [] if f.number == 1]
+        assert len(entries) == 1
+        assert fields_of(entries[0].value)[1].decode() == str(conversation_id)
+
+    def test_importing_twice_leaves_one_entry(self, tmp_path: Path) -> None:
+        conversation_id = uuid4()
+        path = self.an_index(tmp_path, self.an_entry(conversation_id))
+
+        upsert_entry(path, conversation_id, self.an_entry(conversation_id, "renamed"))
+
+        entries = [f for f in wire.parse(path.read_bytes()) or [] if f.number == 1]
+        assert len(entries) == 1
+        summary = fields_of(fields_of(entries[0].value)[2])
+        assert summary[1].decode() == "renamed"
+
+    def test_everyone_elses_conversations_survive(self, tmp_path: Path) -> None:
+        """This file is the list of somebody's conversations. Losing a
+        neighbour here loses their history, not a row."""
+        theirs, mine = uuid4(), uuid4()
+        path = self.an_index(tmp_path, self.an_entry(theirs, "not mine"))
+
+        upsert_entry(path, mine, self.an_entry(mine))
+
+        entries = [f for f in wire.parse(path.read_bytes()) or [] if f.number == 1]
+        assert len(entries) == 2
+        assert {fields_of(e.value)[1].decode() for e in entries} == {str(theirs), str(mine)}
+
+    def test_a_running_antigravity_is_refused_rather_than_written_underneath(
+        self, tmp_path: Path
+    ) -> None:
+        """It holds this file in memory and writes it back on exit, so a write
+        underneath it is discarded -- and reporting success would be a lie the
+        person discovers when the list is unchanged."""
+        conversation_id = uuid4()
+        path = self.an_index(tmp_path)
+
+        with pytest.raises(AntigravityIndexLocked, match="running"):
+            upsert_entry(path, conversation_id, self.an_entry(conversation_id), running=True)
+
+    def test_a_missing_index_is_refused_rather_than_created(self, tmp_path: Path) -> None:
+        conversation_id = uuid4()
+
+        with pytest.raises(AntigravityIndexLocked):
+            upsert_entry(tmp_path / "absent.pb", conversation_id, self.an_entry(conversation_id))

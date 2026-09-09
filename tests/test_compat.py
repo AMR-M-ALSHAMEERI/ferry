@@ -104,15 +104,38 @@ class TestTheMatrix:
         assert pair(source, "codex").support == "supported"
         assert refusal(source, "codex") == ""
 
-    @pytest.mark.parametrize("target", ["antigravity"])
-    def test_every_other_target_is_refused_with_a_reason(self, target: str) -> None:
-        found = pair("claude-code", target)
-        assert found.support == "unsupported"
-        # A refusal without a reason is the failure mode this table exists to
-        # avoid: it tells someone their conversation cannot move and leaves
-        # them with nowhere to go and nothing to read.
-        assert len(found.reason) > 40
-        assert refusal("claude-code", target) == found.reason
+    @pytest.mark.parametrize("source", TOOLS)
+    def test_antigravity_accepts_a_conversation_built_for_it(self, source: str) -> None:
+        """Refused until 2026-09-10, on a reason recorded before it was measured.
+
+        The reason said a conversation can only be restored from its original
+        database. Measured at Antigravity 2.8.1, a conversation is seven tables
+        with a plain schema, the codec parses every blob, and a synthesised
+        metadata blob is byte-identical to a real one but for one field. What
+        actually blocked it was a second store, and Ferry writes that too now.
+
+        **Every target in this table has now been refused and then measured
+        into working**, which is the argument for treating a refusal as dated
+        evidence rather than as a fact.
+        """
+        if source == "antigravity":
+            assert pair(source, "antigravity").support == "native"
+            return
+        assert pair(source, "antigravity").support == "supported"
+        assert refusal(source, "antigravity") == ""
+
+    def test_a_refusal_still_has_to_carry_a_reason(self) -> None:
+        """No target is refused today, so this guards the rule rather than a row.
+
+        A refusal without a reason tells someone their conversation cannot move
+        and leaves them nowhere to go. If a future measurement puts a tool back
+        in this column, it fails here until it brings its reason with it.
+        """
+        for target in TOOLS:
+            found = pair("claude-code", target)
+            if found.support == "unsupported":
+                assert len(found.reason) > 40, f"{target} is refused without saying why"
+                assert refusal("claude-code", target) == found.reason
 
     def test_an_unknown_target_is_refused_rather_than_assumed_to_work(self) -> None:
         found = pair("claude-code", "some-future-tool")
@@ -209,9 +232,15 @@ class TestTheFalseWrite:
         assert any("not a SQLite database" in e.message for e in events if e.kind == "skipped")
         assert not (ag_paths.conversations_dir(store) / f"{item.id}.db").exists()
 
-    def test_the_refusal_says_what_is_wrong_rather_than_only_that_it_failed(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_store_with_no_projects_says_what_to_do_about_it(self, tmp_path: Path) -> None:
+        """This asserted the table's refusal until Antigravity became a target.
+
+        Now a conversation from another tool is built rather than refused, and
+        the only thing that stops one is having nowhere to put it: Antigravity
+        groups conversations by project, and a store with no projects is one a
+        person has never opened a folder in. That is a real obstacle with a real
+        answer, so the message carries the answer.
+        """
         item = conversation("codex")
         root = self.bundle_with(tmp_path, item, b"not a database at all")
         store = {ag_paths.DATA_DIR_ENV: str(tmp_path / "store")}
@@ -220,10 +249,10 @@ class TestTheFalseWrite:
         skipped = [e.message for e in events if e.kind == "skipped"]
 
         assert skipped
-        # Refused by the table before the bytes are ever read: the person asked
-        # for something that cannot work, and is told why rather than being
-        # handed the failure of the attempt.
-        assert "original SQLite database" in skipped[0]
+        assert "no projects" in skipped[0]
+        # A message that only says no is a message that strands someone.
+        assert "open a folder" in skipped[0]
+        assert not (ag_paths.conversations_dir(store) / f"{item.id}.db").exists()
 
 
 class TestAskingBeforeWriting:

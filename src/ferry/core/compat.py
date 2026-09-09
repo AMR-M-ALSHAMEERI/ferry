@@ -23,13 +23,27 @@ really there* are different claims and only the second is worth shipping.
                         replayed, to the smallest shape VS Code was measured
                         to accept (#203, #204). Tool calls and their results
                         become readable text, never Copilot tool invocations.
-``-> antigravity``      unsupported. A conversation is restored *from its
-                        original SQLite database*. Ferry can copy one; it
-                        cannot generate one.
+``-> antigravity``      supported. A conversation is built as a database
+                        of its own and listed in the second store the app
+                        actually reads.
 ======================  ==================================================
 
-**Unsupported is an answer, not a failure.** PLAN section 5 M7b permits
-Antigravity-as-target to end the milestone this way.
+**Unsupported is an answer, not a failure**, and this table no longer needs
+one. PLAN section 5 M7b permitted Antigravity-as-target to end the milestone
+refused, and the refusal above was written before it was measured -- the third
+in this file to be so.
+
+Measured at Antigravity 2.8.1, every clause of it was wrong. A conversation is
+seven tables with a plain schema and no migration bookkeeping; the codec parsed
+every blob in the conversation examined; only two wire types are used, so the
+"protobuf encoder" it lacked is four functions; and a synthesised metadata blob
+came out byte-identical to a real one except for a single field, which is left
+out rather than invented.
+
+**What actually blocked it was a second store**, named in a line of the
+language server's own log: *"trajectory store manager with proto store and
+SQLite store"*. Ferry wrote the SQLite one. A byte-for-byte clone of a listed
+conversation was not listed, which is what finally said so.
 
 **The ceiling moved once, upward, and only because it was tested.** Every pair
 that works was described here as a *readable transcript* and nothing more.
@@ -115,12 +129,7 @@ _TARGETS: dict[str, Pair] = {
     "claude-code": Pair("supported"),
     "codex": Pair("supported"),
     "copilot": Pair("supported"),
-    "antigravity": Pair(
-        "unsupported",
-        "Antigravity conversations are restored from the original SQLite "
-        "database they were exported with. Ferry can carry one across; it "
-        "cannot build one for a conversation that never had it.",
-    ),
+    "antigravity": Pair("supported"),
 }
 """Keyed on the **target** alone.
 
