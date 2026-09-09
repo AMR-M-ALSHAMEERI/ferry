@@ -36,30 +36,33 @@ reported success" and "the conversation is really there" are different claims.
 | **Claude Code** | **Yes** | Its transcript is plain JSONL and every envelope field can be rebuilt. All three other tools, every message, 100% of the words. |
 | **GitHub Copilot Chat** | **Yes** | Ferry builds a VS Code chat document rather than replaying one it read, and writes the workspace chat index entry that makes it appear in the list. A question is carried in the document's `parts`, not only its `text`, because that is what VS Code draws. |
 | **OpenAI Codex** | **Yes** | The `session_meta` header *can* be synthesised — measured, not assumed. Codex also needs a row in its `threads` table to offer the conversation in the picker, the interface events it draws each turn as well as the records it sends the model, and a timestamp on every record. All four are written. |
-| Antigravity | No | Antigravity conversations are restored from the original SQLite database they were exported with. Ferry can carry one across; it cannot build one for a conversation that never had it. |
+| **Google Antigravity** | **Yes** | A conversation is built as a SQLite database of its own — seven tables, and protobuf blobs written by Ferry's own encoder — and then listed in `agyhub_summaries_proto.pb`, the second store the app actually reads. Tool calls become text; no step claims Antigravity ran anything. |
 
 **Importing a tool's own conversations back into it is not a conversion** and is
 unaffected by any of this. That is an ordinary restore and it works for all
 four tools.
 
-### Why the one "no" is a no
+### There is no "no" left, and that is the interesting part
 
-Antigravity is refused because of how that tool stores its data, not because of
-a missing feature in Ferry: a conversation there is restored from a database
-that has to already exist, and Ferry will not invent one.
+**Every row in this table once said no.** Copilot, because Ferry could only
+write back a document it had read. Codex, because its header could not be
+invented. Antigravity, because a conversation is protobuf inside SQLite and
+Ferry has no schema for it.
 
-**Two of these rows used to say no.** Codex was refused on the grounds that its
-header could not be invented, and Copilot on the grounds that Ferry could only
-write back a document it had read. Both turned out to be work rather than
-walls, and both took a measurement to find out — which is the reason this table
-distinguishes a tool's own storage from a gap in Ferry, and the reason the
-Antigravity row is worth re-testing rather than treating as permanent.
+Each reason sounded like a property of the tool. Each turned out to be a gap in
+what had been measured — and in three cases out of three, the thing that
+actually blocked the import was not the format at all.
 
-Every one of the three that works needed something **after** the file was
-written before the tool would admit it existed: a Copilot chat index entry, a
-trusted folder in Claude Code, a `threads` row in Codex. In each case the
-conversation was complete on disk and the tool's list was empty, which looks
-exactly like the import having failed.
+Every one of them needed something **after** the file was written before the
+tool would admit it existed: a Copilot chat index entry, a trusted folder in
+Claude Code, a `threads` row in Codex (spelled the way Codex spells a path), and
+an entry in Antigravity's second store. In each case the conversation was
+complete on disk and the tool's list was empty, which looks exactly like the
+import having failed.
+
+Antigravity's hid longest, because a folder full of self-describing databases
+looks like a list. It was found by cloning a conversation the app *does* show,
+changing only its ids, and watching it not appear.
 
 ## What is lost
 

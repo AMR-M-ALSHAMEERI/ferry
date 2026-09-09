@@ -580,6 +580,71 @@ percent-encoded spelling, under either `folderUri` directly or nested inside
 `gitFolder` when the folder is a git repository. A conversation whose project
 does not exist has nowhere to be filed.
 
+### Two stores, and the list is in the other one
+
+**The conversations folder is not what Antigravity lists.** Measured the hard
+way: a byte-for-byte clone of a conversation the app shows, with only its ids
+changed, does not appear. Four rounds of building a conversation up from nothing
+had been spent guessing at the format before that clone was tried.
+
+The language server names both stores in its own log:
+
+```
+Creating trajectory store manager with proto store and SQLite store
+```
+
+The SQLite store is `conversations/<uuid>.db`. The proto store is
+`~/.gemini/antigravity/agyhub_summaries_proto.pb`, a repeated field of entries,
+one per conversation, subagents included. **A conversation with no entry here is
+invisible however correct its database is.**
+
+An entry is `{1: <conversation id>, 2: <summary>}`. Every part of the summary was
+derived by measuring the six real ones:
+
+| Field | What it holds |
+|---|---|
+| 1 | the title |
+| 2 | **the step count** — 2161, 9, 456, 14, 67, 18, matching the databases exactly |
+| 3, 7, 10 | updated, created, created again |
+| 4 | a cascade id, distinct from the conversation id |
+| 5, 22 | `1` and `4` in all six |
+| 9 | the model identifier, in the wrapper the trajectory blob uses |
+| 15, 16 | a flag empty on half of them, and a count that is `0` below a hundred steps |
+| 17 | the trajectory metadata, minus the two fields it does not carry |
+
+Field 23 appears in four of the six and is `0`. It is not written: the entry
+that was copied to prove a conversation could be listed did not have it.
+
+**Antigravity holds this file in memory and writes it back on exit**, so an
+entry added while it is running is discarded.
+
+### What a conversation needs to be built from nothing
+
+Seven tables, the schema plain enough to create outright — no migration
+bookkeeping, `user_version = 1` — and two blobs that matter.
+
+`trajectory_metadata_blob` for a **root** conversation carries exactly fields
+`[1, 2, 3, 6, 7, 10, 15, 18]`, agreeing across both roots measured. A
+synthesised one is **byte-identical to a real one except field 15**: 352–380
+bytes that do not parse as a message and differ per conversation. Left out
+rather than invented, and a conversation without it opens and reads.
+
+**Field 5 must be absent.** It names a parent, which makes the conversation a
+subagent, and subagents are never listed — the trap that cost two rounds, since
+the smallest database on a machine is usually a subagent and therefore the worst
+possible template.
+
+Field 10 is `8a01067a042a020a00` in both roots, byte-identical, and is written as
+the constant it is. Field 7 is a model or resource identifier of 39–44
+characters, eight `/`-separated segments and no digits; it is copied from an
+existing conversation rather than invented, because asserting a model for work
+done in another tool would be a claim Ferry cannot support.
+
+**A user step keeps its text twice**, at `19.2` and at `19.3.1`, identical bytes
+— 8,872 each in the first one measured. Writing only 19.2 gives a conversation
+whose title bar holds the question and whose bubble is empty. One is what is sent
+to the model; the other is what the interface draws.
+
 ### Attachments
 
 `brain/<uuid>/.user_uploaded/`, as real files rather than base64 inside the

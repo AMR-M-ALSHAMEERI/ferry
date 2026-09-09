@@ -10,17 +10,17 @@ assistant entirely — across **Claude Code**, **OpenAI Codex**,
 ## Cross-tool migration
 
 Ferry's Universal Conversation Schema is designed so a conversation is not
-locked to the tool that created it. **Three of the four tools are targets
-today** — Claude Code, GitHub Copilot Chat and OpenAI Codex. A conversation
-from any of the four is written into any of those three with every message and
-every word intact, listed where that tool lists its own conversations, and
-openable from the same place.
+locked to the tool that created it. **All four tools are targets** — Claude
+Code, GitHub Copilot Chat, OpenAI Codex and Google Antigravity. A conversation
+from any of them is written into any of them with every message and every word
+intact, listed where that tool lists its own conversations, and openable from
+the same place.
 
-**Antigravity is refused**, and the reason is a property of that tool rather
-than a missing feature: an Antigravity conversation is restored from the
-original SQLite database it was exported with, and Ferry can carry one across
-but cannot build one for a conversation that never had it. The refusal names
-that reason on screen.
+Every one of those four was refused at some point, and every refusal turned out
+to describe a gap in the measurement rather than in the tool. The last one,
+Antigravity, was recorded as impossible because a conversation is stored as
+protobuf inside SQLite; what actually stood in the way was a second index the
+app reads and nothing had noticed.
 
 Conversion is **off by default**. When a bundle holds conversations from
 another tool, Ferry counts what converting them would cost — signatures that

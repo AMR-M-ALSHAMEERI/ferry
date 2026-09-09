@@ -188,10 +188,13 @@ database, without which nothing lists the conversation. And the CLI picker
 project the conversation happened in, or you will not see it. The desktop app
 lists everything regardless of folder.
 
-**Google Antigravity IDE** — restores only. Antigravity rebuilds a conversation
-from the original database it was exported with, so Ferry can carry one back
-but cannot build one for a conversation that came from elsewhere. See
-[CROSS-TOOL.md](CROSS-TOOL.md).
+**Google Antigravity** — two things matter, and one of them is unusual. A
+conversation belongs to a **project**, so open the folder your other
+conversations are in; and Antigravity keeps its list in a file separate from the
+conversations themselves, which Ferry writes as part of the import. **Close
+Antigravity before importing:** it holds that list in memory and writes it back
+when it exits, so anything added underneath a running app is discarded. Ferry
+says so rather than reporting a success you would only discover was empty.
 
 ---
 
