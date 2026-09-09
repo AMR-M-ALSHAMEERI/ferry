@@ -1195,3 +1195,54 @@ class TestGrantingTrustDuringTheImport:
         )
 
         assert folders == ["/home/bob/widget"]
+
+
+def test_a_transcript_ferry_wrote_is_not_read_as_claude_codes_version(tmp_path: Path) -> None:
+    """The same defect Codex had, in the tool that reads its version the same way."""
+    mine = tmp_path / "ferry.jsonl"
+    mine.write_text('{"version": "ferry-0.1.0"}\n', encoding="utf-8")
+    theirs = tmp_path / "claude.jsonl"
+    theirs.write_text('{"version": "2.1.237"}\n', encoding="utf-8")
+    import os
+
+    os.utime(theirs, (1, 1))
+    os.utime(mine, (2, 2))
+
+    assert ClaudeCodeAdapter._version_from([theirs, mine]) == "2.1.237"
+
+
+def test_a_converted_conversation_is_not_stamped_with_the_other_tools_version(
+    target: ClaudeCodeAdapter, tmp_path: Path, manifest
+) -> None:
+    """`source_tool_version` is the version of the tool it came *from*.
+
+    Written into a Claude Code transcript's `version` field - which means "the
+    Claude Code that wrote this" - it made Ferry report Claude Code's version
+    as Codex's, because that is where `detect()` reads it from. A conversion is
+    stamped as Ferry's work, which is what it is.
+    """
+    conversation_id = UUID("dddddddd-0000-4000-8000-00000000000c")
+    bundle = Bundle.create(tmp_path / "foreign", manifest)
+    bundle.add_conversation(
+        Conversation(
+            id=conversation_id,
+            source_tool="codex",
+            source_tool_version="0.147.0",
+            created_at=datetime(2026, 8, 1, tzinfo=UTC),
+            updated_at=datetime(2026, 8, 1, tzinfo=UTC),
+            workspace=Workspace(original_path="/home/bob/foreign"),
+            messages=[Message(role="user", content=[TextBlock(text="hello")])],
+        )
+    )
+
+    list(target.import_(tmp_path / "foreign", ImportOptions(allow_cross_tool=True)))
+
+    written = next((tmp_path / "target").rglob(f"{conversation_id}.jsonl"))
+    versions = {
+        record["version"]
+        for record in read_jsonl(written)
+        if isinstance(record.get("version"), str)
+    }
+    assert versions, "the transcript records no version at all"
+    assert "0.147.0" not in versions, "Claude Code would report itself as Codex"
+    assert all(v.startswith("ferry-") for v in versions)

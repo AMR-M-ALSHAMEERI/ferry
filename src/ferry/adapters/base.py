@@ -111,6 +111,22 @@ class ImportEvent:
     """
 
 
+FERRY_WROTE_IT = "ferry-"
+"""How a record says Ferry wrote it, rather than the tool.
+
+Two adapters report the tool's version by reading it out of the newest
+conversation, because the app is installed somewhere different on every
+platform and a version that never wrote anything is not the version that
+produced the history. Ferry stamps what it writes honestly -- `ferry-0.1.0` --
+and the consequence was that importing into Codex made Ferry report **Codex's
+version as `ferry-0.1.0`**: the tool reading its own handwriting back as a
+measurement of somebody else.
+
+Anything carrying this prefix is Ferry's, and is skipped when asking what
+version of a tool wrote a person's history.
+"""
+
+
 ConversionMode = Literal["archive", "continue"]
 """How much of a conversation crossing tools is given up.
 

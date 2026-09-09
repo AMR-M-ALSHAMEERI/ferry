@@ -999,3 +999,37 @@ def test_every_record_carries_a_time_even_when_the_message_has_none(
         assert record["timestamp"].startswith("2026-09-01"), (
             "a record was stamped with a time nothing in the conversation supports"
         )
+
+
+def test_a_rollout_ferry_wrote_is_not_read_as_codexs_version(tmp_path: Path) -> None:
+    """Ferry stamps its rebuilds `ferry-<version>`, honestly. Reading that back
+    as the tool's version told a person their Codex was now `ferry-0.1.0` -- the
+    tool reading its own handwriting as a measurement of somebody else. Found by
+    the person, after the first real import.
+    """
+    day = tmp_path / "sessions" / "2026" / "09" / "10"
+    day.mkdir(parents=True)
+
+    def rollout(name: str, cli_version: str) -> Path:
+        path = day / name
+        path.write_text(
+            json.dumps({"type": "session_meta", "payload": {"cli_version": cli_version}}) + "\n",
+            encoding="utf-8",
+        )
+        return path
+
+    codex_wrote = rollout(
+        "rollout-2026-09-10T00-00-00-aaaaaaaa-0000-0000-0000-000000000000.jsonl", "0.147.0"
+    )
+    ferry_wrote = rollout(
+        "rollout-2026-09-10T01-00-00-bbbbbbbb-0000-0000-0000-000000000000.jsonl", "ferry-0.1.0"
+    )
+    # Ferry's is the newer one, which is exactly the situation after an import.
+    import os
+
+    os.utime(codex_wrote, (1, 1))
+    os.utime(ferry_wrote, (2, 2))
+
+    found = CodexAdapter._version_from([codex_wrote, ferry_wrote])
+
+    assert found == "0.147.0"

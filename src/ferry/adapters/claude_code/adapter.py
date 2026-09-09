@@ -31,6 +31,7 @@ from uuid import UUID
 
 from ferry import __version__
 from ferry.adapters.base import (
+    FERRY_WROTE_IT,
     Adapter,
     DetectResult,
     ExportEvent,
@@ -217,7 +218,9 @@ class ClaudeCodeAdapter(Adapter):
 
         The *last* version in the *most recently touched* transcript: a session
         that spans an upgrade carries both, and the one that matters is the one
-        writing now. Matched with a regex rather than parsed as JSON because
+        writing now. **A transcript Ferry wrote is skipped**: it is stamped
+        `ferry-<version>`, and reading that back would report Ferry as the
+        version of Claude Code. Matched with a regex rather than parsed as JSON because
         ``detect()`` runs every time Ferry starts and a real transcript runs to
         several megabytes.
         """
@@ -227,7 +230,7 @@ class ClaudeCodeAdapter(Adapter):
                 with session.open(encoding="utf-8") as handle:
                     for line in handle:
                         match = _VERSION_FIELD.search(line)
-                        if match:
+                        if match and not match.group(1).startswith(FERRY_WROTE_IT):
                             found = match.group(1)
             except OSError:
                 continue
@@ -656,7 +659,12 @@ class ClaudeCodeAdapter(Adapter):
             notes = [f"{broken} unreadable lines dropped from the original"] if broken else []
             return session_lines(records), notes
 
-        version = conversation.source_tool_version or f"ferry-{__version__}"
+        # A conversion did not happen in Claude Code, so the version that
+        # produced it is not a Claude Code version and must not be written into
+        # a field that means one. Writing a converted Codex conversation's
+        # version here made Ferry report Claude Code's version as Codex's.
+        native = conversation.source_tool == TOOL
+        version = (conversation.source_tool_version if native else "") or f"ferry-{__version__}"
         image_bytes = self._attachment_bytes(bundle, conversation)
         notes = list(SYNTHESIS_NOTES)
         absent = missing_images(conversation, image_bytes)

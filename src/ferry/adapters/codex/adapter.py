@@ -25,6 +25,7 @@ from uuid import UUID, uuid5
 
 from ferry import __version__
 from ferry.adapters.base import (
+    FERRY_WROTE_IT,
     Adapter,
     DetectResult,
     ExportEvent,
@@ -208,6 +209,12 @@ class CodexAdapter(Adapter):
 
         Reads only the first line, which is always ``session_meta`` and carries
         ``cli_version``. Never parses the rest — one of these files is 53 MB.
+
+        **A rollout Ferry wrote is skipped.** Ferry stamps its own rebuilds
+        `ferry-<version>`, which is honest in the file and wrong as an answer to
+        "which Codex is this?" — after one import, the newest rollout is Ferry's
+        and the version reported to the person was `ferry-0.1.0`. Reported by
+        the person who noticed their Codex had apparently become Ferry.
         """
         for path in sorted(rollouts, key=lambda p: (p.stat().st_mtime, p.name), reverse=True):
             try:
@@ -225,6 +232,8 @@ class CodexAdapter(Adapter):
             if isinstance(payload, dict):
                 version = payload.get("cli_version")
                 if isinstance(version, str) and version:
+                    if version.startswith(FERRY_WROTE_IT):
+                        continue
                     return version
         return None
 
