@@ -232,8 +232,9 @@ one, in two groups:
 
 - **Can be deleted** — still exactly what Ferry wrote. Ferry keeps a checksum
   of every conversion it writes, which is how it knows. Opening a conversation
-  to look at it does not count: Antigravity's database changes a few bytes of
-  its header when opened, and Ferry proves that is all that changed.
+  to look at it does not count. Antigravity and VS Code both change the file a
+  little when they show it — a few header bytes in one, lines of bookkeeping in
+  the other — and Ferry proves that is all that changed before offering it.
 - **Will stay** — you have opened it and carried on, so it is yours now; or it
   is no longer where Ferry put it; or it was imported before Ferry kept
   checksums, so it cannot tell. Each is listed with its reason, and none is

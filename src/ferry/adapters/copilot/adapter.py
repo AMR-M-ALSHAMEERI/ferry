@@ -37,6 +37,7 @@ from ferry.adapters.census import Census, census, count_of
 from ferry.adapters.conflict import reidentify, rename_note
 from ferry.adapters.copilot import paths as cp_paths
 from ferry.adapters.copilot.deltas import replay_lines
+from ferry.adapters.copilot.opened import opened_not_changed
 from ferry.adapters.copilot.reader import read_session
 from ferry.adapters.copilot.writer import (
     SYNTHESIS_NOTES,
@@ -327,6 +328,14 @@ class CopilotAdapter(Adapter):
                 "Close it and try again."
             )
         return None
+
+    def only_opened(self, written: Path, was: provenance_store.Written) -> bool:
+        """Whether VS Code has shown this conversation without it being carried on.
+
+        See :mod:`ferry.adapters.copilot.opened`: opening appends bookkeeping
+        to every request, measured on a real conversation, and nothing else.
+        """
+        return opened_not_changed(written, was)
 
     # ---------- import ----------
 
