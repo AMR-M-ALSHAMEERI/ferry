@@ -40,6 +40,7 @@ from ferry.adapters.antigravity.index import (
     index_path,
     upsert_entry,
 )
+from ferry.adapters.antigravity.opened import opened_not_changed
 from ferry.adapters.antigravity.reader import (
     SessionRead,
     parent_conversation,
@@ -532,6 +533,14 @@ class AntigravityAdapter(Adapter):
             return journal.stat().st_size > 0
         except OSError:
             return False
+
+    def only_opened(self, written: Path, was: provenance_store.Written) -> bool:
+        """Whether Antigravity has opened this database without adding to it.
+
+        See :mod:`ferry.adapters.antigravity.opened`: opening rewrites six
+        header bytes and nothing else, measured on a real conversation.
+        """
+        return opened_not_changed(written, was)
 
     def companions(self, written: Path) -> list[Path]:
         return [written.with_name(written.name + suffix) for suffix in ("-wal", "-shm")]

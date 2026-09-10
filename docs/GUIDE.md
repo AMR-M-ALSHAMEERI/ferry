@@ -230,8 +230,10 @@ into an assistant — for when you tried a migration and do not want the result.
 For each assistant it lists every conversation Ferry brought in from another
 one, in two groups:
 
-- **Can be deleted** — still exactly what Ferry wrote, byte for byte. Ferry
-  keeps a checksum of every conversion it writes, which is how it knows.
+- **Can be deleted** — still exactly what Ferry wrote. Ferry keeps a checksum
+  of every conversion it writes, which is how it knows. Opening a conversation
+  to look at it does not count: Antigravity's database changes a few bytes of
+  its header when opened, and Ferry proves that is all that changed.
 - **Will stay** — you have opened it and carried on, so it is yours now; or it
   is no longer where Ferry put it; or it was imported before Ferry kept
   checksums, so it cannot tell. Each is listed with its reason, and none is

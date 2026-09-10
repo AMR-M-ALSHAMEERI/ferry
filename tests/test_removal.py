@@ -26,6 +26,7 @@ import pytest
 from ferry.adapters.antigravity import AntigravityAdapter, wire
 from ferry.adapters.antigravity import paths as ag_paths
 from ferry.adapters.antigravity.index import AntigravityIndexLocked, drop_entry, entry_for
+from ferry.adapters.antigravity.opened import opened_not_changed
 from ferry.adapters.base import (
     Adapter,
     DetectResult,
@@ -497,6 +498,78 @@ class TestWhatGoesWithTheFile:
         assert not database.exists()
         assert not journal.exists()
         assert not shared.exists()
+
+    def test_opening_an_antigravity_conversation_to_look_is_not_using_it(
+        self, tmp_path: Path
+    ) -> None:
+        """Found by the human: a conversation imported, opened once to check
+        it had arrived, and then refused by the delete as "changed". Rebuilt
+        and compared on their real store, six header bytes had moved - SQLite
+        switching the file to WAL as Antigravity opened it - and not one byte of
+        the conversation. This does the same thing with SQLite itself."""
+        target = antigravity(tmp_path)
+        [database] = import_into(target, tmp_path, a_conversation("antigravity"))
+        record_id = survey(target.adapter)[0].record_id
+        connection = sqlite3.connect(database)
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.close()
+        assert provenance_store.untouched_since_import("antigravity", record_id) is False, (
+            "opening it did not change the file, so this proves nothing"
+        )
+
+        [found] = survey(target.adapter)
+        list(remove(target.adapter, RemoveOptions()))
+
+        assert found.removable
+        assert not database.exists()
+
+    def test_a_step_taken_out_after_opening_still_counts_as_use(self, tmp_path: Path) -> None:
+        """The proof has to fail for any real change, or it is not a proof."""
+        target = antigravity(tmp_path)
+        [database] = import_into(target, tmp_path, a_conversation("antigravity"))
+        connection = sqlite3.connect(database)
+        connection.execute("PRAGMA journal_mode=WAL")
+        with connection:
+            connection.execute("DELETE FROM steps WHERE rowid = (SELECT MAX(rowid) FROM steps)")
+        connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        connection.close()
+
+        [found] = survey(target.adapter)
+        list(remove(target.adapter, RemoveOptions()))
+
+        assert found.state == "changed"
+        assert database.is_file()
+
+
+class TestOpenedNotChanged:
+    def test_a_file_of_another_size_is_never_passed(self, tmp_path: Path) -> None:
+        path = tmp_path / "a.db"
+        path.write_bytes(b"SQLite format 3\x00" + b"\0" * 200)
+        was = provenance_store.fingerprint(path)
+        assert was is not None
+        path.write_bytes(path.read_bytes() + b"\0")
+
+        assert opened_not_changed(path, was) is False
+
+    def test_a_file_that_is_not_sqlite_is_never_passed(self, tmp_path: Path) -> None:
+        path = tmp_path / "a.db"
+        path.write_bytes(b"not a database" + b"\0" * 200)
+        was = provenance_store.fingerprint(path)
+        assert was is not None
+        path.write_bytes(b"not a databasf" + b"\0" * 200)
+
+        assert opened_not_changed(path, was) is False
+
+    def test_a_change_past_the_header_is_never_passed(self, tmp_path: Path) -> None:
+        path = tmp_path / "a.db"
+        path.write_bytes(b"SQLite format 3\x00" + b"\0" * 200)
+        was = provenance_store.fingerprint(path)
+        assert was is not None
+        data = bytearray(path.read_bytes())
+        data[150] = 1
+        path.write_bytes(bytes(data))
+
+        assert opened_not_changed(path, was) is False
 
 
 # --------------------------------------------------------------------------

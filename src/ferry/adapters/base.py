@@ -15,7 +15,10 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from ferry.core.provenance import Written
 
 __all__ = [
     "OnConflict",
@@ -343,6 +346,18 @@ class Adapter(ABC):
         The fingerprint covers the one file Ferry wrote. A database can take new
         work into a journal beside it and leave the main file byte for byte the
         same, and a conversation carried on that way belongs to the person.
+        """
+        return False
+
+    def only_opened(self, written: Path, was: Written) -> bool:
+        """Whether ``written`` differs from what Ferry wrote only by being opened.
+
+        Asked only when the checksum no longer matches. Some files are changed
+        by the act of looking: SQLite rewrites part of a database's header when
+        it opens one. A conversation someone opened to check it had arrived is
+        not one they worked in, and refusing to delete it on that account made
+        the delete refuse the one thing it was asked for. The default is
+        ``False``: without proof, a changed file is the person's.
         """
         return False
 

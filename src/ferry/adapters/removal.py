@@ -110,14 +110,28 @@ def _state(adapter: Adapter, record_id: UUID, path: Path | None, roots: Sequence
         return "unknown"
     if not _inside(path, roots):
         return "elsewhere"
-    untouched = provenance.untouched_since_import(adapter.name, record_id)
+    untouched = _untouched(adapter, record_id, path)
     if untouched is None:
         return "unknown"
     if not path.exists():
         return "gone"
-    if untouched is False or adapter.used_since(path):
-        return "changed"
-    return "removable"
+    return "removable" if untouched else "changed"
+
+
+def _untouched(adapter: Adapter, record_id: UUID, path: Path) -> bool | None:
+    """Whether the file is still Ferry's: ``None`` when there is no telling.
+
+    The checksum first. If it no longer matches, the adapter may still prove the
+    only difference is the tool having opened the file -- which is looking, not
+    using. Then anything beside the file that shows use overrules both.
+    """
+    verdict = provenance.untouched_since_import(adapter.name, record_id)
+    if verdict is False and path.exists():
+        was = provenance.written_file(adapter.name, record_id)
+        verdict = was is not None and adapter.only_opened(path, was)
+    if verdict and adapter.used_since(path):
+        return False
+    return verdict
 
 
 def survey(adapter: Adapter) -> list[Candidate]:
@@ -203,11 +217,9 @@ def _remove_one(
         return
 
     # Asked again at the moment of acting, not trusted from the list. The
-    # person may have opened the conversation between choosing it and saying
-    # yes, and that makes it theirs.
-    if provenance.untouched_since_import(tool, candidate.record_id) is not True or (
-        adapter.used_since(path)
-    ):
+    # person may have carried the conversation on between choosing it and
+    # saying yes, and that makes it theirs.
+    if _untouched(adapter, candidate.record_id, path) is not True:
         yield RemoveEvent(
             kind="warning",
             conversation_id=cid,
