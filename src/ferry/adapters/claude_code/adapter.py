@@ -357,6 +357,23 @@ class ClaudeCodeAdapter(Adapter):
             force=True,
         )
 
+    # ---------- remove ----------
+
+    def written_roots(self) -> list[Path]:
+        return [cc_paths.projects_dir(self._env)]
+
+    def companions(self, written: Path) -> list[Path]:
+        """Spilled tool output restored beside the transcript, if any was.
+
+        Only what sits under ``tool-results``, which is what an import puts
+        there. Anything else Claude Code keeps in that directory is left, and
+        so is the directory while anything is in it.
+        """
+        spilled = written.parent / written.stem / SIDECAR_SUBDIR
+        if not spilled.is_dir():
+            return []
+        return sorted(path for path in spilled.iterdir() if path.is_file())
+
     # ---------- import ----------
 
     def import_(self, bundle_dir: Path, options: ImportOptions) -> Iterator[ImportEvent]:
@@ -610,6 +627,7 @@ class ClaudeCodeAdapter(Adapter):
                 TOOL,
                 conversation_id,
                 conversation.provenance,
+                title=conversation.title,
                 # Fingerprinted from the file as it now stands, not from the
                 # payload in hand. They are the same bytes today; if some future
                 # step ever writes more, the record still describes the file

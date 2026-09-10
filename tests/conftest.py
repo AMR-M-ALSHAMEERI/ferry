@@ -7,6 +7,7 @@ import pytest
 
 from ferry.core import Manifest, SourceMachine
 from ferry.core import provenance as provenance_store
+from ferry.core.backup import BACKUP_ENV
 from ferry.ucs import (
     Attachment,
     Conversation,
@@ -33,6 +34,10 @@ def _isolate_user_config(tmp_path_factory, monkeypatch):
     # writes into it. Without this the suite left records in the developer's
     # own home -- thirteen of them, the first time the feature ran under it.
     monkeypatch.setenv(provenance_store.ROOT_ENV, str(fake.parent / "provenance"))
+    # And its backups. Deleting takes a copy of everything it removes, so a
+    # suite that deletes would otherwise fill the developer's real backups
+    # folder with copies of test fixtures.
+    monkeypatch.setenv(BACKUP_ENV, str(fake.parent / "backups"))
     return fake
 
 

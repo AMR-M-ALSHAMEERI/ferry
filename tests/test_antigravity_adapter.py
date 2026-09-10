@@ -13,6 +13,7 @@ from ferry.adapters.antigravity import paths, schema, wire
 from ferry.adapters.antigravity.adapter import PROJECT_SIDECAR, AntigravityAdapter
 from ferry.adapters.base import ImportOptions
 from ferry.core import Bundle
+from ferry.core.backup import backup_root
 from tests.antigravity_fixture import build_database
 
 CONV = UUID("aaaaaaaa-1111-4111-8111-111111111111")
@@ -291,7 +292,7 @@ class TestImport:
         run(adapter.import_(bundle_dir, ImportOptions()))
         run(adapter.import_(bundle_dir, ImportOptions(on_conflict="overwrite")))
 
-        assert list((home / ".ferry" / "backups").rglob(f"{CONV}.db"))
+        assert list(backup_root().rglob(f"{CONV}.db"))
         assert not list(paths.conversations_dir(target).glob("*.bak"))
 
     def test_dry_run_writes_nothing(

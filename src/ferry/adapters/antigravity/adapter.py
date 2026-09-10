@@ -35,6 +35,7 @@ from ferry.adapters.antigravity import schema, wire
 from ferry.adapters.antigravity.build import BUILD_NOTES, build_database, model_identifier
 from ferry.adapters.antigravity.index import (
     AntigravityIndexLocked,
+    drop_entry,
     entry_for,
     index_path,
     upsert_entry,
@@ -58,6 +59,7 @@ from ferry.adapters.base import (
     ExportEvent,
     ImportEvent,
     ImportOptions,
+    RemovalBlocked,
 )
 from ferry.adapters.census import census, count_of
 from ferry.adapters.conflict import RENAME_NOT_POSSIBLE
@@ -493,6 +495,47 @@ class AntigravityAdapter(Adapter):
         if source.is_file():
             bundle.add_source_raw_sidecar(conversation_id, source, PROJECT_SIDECAR)
 
+    # ---------- remove ----------
+
+    def written_roots(self) -> list[Path]:
+        return [ag_paths.conversations_dir(self._env)]
+
+    def listing(self, written: Path) -> Path | None:
+        return index_path(self._env)
+
+    def unlist(self, written: Path) -> None:
+        conversation_id = ag_paths.conversation_id_of(written)
+        if conversation_id is None:
+            return
+        try:
+            drop_entry(index_path(self._env), conversation_id)
+        except AntigravityIndexLocked as exc:
+            raise RemovalBlocked(str(exc)) from exc
+
+    def in_use(self) -> str | None:
+        if antigravity_is_running(self._env):
+            return (
+                "Antigravity is running. It keeps its conversation list in memory and "
+                "writes it back when it closes, so close it and try again."
+            )
+        return None
+
+    def used_since(self, written: Path) -> bool:
+        """Whether SQLite is holding work for this database in its journal.
+
+        A conversation carried on in Antigravity can sit in ``-wal`` while the
+        main file stays byte for byte as Ferry wrote it, so the fingerprint
+        alone would call it untouched.
+        """
+        journal = written.with_name(written.name + "-wal")
+        try:
+            return journal.stat().st_size > 0
+        except OSError:
+            return False
+
+    def companions(self, written: Path) -> list[Path]:
+        return [written.with_name(written.name + suffix) for suffix in ("-wal", "-shm")]
+
     # ---------- import ----------
 
     def import_(self, bundle_dir: Path, options: ImportOptions) -> Iterator[ImportEvent]:
@@ -778,6 +821,7 @@ class AntigravityAdapter(Adapter):
             conversation.id,
             conversation.provenance,
             written=provenance_store.fingerprint(destination),
+            title=conversation.title,
         )
 
         yield ImportEvent(

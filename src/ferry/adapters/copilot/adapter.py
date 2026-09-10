@@ -31,6 +31,7 @@ from ferry.adapters.base import (
     ExportEvent,
     ImportEvent,
     ImportOptions,
+    RemovalBlocked,
 )
 from ferry.adapters.census import Census, census, count_of
 from ferry.adapters.conflict import reidentify, rename_note
@@ -40,6 +41,7 @@ from ferry.adapters.copilot.reader import read_session
 from ferry.adapters.copilot.writer import (
     SYNTHESIS_NOTES,
     SessionStoreLocked,
+    drop_index_entry,
     index_entry,
     index_lists,
     recorded_workspace_key,
@@ -297,6 +299,35 @@ class CopilotAdapter(Adapter):
         for note in found.notes:
             yield ExportEvent(kind="note", conversation_id=str(conversation_id), message=note)
 
+    # ---------- remove ----------
+
+    def written_roots(self) -> list[Path]:
+        return [cp_paths.workspace_storage(self._env), cp_paths.empty_window_dir(self._env)]
+
+    def listing(self, written: Path) -> Path | None:
+        """The chat list beside the transcript: its workspace's, or the no-folder one."""
+        if written.parent == cp_paths.empty_window_dir(self._env):
+            return cp_paths.global_storage(self._env) / "state.vscdb"
+        return written.parent.parent / "state.vscdb"
+
+    def unlist(self, written: Path) -> None:
+        database = self.listing(written)
+        if database is None:  # pragma: no cover - Copilot always has a list
+            return
+        try:
+            drop_index_entry(database, written.stem)
+        except SessionStoreLocked as exc:
+            raise RemovalBlocked(str(exc)) from exc
+
+    def in_use(self) -> str | None:
+        if vs_code_is_running(self._env):
+            return (
+                "VS Code is running. It keeps the chat list in memory and writes it back "
+                "when it closes, which would put these conversations back in the list. "
+                "Close it and try again."
+            )
+        return None
+
     # ---------- import ----------
 
     def import_(self, bundle_dir: Path, options: ImportOptions) -> Iterator[ImportEvent]:
@@ -503,6 +534,7 @@ class CopilotAdapter(Adapter):
                 conversation.id,
                 conversation.provenance,
                 written=provenance_store.fingerprint(transcript),
+                title=conversation.title,
             )
 
         yield ImportEvent(

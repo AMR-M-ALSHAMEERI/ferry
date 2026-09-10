@@ -18,6 +18,14 @@ class Adapter(ABC):
     def detect(self) -> DetectResult: ...
     def export(self, dest_bundle_dir: Path) -> Iterator[ExportEvent]: ...
     def import_(self, bundle_dir: Path, options: ImportOptions) -> Iterator[ImportEvent]: ...
+
+    # Taking back what an import wrote. Every default makes a delete do nothing.
+    def written_roots(self) -> list[Path]: ...
+    def listing(self, written: Path) -> Path | None: ...
+    def unlist(self, written: Path) -> None: ...
+    def in_use(self) -> str | None: ...
+    def used_since(self, written: Path) -> bool: ...
+    def companions(self, written: Path) -> list[Path]: ...
 ```
 
 Register the finished adapter in `ferry/adapters/__init__.py`, replacing its
@@ -28,6 +36,18 @@ Events carry a `kind` (`started`, `progress`, `skipped`, `warning`, `error`,
 `done`), an optional `conversation_id`, and a message. The CLI renders them;
 tests assert on them. One `progress` event means one conversation actually
 handled — the counts in the self-check depend on that.
+
+A target also describes how to take back what its import wrote, so *Delete
+conversations Ferry imported* can undo it; `ferry.adapters.removal` does the
+rest. `written_roots` says where conversations are written, and a delete never
+follows a record outside them. `listing` and `unlist` name and remove the entry
+that makes the tool list a conversation — the other half of every import — and
+`unlist` must be harmless when the entry is already gone, because a delete that
+stopped halfway is finished by running it again. `in_use` says why the tool must
+be closed first. `used_since` reports work the fingerprint cannot see, such as a
+SQLite journal beside the file. `companions` are files that go with the
+conversation. Record provenance with `title=`, so the delete screen can name
+what it offers.
 
 ## Rules
 

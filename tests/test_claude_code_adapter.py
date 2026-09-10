@@ -26,6 +26,7 @@ from ferry.adapters.claude_code.reader import read_session
 from ferry.adapters.claude_code.trust import TrustError
 from ferry.adapters.claude_code.writer import remap_prefix
 from ferry.core import Bundle, sha256_file
+from ferry.core.backup import backup_root
 from ferry.ucs import (
     Conversation,
     Message,
@@ -597,7 +598,7 @@ def test_overwriting_backs_the_old_file_up_first(
 
     list(target.import_(exported, ImportOptions(on_conflict="overwrite")))
 
-    backups = list((home / ".ferry" / "backups").rglob(f"{BASIC_ID}.jsonl"))
+    backups = list(backup_root().rglob(f"{BASIC_ID}.jsonl"))
     assert len(backups) == 1
     assert backups[0].read_text(encoding="utf-8") == "clobbered"
     assert written.read_text(encoding="utf-8") != "clobbered"

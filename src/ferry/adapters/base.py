@@ -26,6 +26,9 @@ __all__ = [
     "ImportEvent",
     "ImportOptions",
     "NotImplementedAdapter",
+    "RemovalBlocked",
+    "RemoveEvent",
+    "RemoveOptions",
     "get_adapter",
     "list_adapters",
 ]
@@ -194,6 +197,48 @@ class ImportOptions:
     path_remap: tuple[tuple[str, str], ...] = ()
 
 
+@dataclass(frozen=True)
+class RemoveEvent:
+    """Progress signal emitted while conversations Ferry wrote are being deleted.
+
+    The same shape as the other two, so the screen that renders an import
+    renders this too. A delete that reported itself some other way would be the
+    one place where a warning could go unshown.
+    """
+
+    kind: EventKind
+    conversation_id: str | None = None
+    message: str = ""
+
+    total: int | None = None
+    """How many conversations this run will delete, on a ``started`` event."""
+
+
+@dataclass(frozen=True)
+class RemoveOptions:
+    """Caller-controlled behaviour for deleting what Ferry wrote.
+
+    ``backup`` defaults to on for the same reason an import's does: this removes
+    things from a person's real history. Everything it can remove also came out
+    of a bundle, but that bundle may be long gone.
+    """
+
+    dry_run: bool = False
+    backup: bool = True
+    only: frozenset[str] = frozenset()
+    """Record ids to delete, as strings. Empty means every one that can go."""
+
+
+class RemovalBlocked(RuntimeError):
+    """The entry that makes a tool list a conversation could not be taken out.
+
+    Raised by :meth:`Adapter.unlist`, and it stops that conversation's delete
+    **before the file is touched**. A file gone but still listed is an empty
+    conversation in someone's list; a file still there and still listed is
+    exactly what they had, which is the right state to fail into.
+    """
+
+
 class Adapter(ABC):
     """Per-tool reader and writer of conversation history.
 
@@ -243,6 +288,66 @@ class Adapter(ABC):
         Never raises; an adapter that cannot tell reports nothing rather than
         blocking an import over a question it could not answer.
         """
+        return []
+
+    # Deleting what Ferry wrote; see ferry.adapters.removal. Every default makes
+    # a delete do nothing, so an adapter that has not described where it writes
+    # can never be asked to remove anything.
+
+    def written_roots(self) -> list[Path]:
+        """Where this adapter writes conversations.
+
+        A delete only touches files inside these. Ferry's records name the file
+        each import wrote, and a record naming one anywhere else -- written
+        while this tool was pointed at a different store -- is left alone rather
+        than followed out of the store being cleaned.
+        """
+        return []
+
+    def listing(self, written: Path) -> Path | None:
+        """The file holding the entry that makes the tool list ``written``.
+
+        ``None`` for a tool that lists whatever is on disk. Named separately
+        from :meth:`unlist` so a delete can back it up before changing it, and
+        say in a preview what it would touch.
+        """
+        return None
+
+    def unlist(self, written: Path) -> None:
+        """Take out the entry that makes the tool list ``written``.
+
+        The other half of every import: a file with no entry is invisible, and
+        an entry with no file is an empty conversation in the list. Must be
+        safe to call when the entry is already gone, because a delete that
+        stopped halfway is finished by running it again.
+
+        Raises:
+            RemovalBlocked: If the entry could not be taken out.
+        """
+        # Nothing to take out by default: a tool that lists whatever is on
+        # disk stops listing a conversation when its file goes.
+        return None
+
+    def in_use(self) -> str | None:
+        """Why a delete has to wait, or ``None`` if it need not.
+
+        A tool that keeps its list in memory and writes it back when it closes
+        would put the entry straight back, so it has to be closed first. The
+        answer is a sentence for the person rather than a flag.
+        """
+        return None
+
+    def used_since(self, written: Path) -> bool:
+        """Whether anything beside ``written`` shows it has been used.
+
+        The fingerprint covers the one file Ferry wrote. A database can take new
+        work into a journal beside it and leave the main file byte for byte the
+        same, and a conversation carried on that way belongs to the person.
+        """
+        return False
+
+    def companions(self, written: Path) -> list[Path]:
+        """Files that belong to ``written`` and go when it goes."""
         return []
 
 

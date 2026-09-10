@@ -31,11 +31,17 @@ from ferry.adapters.base import (
     ExportEvent,
     ImportEvent,
     ImportOptions,
+    RemovalBlocked,
 )
 from ferry.adapters.census import census, count_of, jsonl_holds
 from ferry.adapters.claude_code.writer import remap_prefix
 from ferry.adapters.codex import paths as cx_paths
-from ferry.adapters.codex.index import ThreadIndexLocked, thread_row, upsert_thread_row
+from ferry.adapters.codex.index import (
+    ThreadIndexLocked,
+    drop_thread_row,
+    thread_row,
+    upsert_thread_row,
+)
 from ferry.adapters.codex.reader import SessionRead, parent_thread, read_rollout
 from ferry.adapters.codex.writer import REBUILD_NOTES, Rebuild, rollout_lines, rollout_stamp
 from ferry.adapters.conflict import reidentify, rename_note
@@ -420,6 +426,26 @@ class CodexAdapter(Adapter):
             force=True,
         )
 
+    # ---------- remove ----------
+
+    def written_roots(self) -> list[Path]:
+        return [cx_paths.sessions_dir(self._env)]
+
+    def listing(self, written: Path) -> Path | None:
+        """The state database whose ``threads`` table the picker is built from."""
+        databases = cx_paths.state_databases(self._env)
+        return databases[-1] if databases else None
+
+    def unlist(self, written: Path) -> None:
+        database = self.listing(written)
+        thread = cx_paths.thread_id_of(written)
+        if database is None or thread is None:
+            return
+        try:
+            drop_thread_row(database, thread)
+        except ThreadIndexLocked as exc:
+            raise RemovalBlocked(str(exc)) from exc
+
     # ---------- import ----------
 
     def import_(self, bundle_dir: Path, options: ImportOptions) -> Iterator[ImportEvent]:
@@ -620,6 +646,7 @@ class CodexAdapter(Adapter):
                 conversation.id,
                 conversation.provenance,
                 written=provenance_store.fingerprint(destination),
+                title=conversation.title,
             )
 
         restored = self._restore_pasted(bundle, conversation)

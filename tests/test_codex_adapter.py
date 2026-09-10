@@ -33,6 +33,7 @@ from ferry.adapters.codex.writer import (
 )
 from ferry.core import Bundle
 from ferry.core import provenance as provenance_store
+from ferry.core.backup import backup_root
 from ferry.ucs import (
     Conversation,
     Message,
@@ -585,7 +586,7 @@ def test_overwriting_backs_the_old_file_up_first(
 
     list(target.import_(exported, ImportOptions(on_conflict="overwrite")))
 
-    backups = list((home / ".ferry" / "backups").rglob("*.jsonl"))
+    backups = list(backup_root().rglob("*.jsonl"))
     assert any(b.read_text(encoding="utf-8") == "clobbered" for b in backups)
     assert written.read_text(encoding="utf-8") != "clobbered"
 

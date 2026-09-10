@@ -41,6 +41,7 @@ from ferry.cli.flows import (
 )
 from ferry.cli.theme import MONO, Capability
 from ferry.cli.ui import UI, NonInteractiveError
+from ferry.core.backup import backup_root
 from ferry.core.sealed import is_sealed, opens_with
 
 
@@ -856,7 +857,7 @@ class TestInspect:
 
         assert list((bundle_dir / "conversations").glob("*.json")) == []
         assert "Deleted" in ui.text
-        assert list((home / ".ferry" / "backups").rglob("*.json"))
+        assert list(backup_root().rglob("*.json"))
 
     def test_declining_to_delete_the_bundle_leaves_it(self, bundle_dir: Path) -> None:
         ui = _Answers(path=str(bundle_dir), actions=["all", "done"], confirm=False)

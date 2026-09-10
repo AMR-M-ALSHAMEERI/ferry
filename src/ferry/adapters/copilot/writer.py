@@ -38,6 +38,7 @@ from ferry.ucs import Conversation
 __all__ = [
     "INDEX_KEY",
     "SessionStoreLocked",
+    "drop_index_entry",
     "index_entry",
     "snapshot_line",
     "upsert_index_entry",
@@ -181,6 +182,56 @@ def upsert_index_entry(database: Path, entry: dict[str, Any]) -> None:
                 "INSERT OR REPLACE INTO ItemTable (key, value) VALUES (?, ?)",
                 (INDEX_KEY, json.dumps(index, ensure_ascii=False)),
             )
+    except sqlite3.OperationalError as exc:
+        raise SessionStoreLocked(
+            f"{database.name} is locked - close VS Code and try again ({exc})"
+        ) from exc
+    finally:
+        connection.close()
+
+
+def drop_index_entry(database: Path, session_id: str) -> bool:
+    """Take one conversation out of a ``state.vscdb`` chat list.
+
+    The undo of :func:`upsert_index_entry`, with the same care: the list is one
+    JSON value holding every conversation, so it is read, one key is taken out,
+    and it is written back whole inside a transaction. Returns whether the entry
+    was there.
+
+    A list that will not parse is left exactly as it is. Rewriting something
+    Ferry cannot read would be guessing with a person's whole chat history.
+
+    Raises:
+        SessionStoreLocked: If the database cannot be written, almost always
+            because VS Code is running.
+    """
+    if not database.is_file():
+        return False
+    try:
+        connection = sqlite3.connect(database, timeout=_BUSY_TIMEOUT_SECONDS)
+    except sqlite3.Error as exc:  # pragma: no cover - depends on the filesystem
+        raise SessionStoreLocked(f"cannot open {database.name}: {exc}") from exc
+
+    try:
+        with connection:
+            row = connection.execute(
+                "SELECT value FROM ItemTable WHERE key = ?", (INDEX_KEY,)
+            ).fetchone()
+            if row is None:
+                return False
+            try:
+                index = json.loads(row[0])
+            except (TypeError, ValueError):
+                return False
+            entries = index.get("entries") if isinstance(index, dict) else None
+            if not isinstance(entries, dict) or session_id not in entries:
+                return False
+            del entries[session_id]
+            connection.execute(
+                "INSERT OR REPLACE INTO ItemTable (key, value) VALUES (?, ?)",
+                (INDEX_KEY, json.dumps(index, ensure_ascii=False)),
+            )
+            return True
     except sqlite3.OperationalError as exc:
         raise SessionStoreLocked(
             f"{database.name} is locked - close VS Code and try again ({exc})"

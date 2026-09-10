@@ -9,7 +9,7 @@ are all real, so later milestones fill in behaviour behind a finished interface.
 from __future__ import annotations
 
 from ferry.adapters.base import Adapter, DetectResult, list_adapters
-from ferry.cli.flows import run_compact, run_export, run_import, run_inspect
+from ferry.cli.flows import run_compact, run_export, run_import, run_inspect, run_remove
 from ferry.cli.motion import MENU_MOTION
 from ferry.cli.theme import IconSet
 from ferry.cli.ui import UI, NonInteractiveError, _DetectionRow
@@ -22,6 +22,7 @@ MENU_ITEMS: list[tuple[str, str]] = [
     ("import", "Import a bundle into a tool"),
     ("inspect", "Inspect a bundle"),
     ("compact", "Compact a conversation into a summary"),
+    ("remove", "Delete conversations Ferry imported"),
     ("theme", "Change theme"),
     ("quit", "Quit"),
 ]
@@ -38,7 +39,7 @@ _MILESTONE_FOR_ACTION: dict[str, str] = {}
 Empty since M7c, when Compact -- the last of them -- was built.
 """
 
-_WIRED = frozenset({"export", "import", "inspect", "compact"})
+_WIRED = frozenset({"export", "import", "inspect", "compact", "remove"})
 """Actions that reach a real adapter.
 
 These were stubs reporting "arrives at M3" long after M3 and M4 had shipped --
@@ -182,6 +183,8 @@ def run_menu(ui: UI) -> int:
                 run_inspect(ui)
             elif action == "export":
                 run_export(ui, scan(ui))
+            elif action == "remove":
+                run_remove(ui, scan(ui))
             else:
                 run_import(ui, scan(ui))
             continue

@@ -64,6 +64,7 @@ from ferry.adapters.antigravity.build import trajectory_blob
 __all__ = [
     "INDEX_NAME",
     "AntigravityIndexLocked",
+    "drop_entry",
     "entry_for",
     "index_path",
     "upsert_entry",
@@ -155,6 +156,41 @@ def upsert_entry(path: Path, conversation_id: UUID, entry: bytes, *, running: bo
             f"no conversation index at {path}; this is not an Antigravity "
             "installation Ferry recognises"
         )
+    kept, _ = _without(path, conversation_id)
+    _replace(path, b"".join(kept) + entry)
+
+
+def drop_entry(path: Path, conversation_id: UUID, *, running: bool = False) -> bool:
+    """Take one conversation out of the list, leaving every other entry exactly as it was.
+
+    The undo of :func:`upsert_entry`, held to the same care: every other entry
+    is put back as the bytes it arrived as, and the file is replaced whole.
+    Returns whether there was an entry to take out.
+
+    A missing index lists nothing, which is the state being asked for, so it is
+    not an error. A file with nothing to take out is left untouched rather than
+    rewritten into the same bytes.
+
+    Raises:
+        AntigravityIndexLocked: If Antigravity is running, or the index cannot
+            be read or replaced.
+    """
+    if running:
+        raise AntigravityIndexLocked(
+            "Antigravity is running - it rewrites its conversation list on exit, "
+            "so close it and try again"
+        )
+    if not path.is_file():
+        return False
+    kept, dropped = _without(path, conversation_id)
+    if dropped:
+        _replace(path, b"".join(kept))
+    return dropped
+
+
+def _without(path: Path, conversation_id: UUID) -> tuple[list[bytes], bool]:
+    """Every field of the index but this conversation's entry, as encoded, and
+    whether it had one."""
     try:
         original = path.read_bytes()
     except OSError as exc:
@@ -166,14 +202,19 @@ def upsert_entry(path: Path, conversation_id: UUID, entry: bytes, *, running: bo
 
     wanted = str(conversation_id)
     kept: list[bytes] = []
+    dropped = False
     for field in fields:
         if field.number == _ENTRY:
             inner = {f.number: f.value for f in (wire.parse(field.value) or [])}
             if inner.get(1, b"").decode("utf-8", "replace") == wanted:
-                continue  # the one being replaced
+                dropped = True
+                continue
         kept.append(field.encoded)
+    return kept, dropped
 
-    payload = b"".join(kept) + entry
+
+def _replace(path: Path, payload: bytes) -> None:
+    """Write the index whole. A half-written one loses every conversation in it."""
     try:
         handle, temporary = tempfile.mkstemp(dir=str(path.parent), prefix=path.name, suffix=".tmp")
         with os.fdopen(handle, "wb") as out:

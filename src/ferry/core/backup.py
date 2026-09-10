@@ -24,12 +24,29 @@ history has misunderstood its job.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-__all__ = ["MANIFEST_NAME", "BackupRecord", "back_up", "backup_root", "read_manifest"]
+__all__ = [
+    "BACKUP_ENV",
+    "MANIFEST_NAME",
+    "BackupRecord",
+    "back_up",
+    "backup_root",
+    "read_manifest",
+]
+
+BACKUP_ENV = "FERRY_BACKUP_DIR"
+"""Redirects the backups, so a test never writes into the developer's own.
+
+Honoured with no fallback, like the provenance store's override. It became
+necessary the day Ferry learned to delete: every delete takes a copy first, so
+a suite that deletes things would otherwise fill the real ``~/.ferry/backups``
+with copies of test fixtures.
+"""
 
 MANIFEST_NAME = "manifest.jsonl"
 """One line per copy, appended. JSONL because a crash mid-import must not cost
@@ -39,7 +56,10 @@ _run_stamp: str | None = None
 
 
 def backup_root() -> Path:
-    """Where backups live, per PLAN.md §5 M7."""
+    """Where backups live, per PLAN.md §5 M7, unless :data:`BACKUP_ENV` says otherwise."""
+    override = os.environ.get(BACKUP_ENV)
+    if override:
+        return Path(override)
     return Path.home() / ".ferry" / "backups"
 
 

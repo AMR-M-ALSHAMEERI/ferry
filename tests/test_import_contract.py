@@ -22,6 +22,7 @@ from pathlib import Path
 import pytest
 
 from ferry.adapters.base import ImportEvent, ImportOptions
+from ferry.core.backup import backup_root
 from tests.importcontract import BUILDERS, RENAME_IMPOSSIBLE, Case
 
 TOOLS = sorted(BUILDERS)
@@ -101,7 +102,7 @@ def test_overwrite_copies_the_old_file_into_the_backup_directory_first(
 
     run(case, ImportOptions(on_conflict="overwrite"))
 
-    backups = [path for path in (home / ".ferry" / "backups").rglob("*") if path.is_file()]
+    backups = [path for path in backup_root().rglob("*") if path.is_file()]
     assert backups, f"{case.name} overwrote without taking a backup"
     assert not any(path.suffix == ".bak" for path in case.store.rglob("*")), (
         f"{case.name} left a backup inside the tool's own store"
@@ -121,7 +122,7 @@ def test_a_backup_records_where_the_file_came_from(
     run(case, ImportOptions())
     run(case, ImportOptions(on_conflict="overwrite"))
 
-    runs = [path for path in (home / ".ferry" / "backups").iterdir() if path.is_dir()]
+    runs = [path for path in backup_root().iterdir() if path.is_dir()]
     assert len(runs) == 1, "one import is one backup directory"
     records = read_manifest(runs[0])
     assert records
@@ -140,7 +141,7 @@ def test_backup_can_be_turned_off(
     run(case, ImportOptions())
     run(case, ImportOptions(on_conflict="overwrite", backup=False))
 
-    assert not (home / ".ferry" / "backups").exists()
+    assert not backup_root().exists()
 
 
 def test_rename_keeps_both_or_refuses_but_never_silently_overwrites(case: Case) -> None:

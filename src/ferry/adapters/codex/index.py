@@ -59,6 +59,7 @@ from uuid import UUID
 __all__ = [
     "APPROVAL_MODE",
     "canonical_cwd",
+    "drop_thread_row",
     "SANDBOX_POLICY",
     "ThreadIndexLocked",
     "thread_row",
@@ -218,6 +219,36 @@ def upsert_thread_row(database: Path, row: dict[str, Any]) -> None:
                 f"VALUES ({','.join('?' * len(COLUMNS))})",
                 tuple(row[name] for name in COLUMNS),
             )
+    except sqlite3.OperationalError as exc:
+        raise ThreadIndexLocked(
+            f"{database.name} is locked - close Codex and try again ({exc})"
+        ) from exc
+    except sqlite3.DatabaseError as exc:
+        raise ThreadIndexLocked(f"{database.name} could not be written: {exc}") from exc
+    finally:
+        connection.close()
+
+
+def drop_thread_row(database: Path, thread_id: UUID) -> bool:
+    """Take one conversation out of the picker's index. Returns whether it was listed.
+
+    One row, by id. Every other row in the table is a session somebody ran, and
+    nothing here reads or rewrites them. A missing database lists nothing, which
+    is the state being asked for, so that is not an error either.
+
+    Raises:
+        ThreadIndexLocked: If the row could not be deleted.
+    """
+    if not database.is_file():
+        return False
+    try:
+        connection = sqlite3.connect(database, timeout=_BUSY_TIMEOUT_SECONDS)
+    except sqlite3.Error as exc:  # pragma: no cover - depends on the filesystem
+        raise ThreadIndexLocked(f"cannot open {database.name}: {exc}") from exc
+    try:
+        with connection:
+            cursor = connection.execute("DELETE FROM threads WHERE id = ?", (str(thread_id),))
+            return cursor.rowcount > 0
     except sqlite3.OperationalError as exc:
         raise ThreadIndexLocked(
             f"{database.name} is locked - close Codex and try again ({exc})"

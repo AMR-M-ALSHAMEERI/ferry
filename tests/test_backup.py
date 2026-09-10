@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ferry.core.backup import MANIFEST_NAME, back_up, backup_root, read_manifest
+from ferry.core.backup import BACKUP_ENV, MANIFEST_NAME, back_up, backup_root, read_manifest
 
 
 def _source(tmp_path: Path, name: str = "chat.jsonl", text: str = "first") -> Path:
@@ -114,6 +114,15 @@ def test_a_directory_with_no_manifest_reads_as_empty_rather_than_raising(tmp_pat
 
 
 def test_the_production_root_is_under_the_users_home(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.delenv(BACKUP_ENV, raising=False)
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
 
     assert backup_root() == tmp_path / ".ferry" / "backups"
+
+
+def test_the_suite_keeps_its_backups_out_of_the_real_folder(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Deleting copies everything it removes, so a suite that deletes would
+    otherwise leave copies of its fixtures in the developer's own backups."""
+    monkeypatch.setenv(BACKUP_ENV, str(tmp_path / "elsewhere"))
+
+    assert backup_root() == tmp_path / "elsewhere"

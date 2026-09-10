@@ -130,6 +130,13 @@ as a conversation you had.
   that same screen, because you delete something after looking at it. Deleting
   one conversation keeps a copy in `~/.ferry/backups` first; deleting a whole
   bundle does not, and says so.
+- **What Ferry imported, it can take back.** *Delete conversations Ferry
+  imported* removes a conversation Ferry converted into an assistant — the file
+  and the entry that makes the assistant list it — and only while it is still
+  exactly what Ferry wrote. One you have opened and carried on is yours, and is
+  shown as staying. Nothing is ticked to begin with, a copy goes to
+  `~/.ferry/backups` first, and a restore of your own conversation is never
+  offered.
 - **A sealed bundle can be changed too.** Inspect offers to unseal it into a
   folder you can work with, leaving the `.ferry` file exactly where it is; or
   to delete a conversation and seal it again in one step. The second one never

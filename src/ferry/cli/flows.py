@@ -37,8 +37,11 @@ from ferry.adapters.base import (
     ImportEvent,
     ImportOptions,
     OnConflict,
+    RemoveEvent,
+    RemoveOptions,
 )
 from ferry.adapters.census import count_of
+from ferry.adapters.removal import Candidate, remove, survey
 from ferry.cli.ui import UI, NonInteractiveError
 from ferry.core import Bundle, BundleError, BundleSummary, delete_bundle, summarise
 from ferry.core.bundle import MANIFEST_NAME
@@ -61,6 +64,7 @@ __all__ = [
     "run_export",
     "run_import",
     "run_inspect",
+    "run_remove",
 ]
 
 _MAX_SHOWN_WARNINGS = 8
@@ -351,10 +355,11 @@ def _shorten(text: str) -> str:
     return text[: _MAX_LABEL - 3].rstrip() + "..."
 
 
-def _with(
-    first: ExportEvent | ImportEvent | None,
-    rest: Iterator[ExportEvent | ImportEvent],
-) -> Iterator[ExportEvent | ImportEvent]:
+Event = ExportEvent | ImportEvent | RemoveEvent
+"""Anything an adapter reports while it works. One screen renders all three."""
+
+
+def _with(first: Event | None, rest: Iterator[Event]) -> Iterator[Event]:
     """The event that was read early, followed by the others."""
     if first is not None:
         yield first
@@ -393,7 +398,7 @@ def _print_group(
 
 def _report(
     ui: UI,
-    events: Iterator[ExportEvent | ImportEvent],
+    events: Iterator[Event],
     noun: str,
     *,
     label: str,
@@ -1229,6 +1234,139 @@ def _import_from(ui: UI, available: list[Adapter], bundle_dir: Path) -> None:
         "conversations imported",
         label="Importing",
         total=len(only) if only else count,
+    )
+
+
+# --------------------------------------------------------------------------
+# deleting what Ferry imported
+# --------------------------------------------------------------------------
+
+_DELETE_HINT = "deleting asks before it removes anything, so it needs a terminal"
+
+
+def _removal_line(candidate: Candidate) -> str:
+    """One conversation Ferry imported, as a row someone can choose from."""
+    parts: list[str] = []
+    if candidate.came_from:
+        parts.append(f"from {candidate.came_from}")
+    if candidate.imported_at is not None:
+        parts.append(f"imported {candidate.imported_at:%d %b %Y}")
+    name = _clip(candidate.name, _MAX_TITLE)
+    return f"{name:<{_MAX_TITLE}}  {', '.join(parts)}".rstrip()
+
+
+def _tally(found: Sequence[Candidate]) -> str:
+    can = sum(1 for candidate in found if candidate.removable)
+    stay = len(found) - can
+    return f"{can} can be deleted" + (f", {stay} will stay." if stay else ".")
+
+
+def run_remove(ui: UI, adapters: Scanned) -> None:
+    """Delete conversations Ferry imported, from the assistant it put them in.
+
+    Only ever what Ferry wrote, and only while it is still exactly what Ferry
+    wrote: a conversation someone has opened and carried on is theirs, and is
+    listed as staying rather than offered.
+
+    **Nothing is ticked to begin with**, the opposite of the import checklist.
+    Taking everything is the ordinary answer to "which should be imported?";
+    here the ordinary answer is one or two, and a list that opened fully ticked
+    would make the destructive answer the one Enter gives.
+    """
+    found_in: list[tuple[Adapter, list[Candidate]]] = []
+    for adapter in _installed(adapters):
+        found = survey(adapter)
+        if found:
+            found_in.append((adapter, found))
+
+    if not found_in:
+        ui.info("There is nothing here Ferry imported from another assistant.")
+        ui.detail(
+            "Only conversations Ferry converted from another assistant can be deleted "
+            "here. A restore puts back your own conversation, and that is not Ferry's "
+            "to delete."
+        )
+        ui.blank()
+        return
+
+    try:
+        if len(found_in) == 1:
+            adapter, found = found_in[0]
+            ui.info(f"{adapter.display_name} is the only assistant Ferry has imported into.")
+        else:
+            chosen = ui.select(
+                "Delete from which assistant?",
+                [(a.name, a.display_name, _tally(listed)) for a, listed in found_in],
+                hint=_DELETE_HINT,
+            )
+            if chosen is None:
+                return
+            adapter, found = next(pair for pair in found_in if pair[0].name == chosen)
+
+        removable = [candidate for candidate in found if candidate.removable]
+        staying = [candidate for candidate in found if not candidate.removable]
+        if staying:
+            ui.blank()
+            ui.info(f"{count_of(len(staying), 'conversation')} Ferry imported will stay:")
+            for candidate in staying[:_MAX_SHOWN_WARNINGS]:
+                ui.detail(f"{_clip(candidate.name, _MAX_TITLE)}: {candidate.why_it_stays}")
+            if len(staying) > _MAX_SHOWN_WARNINGS:
+                ui.detail(f"... and {len(staying) - _MAX_SHOWN_WARNINGS} more")
+        if not removable:
+            ui.info("Nothing here can be deleted.")
+            ui.blank()
+            return
+
+        # Said before the list rather than after the choice. Ticking three
+        # conversations and only then being told to close the app is a screen
+        # wasting the person's time.
+        busy = adapter.in_use()
+        if busy:
+            ui.blank()
+            ui.warn(busy)
+            ui.info("Nothing was deleted.")
+            ui.blank()
+            return
+
+        ui.blank()
+        picked = ui.multiselect(
+            "Which should be deleted?",
+            [(str(candidate.record_id), _removal_line(candidate)) for candidate in removable],
+            preselected=[],
+            hint=_DELETE_HINT,
+        )
+        doomed = [c for c in removable if picked is not None and str(c.record_id) in picked]
+        if not doomed:
+            ui.info("Nothing was deleted.")
+            ui.blank()
+            return
+
+        listed = doomed[0].path is not None and adapter.listing(doomed[0].path) is not None
+        ui.blank()
+        ui.warn(
+            f"This deletes {count_of(len(doomed), 'conversation')} from your real "
+            f"{adapter.display_name} history."
+        )
+        ui.detail("Each is exactly as Ferry wrote it. None has been carried on since.")
+        if listed:
+            ui.detail(f"Its entry in {adapter.display_name}'s list goes with it.")
+        ui.info("A copy of each goes to ~/.ferry/backups first.")
+        question = "Delete it?" if len(doomed) == 1 else "Delete them?"
+        if not ui.confirm(question, default=False, hint=_DELETE_HINT):
+            ui.info("Nothing was deleted.")
+            ui.blank()
+            return
+    except NonInteractiveError as exc:
+        ui.error(str(exc))
+        return
+
+    ui.blank()
+    _report(
+        ui,
+        remove(adapter, RemoveOptions(only=frozenset(str(c.record_id) for c in doomed))),
+        "conversations deleted",
+        label="Deleting",
+        total=len(doomed),
     )
 
 

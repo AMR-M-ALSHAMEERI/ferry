@@ -16,6 +16,7 @@ from uuid import UUID
 import pytest
 
 from ferry.core import Bundle, BundleError, Manifest, SourceMachine, delete_bundle
+from ferry.core.backup import backup_root
 from ferry.ucs import Attachment, Conversation, Message, TextBlock, Workspace
 
 ONE = UUID("11111111-1111-4111-8111-111111111111")
@@ -130,14 +131,14 @@ class TestDeleteConversation:
         removed = bundle.delete_conversation(ONE)
 
         assert removed.backup is not None
-        kept = list((tmp_path / "home" / ".ferry" / "backups").rglob(f"{ONE}.json"))
+        kept = list(backup_root().rglob(f"{ONE}.json"))
         assert kept, "the conversation document must be in the backup"
 
     def test_the_copy_can_be_declined(self, bundle: Bundle, tmp_path: Path) -> None:
         removed = bundle.delete_conversation(ONE, backup=False)
 
         assert removed.backup is None
-        assert not (tmp_path / "home" / ".ferry" / "backups").exists()
+        assert not backup_root().exists()
 
     def test_it_reports_what_it_freed(self, bundle: Bundle) -> None:
         expected = sum(path.stat().st_size for path in bundle.conversation_files(ONE))
@@ -200,10 +201,10 @@ class TestDeleteBundle:
         """
         delete_bundle(bundle.root)
 
-        assert not (tmp_path / "home" / ".ferry" / "backups").exists()
+        assert not backup_root().exists()
 
     def test_a_copy_is_taken_when_it_is(self, bundle: Bundle, tmp_path: Path) -> None:
         removed = delete_bundle(bundle.root, backup=True)
 
         assert removed.backup is not None
-        assert list((tmp_path / "home" / ".ferry" / "backups").rglob("manifest.json"))
+        assert list(backup_root().rglob("manifest.json"))

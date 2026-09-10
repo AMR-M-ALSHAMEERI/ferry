@@ -50,7 +50,9 @@ __all__ = [
     "forget",
     "recall",
     "record",
+    "recorded",
     "root",
+    "title_of",
     "untouched_since_import",
     "written_file",
 ]
@@ -133,8 +135,13 @@ def record(
     provenance: Provenance,
     env: os._Environ[str] | dict[str, str] | None = None,
     written: Written | None = None,
+    title: str | None = None,
 ) -> Path:
     """Write the stamp for one converted conversation.
+
+    ``title`` is kept so that a list of what Ferry wrote can be read by a
+    person. Without it the delete screen could only offer file names, and a
+    column of UUIDs is not something anyone can safely choose from.
 
     Written through a temporary file and a rename, like everything else Ferry
     puts on disk: a half-written provenance record read back later would say
@@ -153,6 +160,8 @@ def record(
     document: dict[str, Any] = {"provenance": provenance.model_dump(mode="json")}
     if written is not None:
         document["written"] = written.as_json()
+    if title:
+        document["title"] = title
     temporary = destination.with_suffix(".json.ferry-tmp")
     temporary.write_text(json.dumps(document, indent=2), encoding="utf-8")
     temporary.replace(destination)
@@ -213,6 +222,39 @@ def written_file(
         )
     except (KeyError, TypeError, ValueError):
         return None
+
+
+def recorded(tool: str, env: os._Environ[str] | dict[str, str] | None = None) -> list[UUID]:
+    """Every conversation with a record for ``tool``, in a stable order.
+
+    A file whose name is not a conversation id is not a record -- a leftover
+    from an interrupted write, say -- and is left out rather than guessed at.
+    """
+    directory = root(env) / tool
+    if not directory.is_dir():
+        return []
+    found: list[UUID] = []
+    for path in sorted(directory.glob("*.json")):
+        try:
+            found.append(UUID(path.stem))
+        except ValueError:
+            continue
+    return found
+
+
+def title_of(
+    tool: str, conversation_id: UUID, env: os._Environ[str] | dict[str, str] | None = None
+) -> str | None:
+    """The title recorded with a conversation, or ``None`` if none was.
+
+    Records written before titles were kept have none, and a caller shows the
+    file name instead.
+    """
+    document = _read(tool, conversation_id, env)
+    if document is None:
+        return None
+    title = document.get("title")
+    return title if isinstance(title, str) and title else None
 
 
 def untouched_since_import(

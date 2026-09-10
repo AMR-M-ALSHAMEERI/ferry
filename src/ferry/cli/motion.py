@@ -257,6 +257,18 @@ MENU_MOTION: Final[dict[str, Motion]] = {
         # than the ordinary one.
         styles=("warning",),
     ),
+    # A hull going under: the import mark sinking through the wordmark's own
+    # block letterforms until only a ripple is left. One column wide where
+    # Compact above it is three, so the neighbours differ in shape. Warning
+    # colour, because this is the menu action that removes something from a
+    # person's real history.
+    "remove": Motion(
+        frames=("  ◂  ", "  ▄  ", "  ▃  ", "  ▂  ", "  ▁  ", "  ·  "),
+        ascii_frames=("  <  ", "  o  ", "  =  ", "  -  ", "  _  ", "  .  "),
+        rest="  ▁  ",
+        ascii_rest="  _  ",
+        styles=("warning",),
+    ),
     # A single solid mark. It was a three-cell shade ramp, which sat directly
     # under Compact's three-cell block bar and read as one object split over
     # two rows. Neighbours in a menu have to differ in *shape*, not only in

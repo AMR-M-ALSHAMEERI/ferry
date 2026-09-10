@@ -222,6 +222,48 @@ that.
 
 ---
 
+## Deleting what Ferry imported
+
+*Delete conversations Ferry imported.* Takes back conversations Ferry converted
+into an assistant — for when you tried a migration and do not want the result.
+
+For each assistant it lists every conversation Ferry brought in from another
+one, in two groups:
+
+- **Can be deleted** — still exactly what Ferry wrote, byte for byte. Ferry
+  keeps a checksum of every conversion it writes, which is how it knows.
+- **Will stay** — you have opened it and carried on, so it is yours now; or it
+  is no longer where Ferry put it; or it was imported before Ferry kept
+  checksums, so it cannot tell. Each is listed with its reason, and none is
+  offered.
+
+**Nothing is ticked to begin with.** Tick what should go, and Ferry says how
+many conversations it is about to delete from your real history and asks,
+defaulting to no.
+
+A delete removes both halves of what the import wrote: the conversation, and
+the entry that makes the assistant list it — Copilot's chat index, Codex's
+session database, Antigravity's conversation list. A copy of each file, and of
+each list it changes, goes to `~/.ferry/backups` first.
+
+What it will not do:
+
+- **Delete a restore.** Importing your own conversation back into the assistant
+  it came from puts back *your* history. Ferry keeps no record of that, and
+  never offers it.
+- **Delete while VS Code or Antigravity is open.** Both keep their list in
+  memory and write it back when they close, which would put the entry straight
+  back. The screen says so before you choose anything.
+- **Take back a folder Claude Code was allowed to open.** That setting is
+  shared with your own conversations in the same folder, so it stays.
+- **Touch the assistant a conversation originally came from.** It only removes
+  what Ferry wrote.
+
+If a delete stops partway — the list was locked, say — run it again. It
+finishes the job rather than starting over.
+
+---
+
 ## Compacting a conversation
 
 *Compact a conversation into a summary.* Turns one conversation into a markdown
@@ -268,12 +310,13 @@ icons, it uses ASCII ones and keeps the colour.
 
 | Path | What it holds |
 |---|---|
-| `~/.ferry/backups/` | Copies taken before an import replaced anything. Ferry never deletes these; pruning them is your decision. |
-| `~/.ferry/provenance/` | One small record per converted conversation: where it came from, what the conversion cost, and a checksum of what Ferry wrote. |
+| `~/.ferry/backups/` | Copies taken before an import replaced anything or a delete removed anything. Ferry never deletes these; pruning them is your decision. |
+| `~/.ferry/provenance/` | One small record per converted conversation: its title, where it came from, what the conversion cost, and a checksum of what Ferry wrote. |
 
 The provenance record is why an exported conversation still knows it was
-converted, and why a future *delete* can tell a conversation Ferry wrote from
-one you have since worked in.
+converted, and why *Delete conversations Ferry imported* can tell a
+conversation Ferry wrote from one you have since worked in. Deleting a
+conversation removes its record too.
 
 ---
 

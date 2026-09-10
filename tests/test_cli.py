@@ -85,7 +85,7 @@ def test_export_and_import_reach_a_real_adapter() -> None:
     """
     from ferry.cli.menu import _MILESTONE_FOR_ACTION, _WIRED, MENU_ITEMS
 
-    assert _WIRED == {"export", "import", "inspect", "compact"}
+    assert _WIRED == {"export", "import", "inspect", "compact", "remove"}
     assert not (_WIRED & set(_MILESTONE_FOR_ACTION))
 
     accounted = _WIRED | set(_MILESTONE_FOR_ACTION) | {"theme", "quit"}
