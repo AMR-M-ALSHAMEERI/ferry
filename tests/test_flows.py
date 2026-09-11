@@ -42,7 +42,7 @@ from ferry.cli.flows import (
 from ferry.cli.theme import MONO, Capability
 from ferry.cli.ui import UI, NonInteractiveError
 from ferry.core.backup import backup_root
-from ferry.core.sealed import is_sealed, opens_with
+from ferry.core.sealed import is_sealed, open_root, opens_with
 
 
 class _Recorder(Adapter):
@@ -1061,8 +1061,9 @@ class TestSealing:
         ui = _Answers(path=str(sealed), actions=["done"], secrets=[PHRASE])
         run_inspect(ui)
 
-        left = list((home / ".ferry" / "open").rglob("manifest.json"))
+        left = list(open_root().rglob("manifest.json"))
         assert left == []
+        assert not (home / ".ferry" / "open").exists(), "the suite must not open into a real home"
 
 
 class _KeepPlaintext(_Answers):

@@ -8,6 +8,7 @@ import pytest
 from ferry.core import Manifest, SourceMachine
 from ferry.core import provenance as provenance_store
 from ferry.core.backup import BACKUP_ENV
+from ferry.core.sealed import OPEN_ENV
 from ferry.ucs import (
     Attachment,
     Conversation,
@@ -38,6 +39,10 @@ def _isolate_user_config(tmp_path_factory, monkeypatch):
     # suite that deletes would otherwise fill the developer's real backups
     # folder with copies of test fixtures.
     monkeypatch.setenv(BACKUP_ENV, str(fake.parent / "backups"))
+    # And where a sealed bundle is opened. Without this every sealed-bundle
+    # test unsealed into the developer's real ~/.ferry/open, and the real
+    # backups folder filled with copies whose originals were under it.
+    monkeypatch.setenv(OPEN_ENV, str(fake.parent / "open"))
     return fake
 
 
