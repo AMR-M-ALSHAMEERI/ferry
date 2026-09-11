@@ -40,6 +40,7 @@ from ferry.adapters.base import (
 )
 from ferry.adapters.census import census, jsonl_holds
 from ferry.adapters.claude_code import paths as cc_paths
+from ferry.adapters.claude_code.opened import opened_not_changed
 from ferry.adapters.claude_code.reader import MESSAGE_TYPES, read_session
 from ferry.adapters.claude_code.trust import TrustError, is_trusted
 from ferry.adapters.claude_code.trust import advice as trust_advice
@@ -373,6 +374,14 @@ class ClaudeCodeAdapter(Adapter):
         if not spilled.is_dir():
             return []
         return sorted(path for path in spilled.iterdir() if path.is_file())
+
+    def only_opened(self, written: Path, was: provenance_store.Written) -> bool:
+        """Whether Claude Code has opened this conversation without it being carried on.
+
+        See :mod:`ferry.adapters.claude_code.opened`: opening appends one
+        bookkeeping marker, measured on a real conversation, and nothing else.
+        """
+        return opened_not_changed(written, was)
 
     # ---------- import ----------
 

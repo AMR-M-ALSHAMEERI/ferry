@@ -232,10 +232,11 @@ one, in two groups:
 
 - **Can be deleted** — still exactly what Ferry wrote. Ferry keeps a checksum
   of every conversion it writes, which is how it knows. Opening a conversation
-  to look at it does not count. All three of Antigravity, VS Code and Codex
-  change the file when they show it — a few header bytes, lines of bookkeeping,
-  a rewrite into Codex's newer format — and Ferry proves the conversation
-  itself is untouched before offering it. (A Codex conversation imported before
+  to look at it does not count. Every assistant Ferry supports changes the file
+  a little when it shows a conversation — a few header bytes in Antigravity,
+  lines of bookkeeping in VS Code, one marker line in Claude Code, a rewrite
+  into its newer format in Codex — and Ferry proves the conversation itself is
+  untouched before offering it. (A Codex conversation imported before
   11 September 2026 and opened since cannot be proven this way, and stays.)
 - **Will stay** — you have opened it and carried on, so it is yours now; or it
   is no longer where Ferry put it; or it was imported before Ferry kept
