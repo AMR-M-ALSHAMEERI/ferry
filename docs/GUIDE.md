@@ -417,6 +417,20 @@ The tool names are `claude-code`, `codex`, `copilot` and `antigravity`;
 | `--mode` | With `--allow-cross-tool`: `archive` (the default; keeps the most detail, for reading) or `continue` (drops thinking and tool output so you can carry on in it). |
 | `--passphrase` | The passphrase of a sealed bundle. See below. |
 
+**`ferry remove`**
+
+| Flag | What it does |
+|---|---|
+| `--tool`, `-t` | The assistant to delete from. Required. |
+| `--conversation`, `-c` | Delete this conversation, by id. Repeatable. |
+| `--all` | Every conversation Ferry imported there that can go. |
+| `--dry-run` | Show what would be deleted. Nothing is. |
+
+It deletes only what the menu's *Delete conversations Ferry imported* would:
+conversations Ferry converted, unchanged since, backed up first, and never
+while the app is open. Name nothing and it lists them, with the ids to pass,
+and deletes nothing.
+
 The commands take the same safe answers the menu starts on. An import **backs
 up before it writes** (there is no flag to stop it), **keeps a conversation the
 assistant already has**, and **never converts across assistants** unless told

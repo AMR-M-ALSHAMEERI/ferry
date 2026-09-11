@@ -24,8 +24,16 @@ from pathlib import Path
 from typing import Final
 
 from ferry.adapters import REGISTRY
-from ferry.adapters.base import Adapter, ConversionMode, DetectResult, ImportOptions, OnConflict
+from ferry.adapters.base import (
+    Adapter,
+    ConversionMode,
+    DetectResult,
+    ImportOptions,
+    OnConflict,
+    RemoveOptions,
+)
 from ferry.adapters.census import count_of
+from ferry.adapters.removal import Candidate, remove, survey
 from ferry.cli.flows import (
     PASSPHRASE_TRIES,
     Event,
@@ -35,6 +43,7 @@ from ferry.cli.flows import (
     _opened,
     _passphrase_refused,
     _recorded_home,
+    _removal_line,
     _report,
     bundle_at,
     seal_checked,
@@ -54,6 +63,7 @@ __all__ = [
     "export_bundle",
     "import_bundle",
     "install_skill",
+    "remove_imported",
     "skill_path",
 ]
 
@@ -501,3 +511,107 @@ def install_skill(ui: UI, *, force: bool = False) -> int:
     ui.success(f"Installed for Claude Code: {target}")
     ui.info("Claude Code finds it in a new session. Typing /ferry there calls it directly.")
     return OK
+
+
+def _list_imported(ui: UI, adapter: Adapter, found: Sequence[Candidate]) -> None:
+    """What Ferry imported into ``adapter``: the ones that can go, then the ones that stay."""
+    removable = [candidate for candidate in found if candidate.removable]
+    staying = [candidate for candidate in found if not candidate.removable]
+    if removable:
+        ui.info(f"{count_of(len(removable), 'conversation')} Ferry imported can be deleted:")
+        for candidate in removable:
+            ui.detail(f"{candidate.record_id}  {_removal_line(candidate)}")
+    if staying:
+        ui.info(f"{count_of(len(staying), 'conversation')} will stay:")
+        for candidate in staying:
+            ui.detail(f"{candidate.record_id}  {candidate.name}: {candidate.why_it_stays}")
+
+
+def remove_imported(
+    ui: UI,
+    *,
+    tool: str,
+    conversations: Sequence[str] = (),
+    everything: bool = False,
+    dry_run: bool = False,
+) -> int:
+    """Delete conversations Ferry imported into ``tool``. Returns an exit code.
+
+    The menu's *Delete conversations Ferry imported*, without the menu: the same
+    survey decides what may go - only what Ferry converted, only while nobody
+    has worked in it since - and the same code deletes it, backing each one up
+    first. What the screen settles with a checklist that starts empty, this
+    settles by asking to be told: nothing is deleted unless it is named, or
+    ``--all`` is said. A command run by an assistant in a mode that asks no
+    permission must not have a default that deletes.
+    """
+    _mark(ui)
+    if conversations and everything:
+        ui.error("Name conversations with --conversation, or pass --all - not both.")
+        return REFUSED
+
+    found = _found(ui, tool)
+    if found is None:
+        return FAILED
+    adapter, _ = found
+
+    candidates = survey(adapter)
+    if not candidates:
+        ui.info(
+            f"Ferry has imported nothing into {adapter.display_name}, "
+            "so there is nothing it may delete."
+        )
+        ui.detail(
+            "Only conversations Ferry converted from another assistant can be deleted. "
+            "A restore puts back your own conversation, and that is not Ferry's to delete."
+        )
+        return OK
+
+    if not conversations and not everything:
+        _list_imported(ui, adapter, candidates)
+        ui.blank()
+        ui.info("Nothing was deleted. Name one with --conversation, or pass --all.")
+        ui.info("Add --dry-run to see what would happen first.")
+        return REFUSED
+
+    known = {str(candidate.record_id) for candidate in candidates}
+    missing = sorted(set(conversations) - known)
+    if missing:
+        ui.error(f"Ferry did not import these into {adapter.display_name}: {', '.join(missing)}")
+        ui.info(f"`ferry remove --tool {adapter.name}` lists the ones it did.")
+        return REFUSED
+
+    removable = [candidate for candidate in candidates if candidate.removable]
+    if everything and not removable:
+        _list_imported(ui, adapter, candidates)
+        ui.info("None of them can be deleted, so nothing was.")
+        return OK
+    chosen = (
+        frozenset(conversations)
+        if conversations
+        else frozenset(str(candidate.record_id) for candidate in removable)
+    )
+
+    ui.blank()
+    if dry_run:
+        ui.info("Preview only. Nothing below is deleted.")
+    else:
+        # Refused here rather than left to the delete: an app that rewrites its
+        # list when it closes would put every entry straight back.
+        busy = adapter.in_use()
+        if busy:
+            ui.error(busy)
+            ui.info("Nothing was deleted.")
+            return REFUSED
+        ui.warn(f"This deletes from your real {adapter.display_name} history.")
+        ui.info("A copy of each goes to ~/.ferry/backups first.")
+
+    kinds: Counter[str] = Counter()
+    _report(
+        ui,
+        _tallied(remove(adapter, RemoveOptions(dry_run=dry_run, only=chosen)), kinds),
+        "conversations would be deleted" if dry_run else "conversations deleted",
+        label="Previewing" if dry_run else "Deleting",
+        total=len(chosen),
+    )
+    return FAILED if kinds["error"] else OK

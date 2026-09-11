@@ -1256,7 +1256,7 @@ def _import_from(ui: UI, available: list[Adapter], bundle_dir: Path) -> None:
 # deleting what Ferry imported
 # --------------------------------------------------------------------------
 
-_DELETE_HINT = "deleting asks before it removes anything, so it needs a terminal"
+_DELETE_HINT = "from a script, use ferry remove"
 
 
 def _removal_line(candidate: Candidate) -> str:

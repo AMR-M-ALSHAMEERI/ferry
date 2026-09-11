@@ -128,6 +128,27 @@ ferry compact ~/ferry-backup-claude-code --conversation <id> --shape handoff --l
 It works on an unsealed bundle folder only. The same listing is the way to
 find the ids that `ferry import --conversation` takes.
 
+### `ferry remove`
+
+Deletes conversations Ferry itself imported into an assistant - only those,
+only while nobody has worked in them since, and each backed up first.
+
+```bash
+ferry remove --tool copilot
+```
+
+| Flag | Meaning |
+|---|---|
+| `--tool`, `-t` | The assistant to delete from. Required. |
+| `--conversation`, `-c` | Delete this conversation, by id. Repeatable. |
+| `--all` | Every conversation Ferry imported there that can go. |
+| `--dry-run` | Show what would be deleted. Nothing is. |
+
+With neither `--conversation` nor `--all`, it lists what Ferry imported there -
+id, title, where it came from - and which of them can go, and exits `2`
+without deleting anything. A conversation someone has carried on is listed as
+staying, and Ferry will not delete it. It refuses while the app is open.
+
 ### `ferry skill`
 
 Prints this file. `ferry skill --install` installs it as a Claude Code skill.
@@ -164,8 +185,11 @@ Follow these even when asked to hurry.
 7. **Treat bundles as private.** They hold the person's real conversations. Do
    not open them to read their contents, do not paste their contents anywhere,
    and never add them to a git repository.
-8. **Do not delete bundles or conversations.** Removing what Ferry imported,
-   and clearing old backups, are done from Ferry's menu by the person.
+8. **Delete only what the person chooses, with `ferry remove`.** List first,
+   show the person the titles, preview with `--dry-run`, and delete only the
+   conversations they confirm, by id. Pass `--all` only when they say all of
+   them. Close the app first, as for importing. Never delete bundles, backups
+   or anything else - clearing old backups is done from Ferry's menu.
 
 ## Moving to a new machine
 

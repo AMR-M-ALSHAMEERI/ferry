@@ -337,6 +337,63 @@ def import_command(
     )
 
 
+_REMOVE_CONVERSATION_OPTION = typer.Option(
+    None,
+    "--conversation",
+    "-c",
+    metavar="ID",
+    help="Delete this conversation, by id. Repeatable. Name none, and no --all, to list them.",
+)
+
+
+@app.command("remove", cls=FerryCommand)
+def remove_command(
+    tool: str = typer.Option(
+        ...,
+        "--tool",
+        "-t",
+        metavar="TOOL",
+        callback=_tool_callback,
+        help=f"The assistant to delete from: {_TOOL_NAMES}.",
+    ),
+    conversation: list[str] | None = _REMOVE_CONVERSATION_OPTION,
+    everything: bool = typer.Option(
+        False, "--all", help="Every conversation Ferry imported there that can go."
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show what would be deleted. Nothing is."
+    ),
+    theme: str | None = typer.Option(
+        None,
+        "--theme",
+        metavar="NAME",
+        callback=_theme_callback,
+        help=_THEME_HELP,
+        rich_help_panel=_APPEARANCE,
+    ),
+    no_color: bool = typer.Option(
+        False, "--no-color", help=_NO_COLOR_HELP, rich_help_panel=_APPEARANCE
+    ),
+) -> None:
+    """Delete conversations Ferry imported into an assistant.
+
+    Only what Ferry converted, only while nobody has worked in it since, and
+    each backed up first. Deletes nothing unless a conversation is named or
+    --all is given; with neither, it lists them.
+    """
+    from ferry.cli.commands import remove_imported
+
+    raise typer.Exit(
+        remove_imported(
+            _command_ui(theme, no_color),
+            tool=tool,
+            conversations=conversation or (),
+            everything=everything,
+            dry_run=dry_run,
+        )
+    )
+
+
 @app.command("skill", cls=FerryCommand)
 def skill_command(
     install: bool = typer.Option(

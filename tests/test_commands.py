@@ -18,13 +18,15 @@ import pytest
 import typer.main
 from typer.testing import CliRunner
 
+from ferry.adapters import REGISTRY
 from ferry.adapters.claude_code.paths import mangle
 from ferry.cli import app
 from ferry.cli.brand import TAGLINE
 from ferry.cli.commands import FAILED, OK, REFUSED, export_bundle, import_bundle
 from ferry.cli.theme import THEMES, Capability
 from ferry.cli.ui import UI
-from ferry.core import Bundle, Manifest
+from ferry.core import Bundle, Manifest, provenance
+from ferry.core.backup import backup_root
 from ferry.core.sealed import is_sealed
 from ferry.ucs import Conversation
 
@@ -320,6 +322,98 @@ def test_a_bundle_from_another_home_suggests_the_remap(
     result = runner.invoke(app, ["import", "-b", str(bundle), "-t", "claude-code", "--dry-run"])
     assert result.exit_code == OK, result.output
     assert "--path-remap" in _said(result)
+
+
+# ---------------------------------------------------------------- remove
+
+
+@pytest.fixture
+def imported(
+    tmp_path: Path,
+    target: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    manifest: Manifest,
+    conversation: Conversation,
+) -> Path:
+    """One conversation Ferry converted into the target store, recorded as its own."""
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(target))
+    foreign = conversation.model_copy(update={"source_tool": "codex"})
+    bundle = _foreign_bundle(tmp_path / "foreign", manifest, foreign)
+    result = runner.invoke(
+        app, ["import", "-b", str(bundle), "-t", "claude-code", "--allow-cross-tool"]
+    )
+    assert result.exit_code == OK, result.output
+    return target
+
+
+def _record() -> str:
+    (record,) = list(provenance.recorded("claude-code"))
+    return str(record)
+
+
+def _written(record: str) -> Path:
+    written = provenance.written_file("claude-code", UUID(record))
+    assert written is not None
+    return Path(written.path)
+
+
+def test_remove_naming_nothing_lists_and_deletes_nothing(imported: Path) -> None:
+    record = _record()
+    result = runner.invoke(app, ["remove", "--tool", "claude-code"])
+    assert result.exit_code == REFUSED
+    assert record in _said(result)
+    assert _written(record).exists()
+
+
+def test_remove_dry_run_deletes_nothing(imported: Path) -> None:
+    record = _record()
+    result = runner.invoke(app, ["remove", "-t", "claude-code", "--all", "--dry-run"])
+    assert result.exit_code == OK, result.output
+    assert "Nothing below is deleted" in _said(result)
+    assert _written(record).exists()
+
+
+def test_remove_deletes_what_is_named_and_backs_it_up(imported: Path) -> None:
+    record = _record()
+    path = _written(record)
+    result = runner.invoke(app, ["remove", "-t", "claude-code", "--conversation", record])
+    assert result.exit_code == OK, result.output
+    assert not path.exists()
+    assert list(backup_root().rglob(path.name))
+    assert list(provenance.recorded("claude-code")) == []
+
+
+def test_remove_refuses_an_id_ferry_did_not_import(imported: Path) -> None:
+    stray = str(uuid4())
+    result = runner.invoke(app, ["remove", "-t", "claude-code", "-c", stray])
+    assert result.exit_code == REFUSED
+    assert stray in _said(result)
+    assert _written(_record()).exists()
+
+
+def test_remove_refuses_all_and_a_name_together(imported: Path) -> None:
+    result = runner.invoke(app, ["remove", "-t", "claude-code", "--all", "-c", _record()])
+    assert result.exit_code == REFUSED
+    assert _written(_record()).exists()
+
+
+def test_remove_refuses_while_the_app_is_open(
+    imported: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(REGISTRY["claude-code"], "in_use", lambda: "Claude Code is open.")
+    result = runner.invoke(app, ["remove", "-t", "claude-code", "--all"])
+    assert result.exit_code == REFUSED
+    assert "Claude Code is open." in _said(result)
+    assert _written(_record()).exists()
+
+
+def test_remove_with_nothing_imported_says_so(
+    target: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(target))
+    result = runner.invoke(app, ["remove", "-t", "claude-code", "--all"])
+    assert result.exit_code == OK
+    assert "nothing it may delete" in _said(result)
 
 
 # ---------------------------------------------------------------- the wordmark
