@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, cast
 import typer
 
 from ferry import __version__
+from ferry.cli.helpstyle import FerryCommand, FerryGroup
 from ferry.cli.menu import run_menu
 from ferry.cli.theme import THEMES, Capability, detect_capability, resolve_theme
 from ferry.cli.ui import UI
@@ -24,11 +25,22 @@ __all__ = ["app", "main"]
 
 app = typer.Typer(
     name="ferry",
+    cls=FerryGroup,
     help="Back up and migrate your local AI assistant conversation history.",
+    epilog="Run ferry on its own for the menu. The commands above do the same work from a script.",
     invoke_without_command=True,
     no_args_is_help=False,
     add_completion=True,
 )
+
+_APPEARANCE = "Appearance"
+_SEALING = "Sealing"
+_CROSSING = "Crossing tools"
+
+_TOOL_NAMES = "claude-code, codex, copilot or antigravity"
+
+_THEME_HELP = "Colour theme: harbor, compass, classic or mono."
+_NO_COLOR_HELP = "No colour, and plain ASCII markers."
 
 
 def _version_callback(value: bool) -> None:
@@ -60,11 +72,13 @@ def main(
     theme: str | None = typer.Option(
         None,
         "--theme",
+        metavar="NAME",
         callback=_theme_callback,
-        help="Colour theme: harbor, compass, classic, or mono.",
+        help=_THEME_HELP,
+        rich_help_panel=_APPEARANCE,
     ),
     no_color: bool = typer.Option(
-        False, "--no-color", help="Disable colour and use plain ASCII markers."
+        False, "--no-color", help=_NO_COLOR_HELP, rich_help_panel=_APPEARANCE
     ),
     verbose: bool = typer.Option(
         False, "--verbose", "-v", help="Show extra detail about what Ferry is doing."
@@ -87,15 +101,24 @@ def main(
     raise typer.Exit(run_menu(ui))
 
 
-@app.command("tools")
+@app.command("tools", cls=FerryCommand)
 def tools(
-    theme: str | None = typer.Option(None, "--theme", callback=_theme_callback),
-    no_color: bool = typer.Option(False, "--no-color"),
+    theme: str | None = typer.Option(
+        None,
+        "--theme",
+        metavar="NAME",
+        callback=_theme_callback,
+        help=_THEME_HELP,
+        rich_help_panel=_APPEARANCE,
+    ),
+    no_color: bool = typer.Option(
+        False, "--no-color", help=_NO_COLOR_HELP, rich_help_panel=_APPEARANCE
+    ),
 ) -> None:
     """List the AI assistants Ferry can detect on this machine.
 
-    Works without a terminal, so it is the one thing that is useful in a script
-    today. Exits non-zero when nothing is detected.
+    Works without a terminal, so it is useful in a script. Exits non-zero when
+    nothing is detected.
     """
     from ferry.cli.menu import scan
 
@@ -127,15 +150,21 @@ _PASSPHRASE_HELP = (
 )
 
 
-@app.command("export")
+@app.command("export", cls=FerryCommand)
 def export_command(
     tool: str = typer.Option(
-        ..., "--tool", "-t", callback=_tool_callback, help="The assistant to export from."
+        ...,
+        "--tool",
+        "-t",
+        metavar="TOOL",
+        callback=_tool_callback,
+        help=f"The assistant to export from: {_TOOL_NAMES}.",
     ),
     output: str = typer.Option(
         "",
         "--output",
         "-o",
+        metavar="FOLDER",
         help="Folder to write the bundle into. Defaults to a new ferry-bundle-<time> folder here.",
     ),
     force: bool = typer.Option(
@@ -145,19 +174,36 @@ def export_command(
         "this way. With --encrypt, also replaces an existing sealed file.",
     ),
     encrypt: bool = typer.Option(
-        False, "--encrypt", help="Also seal the bundle into one encrypted .ferry file."
+        False,
+        "--encrypt",
+        help="Also seal the bundle into one encrypted .ferry file.",
+        rich_help_panel=_SEALING,
     ),
     passphrase: str | None = typer.Option(
-        None, "--passphrase", envvar="FERRY_PASSPHRASE", help=_PASSPHRASE_HELP
+        None,
+        "--passphrase",
+        metavar="TEXT",
+        envvar="FERRY_PASSPHRASE",
+        help=_PASSPHRASE_HELP,
+        rich_help_panel=_SEALING,
     ),
     replace: bool = typer.Option(
         False,
         "--replace",
-        help="With --encrypt: delete the unencrypted folder once the sealed file is proven "
-        "to open.",
+        help="Delete the unencrypted folder once the sealed file is proven to open.",
+        rich_help_panel=_SEALING,
     ),
-    theme: str | None = typer.Option(None, "--theme", callback=_theme_callback),
-    no_color: bool = typer.Option(False, "--no-color"),
+    theme: str | None = typer.Option(
+        None,
+        "--theme",
+        metavar="NAME",
+        callback=_theme_callback,
+        help=_THEME_HELP,
+        rich_help_panel=_APPEARANCE,
+    ),
+    no_color: bool = typer.Option(
+        False, "--no-color", help=_NO_COLOR_HELP, rich_help_panel=_APPEARANCE
+    ),
 ) -> None:
     """Export an assistant's conversations into a bundle.
 
@@ -184,31 +230,43 @@ _CONVERSATION_OPTION = typer.Option(
     None,
     "--conversation",
     "-c",
+    metavar="ID",
     help="Import only this conversation, by id. Repeat for more. Default: all of them.",
 )
 _PATH_REMAP_OPTION = typer.Option(
     None,
     "--path-remap",
-    help="OLD=NEW: read folders recorded under OLD as being under NEW. Repeatable.",
+    metavar="OLD=NEW",
+    help="Read folders recorded under OLD as being under NEW. Repeatable.",
 )
 
 
-@app.command("import")
+@app.command("import", cls=FerryCommand)
 def import_command(
     bundle: str = typer.Option(
-        ..., "--bundle", "-b", help="The bundle to import: a folder, or a sealed .ferry file."
+        ...,
+        "--bundle",
+        "-b",
+        metavar="PATH",
+        help="The bundle to import: a folder, or a sealed .ferry file.",
     ),
     tool: str = typer.Option(
-        ..., "--tool", "-t", callback=_tool_callback, help="The assistant to import into."
+        ...,
+        "--tool",
+        "-t",
+        metavar="TOOL",
+        callback=_tool_callback,
+        help=f"The assistant to import into: {_TOOL_NAMES}.",
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show everything that would happen. Nothing is written."
     ),
     on_conflict: str = typer.Option(
         "skip",
         "--on-conflict",
-        help="When the assistant already has a conversation: skip (keep its copy), rename "
-        "(keep both), or overwrite (replace its copy, after backing it up).",
-    ),
-    dry_run: bool = typer.Option(
-        False, "--dry-run", help="Show everything that would happen. Nothing is written."
+        metavar="skip|rename|overwrite",
+        help="When the assistant already has a conversation: keep its copy, keep both, or "
+        "replace its copy after backing it up.",
     ),
     conversation: list[str] | None = _CONVERSATION_OPTION,
     path_remap: list[str] | None = _PATH_REMAP_OPTION,
@@ -216,18 +274,35 @@ def import_command(
         False,
         "--allow-cross-tool",
         help="Convert conversations that came from a different assistant. Refused without it.",
+        rich_help_panel=_CROSSING,
     ),
     mode: str = typer.Option(
         "archive",
         "--mode",
-        help="With --allow-cross-tool: archive (keep the most detail, read-only) or continue "
-        "(drop thinking and tool output so you can carry on in it).",
+        metavar="archive|continue",
+        help="Keep the most detail, to read; or drop thinking and tool output, to carry on "
+        "working in it.",
+        rich_help_panel=_CROSSING,
     ),
     passphrase: str | None = typer.Option(
-        None, "--passphrase", envvar="FERRY_PASSPHRASE", help=_PASSPHRASE_HELP
+        None,
+        "--passphrase",
+        metavar="TEXT",
+        envvar="FERRY_PASSPHRASE",
+        help=_PASSPHRASE_HELP,
+        rich_help_panel=_SEALING,
     ),
-    theme: str | None = typer.Option(None, "--theme", callback=_theme_callback),
-    no_color: bool = typer.Option(False, "--no-color"),
+    theme: str | None = typer.Option(
+        None,
+        "--theme",
+        metavar="NAME",
+        callback=_theme_callback,
+        help=_THEME_HELP,
+        rich_help_panel=_APPEARANCE,
+    ),
+    no_color: bool = typer.Option(
+        False, "--no-color", help=_NO_COLOR_HELP, rich_help_panel=_APPEARANCE
+    ),
 ) -> None:
     """Import a bundle into an assistant.
 
@@ -262,15 +337,27 @@ def import_command(
     )
 
 
-@app.command("compact")
+@app.command("compact", cls=FerryCommand)
 def compact_command(
-    bundle: str = typer.Argument(..., help="The bundle holding the conversation."),
-    conversation: str = typer.Option(
-        "", "--conversation", "-c", help="Which conversation, by id. Lists them when omitted."
+    bundle: str = typer.Argument(
+        ..., metavar="BUNDLE", help="The bundle holding the conversation."
     ),
-    shape: str = typer.Option("handoff", "--shape", help="handoff, said, or done."),
-    length: str = typer.Option("standard", "--length", help="brief, standard, or full."),
-    out: str = typer.Option("", "--out", help="Write to a file instead of standard output."),
+    conversation: str = typer.Option(
+        "",
+        "--conversation",
+        "-c",
+        metavar="ID",
+        help="Which conversation, by id. Lists them when omitted.",
+    ),
+    shape: str = typer.Option(
+        "handoff", "--shape", metavar="handoff|said|done", help="What the document keeps."
+    ),
+    length: str = typer.Option(
+        "standard", "--length", metavar="brief|standard|full", help="How long it runs."
+    ),
+    out: str = typer.Option(
+        "", "--out", metavar="FILE", help="Write to a file instead of standard output."
+    ),
 ) -> None:
     """Compact one conversation in a bundle into a markdown document.
 
