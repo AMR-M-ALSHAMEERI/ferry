@@ -270,6 +270,35 @@ finishes the job rather than starting over.
 
 ---
 
+## Cleaning up backups
+
+*Clean up backups.* Before an import replaces anything, and before a delete
+removes anything, Ferry copies it into `~/.ferry/backups/` — one folder per run,
+named by the time it was taken, with a `manifest.jsonl` recording where each
+copy came from so it can be put back. **Ferry never removes these by itself.**
+This screen is where you do.
+
+It opens by saying how many backups there are and how much space they take,
+then offers two things:
+
+- **Delete the backups from temporary folders.** Offered only when there are
+  some: backups holding nothing but copies of files from a temporary or test
+  folder, which were never part of your history. Earlier versions of Ferry's
+  own test suite left many of these.
+- **Choose which backups to delete.** Every backup, newest first, with its date,
+  its size and what it holds — which assistant, *a bundle*, *Claude Code
+  settings*, or *temporary folders*. The newest backup for each assistant is
+  marked. **Nothing is ticked to begin with.**
+
+Either way it says how many backups it is about to delete and how much that
+frees, names any assistant whose newest backup is among them, and asks,
+defaulting to no. **A deleted backup cannot be put back** — it was the copy.
+
+It only ever touches folders Ferry made: a folder in `~/.ferry/backups` named
+anything other than a Ferry timestamp is never listed and never deleted.
+
+---
+
 ## Compacting a conversation
 
 *Compact a conversation into a summary.* Turns one conversation into a markdown
@@ -316,7 +345,7 @@ icons, it uses ASCII ones and keeps the colour.
 
 | Path | What it holds |
 |---|---|
-| `~/.ferry/backups/` | Copies taken before an import replaced anything or a delete removed anything. Ferry never deletes these; pruning them is your decision. |
+| `~/.ferry/backups/` | Copies taken before an import replaced anything or a delete removed anything. Ferry never deletes these by itself; *Clean up backups* removes the ones you choose. |
 | `~/.ferry/provenance/` | One small record per converted conversation: its title, where it came from, what the conversion cost, and a checksum of what Ferry wrote. |
 
 The provenance record is why an exported conversation still knows it was

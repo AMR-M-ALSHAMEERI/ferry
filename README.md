@@ -112,7 +112,8 @@ as a conversation you had.
   under the cursor.
 - Anything an import would replace is copied into
   `~/.ferry/backups/<timestamp>/` first, with a record of where each file came
-  from so it can be put back. Nothing prunes them.
+  from so it can be put back. Nothing prunes them on its own; *Clean up
+  backups* lists them and deletes only the ones you tick.
 - If a conversation is already there, Ferry leaves it alone unless you say
   otherwise. You can also keep both copies, or replace it.
 - A bundle made on another machine records that machine's home folder; if it

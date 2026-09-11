@@ -269,6 +269,17 @@ MENU_MOTION: Final[dict[str, Motion]] = {
         ascii_rest="  _  ",
         styles=("warning",),
     ),
+    # A stack of copies settling down: a rising ramp of the wordmark's block
+    # letterforms that shrinks to a ripple and builds again. A ramp, where
+    # Compact is a level bar and Delete a single mark, so the three differ in
+    # shape. Warning colour, because what it clears cannot be put back.
+    "backups": Motion(
+        frames=(" ▁▂▄ ", " ▁▂▃ ", " ▁▂▂ ", " ▁▁▁ ", " ··· ", " ▁▂▃ "),
+        ascii_frames=(" _-= ", " _-- ", " __- ", " ___ ", " ... ", " _-- "),
+        rest=" ▁▂▄ ",
+        ascii_rest=" _-= ",
+        styles=("warning",),
+    ),
     # A single solid mark. It was a three-cell shade ramp, which sat directly
     # under Compact's three-cell block bar and read as one object split over
     # two rows. Neighbours in a menu have to differ in *shape*, not only in

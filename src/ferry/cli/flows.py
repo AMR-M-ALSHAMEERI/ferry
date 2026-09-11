@@ -44,7 +44,9 @@ from ferry.adapters.census import count_of
 from ferry.adapters.removal import Candidate, remove, survey
 from ferry.cli.ui import UI, NonInteractiveError
 from ferry.core import Bundle, BundleError, BundleSummary, delete_bundle, summarise
+from ferry.core.backup import backup_root
 from ferry.core.bundle import MANIFEST_NAME
+from ferry.core.cleanup import BackupRun, delete_runs, list_runs, newest_by_tool
 from ferry.core.compat import CEILING, assess, pair
 from ferry.core.crypto import WrongPassphrase
 from ferry.core.sealed import (
@@ -64,6 +66,7 @@ __all__ = [
     "run_export",
     "run_import",
     "run_inspect",
+    "run_cleanup",
     "run_remove",
 ]
 
@@ -1368,6 +1371,127 @@ def run_remove(ui: UI, adapters: Scanned) -> None:
         label="Deleting",
         total=len(doomed),
     )
+
+
+# --------------------------------------------------------------------------
+# cleaning up backups
+# --------------------------------------------------------------------------
+
+_CLEANUP_HINT = "cleaning up asks before it removes anything, so it needs a terminal"
+
+
+def _size(count: int) -> str:
+    """A backup's size. Kilobytes allowed here: most backups are small, and a
+    column of "under 1 MB" would make them impossible to tell apart."""
+    if count < 1024 * 1024:
+        return f"{max(1, round(count / 1024)) if count else 0} KB"
+    return f"{count / 1024 / 1024:,.1f} MB"
+
+
+def _run_line(run: BackupRun, newest: dict[str, BackupRun]) -> str:
+    latest = sorted(tool for tool, kept in newest.items() if kept == run)
+    line = f"{run.taken_at:%d %b %Y %H:%M} UTC  {_size(run.size):>9}  {', '.join(run.holds)}"
+    if latest:
+        line += f"  (newest for {', '.join(latest)})"
+    return line
+
+
+def run_cleanup(ui: UI) -> None:
+    """Delete backups the person no longer needs, and only the ones they choose.
+
+    Ferry never removes a backup by itself; this is where the person does. The
+    first offer is the one that cannot cost anything -- the backups that hold
+    nothing but copies from temporary folders -- and choosing any others starts
+    from nothing ticked, with the newest backup for each assistant named before
+    it goes.
+    """
+    root = backup_root()
+    runs = list_runs()
+    if not runs:
+        ui.info(f"There are no backups in {root}.")
+        ui.blank()
+        return
+
+    leftovers = [run for run in runs if run.from_temporary]
+    newest = newest_by_tool(run for run in runs if not run.from_temporary)
+    everything = _size(sum(run.size for run in runs))
+    ui.info(f"{count_of(len(runs), 'backup')} in {root}, {everything} in all.")
+    ui.detail(
+        "Each holds the copies Ferry took before an import replaced something or a delete "
+        "removed something. Ferry never removes them by itself."
+    )
+    if leftovers:
+        ui.detail(
+            f"{count_of(len(leftovers), 'backup')} hold only copies of files from temporary "
+            "folders - left by Ferry's own tests and experiments, never part of your history."
+        )
+
+    try:
+        choices: list[tuple[str, str, str]] = []
+        if leftovers:
+            named = count_of(len(leftovers), "backup")
+            freeable = _size(sum(run.size for run in leftovers))
+            choices.append(
+                (
+                    "temporary",
+                    f"Delete the {named} from temporary folders",
+                    f"Frees {freeable}. Nothing in them came from your assistants.",
+                )
+            )
+        choices.append(
+            ("choose", "Choose which backups to delete", "Nothing is ticked to begin with.")
+        )
+        choices.append(("cancel", "Cancel", "Nothing is deleted."))
+        ui.blank()
+        action = ui.select("What would you like to do?", choices, hint=_CLEANUP_HINT)
+        if action is None or action == "cancel":
+            ui.info("Nothing was deleted.")
+            ui.blank()
+            return
+
+        if action == "temporary":
+            doomed = leftovers
+        else:
+            picked = ui.multiselect(
+                "Which backups should be deleted?",
+                [(run.path.name, _run_line(run, newest)) for run in runs],
+                preselected=[],
+                hint=_CLEANUP_HINT,
+            )
+            doomed = [run for run in runs if picked is not None and run.path.name in picked]
+            if not doomed:
+                ui.info("Nothing was deleted.")
+                ui.blank()
+                return
+
+        last = sorted(tool for tool, kept in newest.items() if kept in doomed)
+        ui.blank()
+        ui.warn(
+            f"This permanently deletes {count_of(len(doomed), 'backup')} "
+            f"({_size(sum(r.size for r in doomed))})."
+        )
+        if action == "choose":
+            ui.detail(
+                "A backup is the only copy of what those files looked like before Ferry "
+                "changed them. Once it is gone, that version cannot be put back."
+            )
+        if last:
+            ui.warn(f"That includes the newest backup for {', '.join(last)}.")
+        question = "Delete it?" if len(doomed) == 1 else "Delete them?"
+        if not ui.confirm(question, default=False, hint=_CLEANUP_HINT):
+            ui.info("Nothing was deleted.")
+            ui.blank()
+            return
+    except NonInteractiveError as exc:
+        ui.error(str(exc))
+        return
+
+    cleared = delete_runs(doomed, root)
+    ui.blank()
+    for problem in cleared.problems:
+        ui.error(problem)
+    ui.success(f"Deleted {count_of(cleared.deleted, 'backup')}, {_size(cleared.freed)} freed.")
+    ui.blank()
 
 
 # --------------------------------------------------------------------------
