@@ -36,8 +36,14 @@ Everything runs on this machine. Ferry makes no network calls.
    when none are found.
 2. If `ferry` itself is not found, Ferry is not installed. Offer to install it
    with `pip install ferry-cli`, and run that yourself once the person agrees.
-   If `ferry` is still not found afterwards, `python -m ferry` runs the same
-   program - use it in place of `ferry` in every command below.
+   - If the `pip` command is not found but Python is, the same install runs as
+     `python -m pip install ferry-cli` (on Windows, `py -m pip install ferry-cli`).
+   - Ferry needs Python 3.11 or newer. If Python is missing or older, stop and
+     tell the person. Install Python only if they ask you to, with their
+     system's usual installer - it changes the whole machine, not one program.
+
+   If `ferry` is still not found after installing, `python -m ferry` runs the
+   same program - use it in place of `ferry` in every command below.
 3. The tool names every command takes are `claude-code`, `codex`, `copilot`
    and `antigravity`.
 4. Bare `ferry` opens an interactive menu that needs a person at the keyboard.
