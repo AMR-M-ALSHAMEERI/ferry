@@ -29,6 +29,7 @@ can often list.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import tempfile
 from collections.abc import Iterator
@@ -48,10 +49,12 @@ from ferry.core.crypto import (
 )
 
 __all__ = [
+    "OPEN_ENV",
     "SEALED_MAGIC",
     "SEALED_SUFFIX",
     "SealedBundle",
     "is_sealed",
+    "open_root",
     "read_sealed_params",
     "opens_with",
     "seal_bundle",
@@ -63,6 +66,24 @@ SEALED_SUFFIX: Final = ".ferry"
 SEALED_MAGIC: Final = b"FERRYSLD"
 _VERSION: Final = 1
 _LENGTH_BYTES: Final = 2
+
+OPEN_ENV: Final = "FERRY_OPEN_DIR"
+"""Redirects where a sealed bundle is opened, so a test never writes into the
+developer's own home.
+
+Honoured with no fallback, like the provenance store's and the backups'
+overrides. Without it every test that opened a sealed bundle unsealed into the
+real ``~/.ferry/open``: the developer's backups held 159 copies whose originals
+were under it, most of them in runs that also held the suite's own copies.
+"""
+
+
+def open_root() -> Path:
+    """Where sealed bundles are opened, unless :data:`OPEN_ENV` says otherwise."""
+    override = os.environ.get(OPEN_ENV)
+    if override:
+        return Path(override)
+    return Path.home() / ".ferry" / "open"
 
 
 @dataclass(frozen=True)
@@ -214,15 +235,16 @@ def unseal_bundle(archive: Path, passphrase: str, destination: Path) -> Bundle:
 def unsealed(archive: Path, passphrase: str) -> Iterator[Bundle]:
     """Open a sealed bundle for as long as the block runs, then remove it.
 
-    The unsealed copy goes under ``~/.ferry/open`` rather than the system
-    temporary directory: it is the user's conversation history, and it belongs
-    somewhere they can find it if Ferry is killed halfway through.
+    The unsealed copy goes under :func:`open_root` -- ``~/.ferry/open`` --
+    rather than the system temporary directory: it is the user's conversation
+    history, and it belongs somewhere they can find it if Ferry is killed
+    halfway through.
 
     **The copy is deleted on the way out, including when the block raises.**
     What deletion cannot promise is that the blocks are overwritten -- see the
     module docstring.
     """
-    workspace = Path.home() / ".ferry" / "open"
+    workspace = open_root()
     workspace.mkdir(parents=True, exist_ok=True)
     holder = Path(tempfile.mkdtemp(prefix="bundle-", dir=workspace))
     try:

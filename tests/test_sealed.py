@@ -10,6 +10,7 @@ fail the only test that matters.
 from __future__ import annotations
 
 import hashlib
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
@@ -19,9 +20,11 @@ import pytest
 from ferry.core import Bundle, BundleError, Manifest, SourceMachine
 from ferry.core.crypto import WrongPassphrase
 from ferry.core.sealed import (
+    OPEN_ENV,
     SEALED_MAGIC,
     SEALED_SUFFIX,
     is_sealed,
+    open_root,
     opens_with,
     read_sealed_params,
     seal_bundle,
@@ -235,10 +238,24 @@ class TestUnsealedContext:
         assert seen and not seen[0].exists()
 
     def test_the_copy_lives_under_the_users_own_directory(
-        self, bundle: Path, tmp_path: Path
+        self, bundle: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Not the system temp directory, which is often world-listable."""
+        monkeypatch.delenv(OPEN_ENV, raising=False)
         sealed = seal_bundle(bundle, PASSPHRASE)
 
         with unsealed(sealed.path, PASSPHRASE) as opened:
             assert (tmp_path / "home" / ".ferry" / "open") in opened.root.parents
+
+    def test_the_suite_opens_sealed_bundles_outside_the_real_home(self, bundle: Path) -> None:
+        """Every sealed-bundle test once unsealed into the developer's own
+        ``~/.ferry/open``, and their real backups filled with copies from it."""
+        sealed = seal_bundle(bundle, PASSPHRASE)
+        redirected = Path(os.environ[OPEN_ENV])
+
+        with unsealed(sealed.path, PASSPHRASE) as opened:
+            assert redirected in opened.root.parents
+            assert not (Path.home() / ".ferry" / "open").exists()
+
+        assert open_root() == redirected
+        assert not (Path.home() / ".ferry" / "open").exists()
