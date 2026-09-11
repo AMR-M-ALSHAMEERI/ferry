@@ -141,7 +141,7 @@ TEXT_ONLY_GLYPHS: Final = frozenset(
     "✓✗▲›❯◉○◆◇·━─…≈"  # status, cursor, progress, wake
     "╷╰╯"  # the ferry mark: funnel and hull
     "┏┓┗┛┣┳━╸╹╻"  # the wordmark's block letterforms
-    "▸◂⏻"  # menu icons: the hulls and the power symbol
+    "▸◂⏻◡⭘"  # menu icons: the hulls, and the power symbol with its drawing
     "▄▃▂▁"  # menu icons: the settling cargo
     "—"  # prose punctuation
 )

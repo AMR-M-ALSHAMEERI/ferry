@@ -291,10 +291,14 @@ MENU_MOTION: Final[dict[str, Motion]] = {
         ascii_rest="  *  ",
         styles=("primary", "accent", "success", "warning"),
     ),
-    # The IEC power symbol, breathing dim to red the way a standby light does.
+    # The IEC power symbol, drawn while the cursor is on it: the lower half of
+    # the circle, the circle closing, then the line coming in on top -- and the
+    # finished symbol held for three frames so it reads before it draws again.
+    # Chosen by the human from two drawings previewed in twelve fonts. It rests
+    # on the symbol, still, as it always has.
     "quit": Motion(
-        frames=("  ⏻  ",),
-        ascii_frames=(" (|) ",),
+        frames=("  ◡  ", "  ⭘  ", "  ⏻  ", "  ⏻  ", "  ⏻  ", "  ⏻  "),
+        ascii_frames=("  u  ", "  O  ", " (|) ", " (|) ", " (|) ", " (|) "),
         rest="  ⏻  ",
         ascii_rest=" (|) ",
         # Breathes red with one amber beat. It used to breathe through `dim`,

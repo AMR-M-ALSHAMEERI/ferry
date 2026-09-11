@@ -457,7 +457,8 @@ def test_which_menu_glyphs_are_ambiguous_width_is_visible() -> None:
         for ch in "".join(motion.frames) + motion.rest:
             if not ch.isascii() and unicodedata.east_asian_width(ch) == "A":
                 ambiguous.add(ch)
-    assert ambiguous == set("≈·◆▄▃▂▁"), sorted(f"U+{ord(c):04X}" for c in ambiguous)
+    # U+2B58, the closing circle in Quit's drawing, joined this record in #237.
+    assert ambiguous == set("≈·◆▄▃▂▁⭘"), sorted(f"U+{ord(c):04X}" for c in ambiguous)
 
 
 def test_every_menu_icon_matches_the_declared_cell_width() -> None:
@@ -472,10 +473,21 @@ def test_the_quit_icon_is_the_power_symbol() -> None:
     assert MENU_MOTION["quit"].rest.strip() == "\u23fb"
 
 
-def test_quit_holds_still_and_breathes_instead_of_moving() -> None:
-    """Moored: the glyph does not travel, the colour pulses."""
+def test_quit_draws_its_symbol_and_then_holds_it() -> None:
+    """The half circle, the circle closing, then the line on top - and the
+    finished symbol held long enough to read before it draws again.
+
+    It used to hold still and only breathe its colour. The human asked for the
+    symbol to be drawn, chose this drawing from two previewed in twelve fonts,
+    and it replaced the still one. The colour still breathes throughout, and it
+    still rests on the finished symbol.
+    """
     motion = MENU_MOTION["quit"]
-    assert len(motion.frames) == 1
+    shapes = [frame.strip() for frame in motion.frames]
+
+    assert shapes[:3] == ["◡", "⭘", "⏻"]
+    assert set(shapes[3:]) == {"⏻"}, "the finished symbol is held, not flashed"
+    assert motion.frames[-1] == motion.rest
     assert len(set(motion.styles)) > 1
 
 
