@@ -27,9 +27,9 @@ count.
 
 | What you see | What it means |
 |---|---|
-| *N empty* | The tool wrote a file when a chat panel opened and nothing was ever typed. VS Code does this often. It is not a conversation and it is not exported. |
+| *N empty, never used* | The tool wrote a file when a chat panel opened and nothing was ever typed. VS Code does this often. It is not a conversation and it is not exported. |
 | *N not shown by the app* | A subagent. Codex and Antigravity give an agent they start their own file, and the application never lists it. Ferry counts it separately rather than inflating the total. |
-| *N duplicates* | Two files claiming the same conversation. Counted once. |
+| *N duplicate copies of a conversation stored more than once* | Two files claiming the same conversation. Counted once. |
 
 Ferry counts **conversations**, not files. Counting files was wrong in at least
 one of these three ways for every tool.

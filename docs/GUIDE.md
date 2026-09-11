@@ -127,7 +127,7 @@ calls become plain text, and how many images need their files in the bundle.
 
 | Option | What it does |
 |---|---|
-| *Import only the N that <tool> made* | Leaves the foreign ones out. Offered only when the bundle holds some of the tool's own conversations. |
+| *Import only the N that <tool> made, and skip the rest* | Leaves the foreign ones out. Offered only when the bundle holds some of the tool's own conversations. |
 | *Convert them so I can read and search them here* | Keeps the most detail. The usual choice. |
 | *Convert them so I can carry on working in them* | Gives up more on purpose: it drops the assistant's private reasoning and the output of its tool calls, so the new assistant can continue the conversation. |
 | *Cancel* | Nothing is written, not even the conversations that needed no conversion. |
