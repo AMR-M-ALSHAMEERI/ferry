@@ -39,9 +39,14 @@ the adapters independent of each other.
 `tests/test_schema_current.py` fails if the checked-in schema no longer matches
 the models, so the two cannot quietly drift apart.
 
-### Current version: 1.3
+### Current schema version: 1.3
 
-| Version | Change |
+This is the version of the conversation format, recorded as `ucs_version` in
+every conversation file inside a bundle. It is not Ferry's own version, which is
+0.1.0 and is what `ferry --version` prints. The two move independently: a new
+release of Ferry does not change the format unless the format itself changes.
+
+| Schema version | Change |
 |---|---|
 | 1.0 | The first schema |
 | 1.1 | Added the `thinking` content block, with an optional `signature` |
@@ -102,6 +107,11 @@ source_raw/<uuid>.bin          optional
 ```
 
 Sealing packs that folder into a zip and encrypts it.
+
+The folder layout has a version of its own, `bundle_version` in
+`manifest.json`, currently 1.0. So a bundle carries two format versions, one
+for its layout and one for each conversation in it, and neither is Ferry's
+version.
 
 The code is in `src/ferry/core/bundle.py` and `src/ferry/core/manifest.py`.
 
