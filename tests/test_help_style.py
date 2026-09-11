@@ -78,11 +78,11 @@ def test_the_top_level_help_opens_with_the_wordmark() -> None:
 
 
 @pytest.mark.parametrize("command", ["export", "import", "compact", "tools"])
-def test_a_command_help_names_itself_under_the_hull(command: str) -> None:
+def test_every_command_help_opens_with_the_whole_wordmark(command: str) -> None:
     result = runner.invoke(app, [command, "--help"])
     assert result.exit_code == 0
-    first = next(line for line in result.output.splitlines() if line.strip())
-    assert first.strip().endswith(f"ferry {command}")
+    assert TAGLINE in result.output
+    assert result.output.index("F E R R Y") < result.output.index(f"ferry {command}")
 
 
 def test_help_that_is_piped_holds_no_escape_codes() -> None:

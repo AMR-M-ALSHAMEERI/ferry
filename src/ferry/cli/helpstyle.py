@@ -143,31 +143,25 @@ def _console() -> Console:
     )
 
 
-def _header(ctx: click.Context, *, full: bool) -> None:
-    """The top of a help page: the whole wordmark for ``ferry``, one line for a command.
+def _header() -> None:
+    """The top of every help page: the whole wordmark, as the menu opens with.
 
-    A command's page gets the hull and its own name rather than the whole mark
-    again. Someone reading ``ferry import --help`` has already met the
-    wordmark; what they need is to see they are in the right command.
+    Command pages first had only the hull and the command's name, on the
+    reasoning that the wordmark had already been met on ``ferry --help``. The
+    person using it wanted the whole mark on every page: it is what says these
+    screens belong to Ferry, and the usage line under it names the command.
     """
     theme = _active or theme_for(())
     console = _console()
     console.print()
-    if full:
-        console.print(still(theme))
-        return
-    line = Text("  ")
-    line.append(build_wordmark(theme).hull_rows[-1], style=theme.accent)
-    line.append("  ")
-    line.append(ctx.command_path, style=theme.heading)
-    console.print(line)
+    console.print(still(theme))
 
 
 class FerryCommand(TyperCommand):
-    """A command whose help page opens with Ferry's mark."""
+    """A command whose help page opens with Ferry's wordmark."""
 
     def format_help(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
-        _header(ctx, full=False)
+        _header()
         super().format_help(ctx, formatter)
 
 
@@ -175,7 +169,7 @@ class FerryGroup(TyperGroup):
     """The ``ferry`` group: applies the theme before parsing, and heads its help."""
 
     def format_help(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
-        _header(ctx, full=True)
+        _header()
         super().format_help(ctx, formatter)
 
     def main(

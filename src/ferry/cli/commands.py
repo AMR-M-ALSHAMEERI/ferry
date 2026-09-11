@@ -91,6 +91,18 @@ def _found(ui: UI, tool: str) -> tuple[Adapter, DetectResult] | None:
     return None
 
 
+def _mark(ui: UI) -> None:
+    """The wordmark, still, when a person is watching; nothing when a script is.
+
+    Not animated: the reveal is a moment's wait, and a command someone runs
+    again and again should not make them sit through it every time. Not
+    printed when the output is piped or logged, where it would be lines of
+    box-drawing in front of what a script actually reads.
+    """
+    if ui.interactive:
+        ui.banner(animate=False)
+
+
 def _new_passphrase(ui: UI) -> str | None:
     """A passphrase to seal with, asked twice -- or an error naming the flag."""
     if not ui.interactive:
@@ -121,6 +133,7 @@ def export_bundle(
     to seal it with wastes them -- or worse, leaves someone who asked for an
     encrypted bundle holding an unencrypted one.
     """
+    _mark(ui)
     if replace and not encrypt:
         ui.error("--replace deletes the unencrypted bundle once it is sealed.")
         ui.info("It only means something with --encrypt.")
@@ -339,6 +352,7 @@ def import_bundle(
     and neither does this (PLAN.md §6.1 allows it only behind a confirmation,
     and a script has nobody to confirm).
     """
+    _mark(ui)
     remap = _parse_remap(path_remap)
     if remap is None:
         ui.error("--path-remap takes OLD=NEW, the folder as recorded and the folder it is now.")

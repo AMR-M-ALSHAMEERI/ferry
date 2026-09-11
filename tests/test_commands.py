@@ -10,6 +10,7 @@ answer is still the one taken when nothing is said.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -19,7 +20,10 @@ from typer.testing import CliRunner
 
 from ferry.adapters.claude_code.paths import mangle
 from ferry.cli import app
-from ferry.cli.commands import FAILED, OK, REFUSED
+from ferry.cli.brand import TAGLINE
+from ferry.cli.commands import FAILED, OK, REFUSED, export_bundle, import_bundle
+from ferry.cli.theme import THEMES, Capability
+from ferry.cli.ui import UI
 from ferry.core import Bundle, Manifest
 from ferry.core.sealed import is_sealed
 from ferry.ucs import Conversation
@@ -316,6 +320,31 @@ def test_a_bundle_from_another_home_suggests_the_remap(
     result = runner.invoke(app, ["import", "-b", str(bundle), "-t", "claude-code", "--dry-run"])
     assert result.exit_code == OK, result.output
     assert "--path-remap" in _said(result)
+
+
+# ---------------------------------------------------------------- the wordmark
+
+
+def test_a_piped_run_prints_no_wordmark(source: Path, tmp_path: Path) -> None:
+    """A script reads this output; box-drawing in front of it is in the way."""
+    result = runner.invoke(app, ["export", "-t", "claude-code", "-o", str(tmp_path / "b")])
+    assert result.exit_code == OK, result.output
+    assert TAGLINE not in result.output
+    assert "F E R R Y" not in result.output
+
+
+@pytest.mark.parametrize("run", [export_bundle, import_bundle])
+def test_a_run_in_a_terminal_opens_with_the_wordmark(
+    run: Callable[..., int], capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A terminal without colour: interactive, but the ASCII form, so the
+    # assertion does not depend on this console's encoding.
+    ui = UI(THEMES["mono"], capability=Capability.NO_COLOR)
+    kwargs = {"bundle": "nowhere"} if run is import_bundle else {}
+    run(ui, tool="codex", **kwargs)
+    shown = capsys.readouterr().out
+    assert TAGLINE in shown
+    assert "F E R R Y" in shown
 
 
 # ---------------------------------------------------------------- the hints
