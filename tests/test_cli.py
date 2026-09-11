@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import io
 from collections.abc import Iterator
 from pathlib import Path
@@ -24,7 +25,7 @@ from ferry.cli import app
 from ferry.cli.brand import TAGLINE, build_wordmark
 from ferry.cli.menu import _describe, scan
 from ferry.cli.theme import ASCII_ICONS, HARBOR, MONO, UNICODE_ICONS, Capability
-from ferry.cli.ui import UI, NonInteractiveError
+from ferry.cli.ui import UI, NonInteractiveError, _DetectionRow
 
 runner = CliRunner()
 
@@ -291,6 +292,54 @@ def test_mono_style_wrapping_emits_no_markup() -> None:
 def test_coloured_style_wrapping_emits_markup() -> None:
     ui = UI(HARBOR, capability=Capability.COLOR)
     assert ui._style("ferry.success", "ok") == "[ferry.success]ok[/ferry.success]"
+
+
+def _captured(ui: UI) -> io.StringIO:
+    out = io.StringIO()
+    ui.console.file = out
+    return out
+
+
+def test_piped_output_keeps_every_ascii_marker() -> None:
+    """``[ok]`` and ``[i]`` parse as rich markup; unescaped, they vanished."""
+    ui = _plain_ui()
+    out = _captured(ui)
+    ui.info("a note")
+    ui.success("it worked")
+    ui.warn("careful")
+    ui.error("it broke")
+    ui.detail("one line")
+    shown = out.getvalue()
+    for marker, message in [
+        ("[i]", "a note"),
+        ("[ok]", "it worked"),
+        ("[!]", "careful"),
+        ("[--]", "it broke"),
+        ("[ok]", "one line"),
+    ]:
+        assert f"{marker} {message}" in shown
+
+
+def test_ascii_markers_survive_under_a_colour_theme_too() -> None:
+    """Harbor falls back to the ASCII icons on a console that cannot encode its own."""
+    ui = UI(dataclasses.replace(HARBOR, icons=ASCII_ICONS), capability=Capability.COLOR)
+    out = _captured(ui)
+    ui.info("a note")
+    assert "[i] a note" in out.getvalue()
+
+
+def test_a_message_is_printed_as_written_not_read_as_markup() -> None:
+    ui = _plain_ui()
+    out = _captured(ui)
+    ui.info("[WIP] fix the [bold]parser[/bold]")
+    assert "[WIP] fix the [bold]parser[/bold]" in out.getvalue()
+
+
+def test_the_detection_table_keeps_its_marker_when_piped() -> None:
+    ui = _plain_ui()
+    out = _captured(ui)
+    ui.detection_table([_DetectionRow(display_name="Claude Code", installed=True, detail="x")])
+    assert "[ok]" in out.getvalue()
 
 
 def test_debug_is_silent_unless_verbose() -> None:

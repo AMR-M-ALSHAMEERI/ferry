@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from rich.console import Console
+from rich.markup import escape
 from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
@@ -188,10 +189,18 @@ class UI:
         return self.capability is not Capability.PLAIN
 
     def _style(self, token: str, text: str) -> str:
-        """Wrap ``text`` in a theme style, or leave it bare under ``mono``."""
+        """Wrap ``text`` in a theme style, or leave it bare under ``mono``.
+
+        ``text`` is escaped either way. ``rich`` reads square brackets as
+        markup, and the ASCII icons are square brackets: ``[ok]`` and ``[i]``
+        parse as style tags and vanish, so every piped line and every ``mono``
+        line lost its marker while ``[!]`` and ``[--]``, which do not parse,
+        survived. Nothing Ferry prints is meant to be read as markup.
+        """
+        safe = escape(text)
         if not self.theme.uses_color:
-            return text
-        return f"[{token}]{text}[/{token}]"
+            return safe
+        return f"[{token}]{safe}[/{token}]"
 
     # ---------- output ----------
 
@@ -208,22 +217,22 @@ class UI:
     def info(self, message: str) -> None:
         """Print a neutral status line."""
         icon = self.theme.icons.info
-        self.console.print(f"  {self._style('ferry.dim', icon)} {message}")
+        self.console.print(f"  {self._style('ferry.dim', icon)} {escape(message)}")
 
     def success(self, message: str) -> None:
         """Print a success line."""
         icon = self.theme.icons.success
-        self.console.print(f"  {self._style('ferry.success', icon)} {message}")
+        self.console.print(f"  {self._style('ferry.success', icon)} {escape(message)}")
 
     def warn(self, message: str) -> None:
         """Print a warning line."""
         icon = self.theme.icons.warning
-        self.console.print(f"  {self._style('ferry.warning', icon)} {message}")
+        self.console.print(f"  {self._style('ferry.warning', icon)} {escape(message)}")
 
     def error(self, message: str) -> None:
         """Print an error line."""
         icon = self.theme.icons.error
-        self.console.print(f"  {self._style('ferry.error', icon)} {message}")
+        self.console.print(f"  {self._style('ferry.error', icon)} {escape(message)}")
 
     def detail(self, message: str) -> None:
         """Print one indented line of a running list.
@@ -283,7 +292,7 @@ class UI:
         writes escape codes into a log.
         """
         if not self.theme.uses_color or not self.interactive:
-            self.console.print(f"  {label}")
+            self.console.print(f"  {escape(label)}")
             yield
             return
         from rich.live import Live
@@ -304,7 +313,7 @@ class UI:
         finish lines are printed -- no escape codes ever reach a log.
         """
         if not self.theme.uses_color or not self.interactive:
-            self.console.print(f"  {label} (0/{total})")
+            self.console.print(f"  {escape(label)} (0/{total})")
 
             class _Silent:
                 def __init__(self) -> None:
@@ -318,7 +327,7 @@ class UI:
 
             silent = _Silent()
             yield silent
-            self.console.print(f"  {label} ({silent.done}/{total})")
+            self.console.print(f"  {escape(label)} ({silent.done}/{total})")
             return
 
         icons = self.theme.icons
@@ -336,7 +345,9 @@ class UI:
             console=self.console,
             transient=False,
         ) as prog:
-            task = prog.add_task(label, total=total)
+            # The description is formatted into markup by the column above, so
+            # a conversation titled "[WIP] fix" would lose its first word.
+            task = prog.add_task(escape(label), total=total)
 
             class _Live:
                 def __init__(self) -> None:
@@ -355,7 +366,7 @@ class UI:
 
                 def describe(self, text: str) -> None:
                     """Change the label to name what is being worked on now."""
-                    prog.update(task, description=text)
+                    prog.update(task, description=escape(text))
 
             yield _Live()
 
