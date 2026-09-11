@@ -28,8 +28,9 @@ picker. A list longer than the screen scrolls with the cursor and says how many
 rows are above and below; Page Up and Page Down move a screen at a time, Home
 and End jump to either end.
 
-Ferry needs a real terminal. Run it from your own terminal window, not from a
-pipe or a script — it will say so and exit cleanly rather than hanging.
+The menu needs a real terminal. From a pipe or a script it says so and exits
+cleanly rather than hanging; for scripts, use the commands in
+[From a script](#from-a-script) instead.
 
 The first thing it does is look for assistants and show what it found:
 
@@ -370,10 +371,68 @@ Start with [TROUBLESHOOTING.md](TROUBLESHOOTING.md). The single most common
 cause is the section above — the file is written correctly and the tool has not
 been told to list it, or you are looking from the wrong folder.
 
-## A note on flags
+## From a script
 
-Ferry's menu is the interface. When a prompt cannot be shown because there is
-no terminal, the error suggests a command-line flag — and **most of those flags
-do not exist yet.** Today `ferry` takes `--theme`, `--no-color`, `--verbose`
-and `--version`, plus the `tools` and `compact` commands. Treat the suggestions
-in those messages as a description of what is planned, not of what you can run.
+Two commands do what the menu's Export and Import do without asking anything,
+so they run in a script, a scheduled task, or an assistant driving Ferry from a
+shell:
+
+```bash
+ferry export --tool claude-code --output ~/ferry-backup
+```
+
+```bash
+ferry import --bundle ~/ferry-backup --tool claude-code --dry-run
+```
+
+```bash
+ferry import --bundle ~/ferry-backup --tool claude-code
+```
+
+The tool names are `claude-code`, `codex`, `copilot` and `antigravity`;
+`ferry tools` shows which of them are on this machine.
+
+**`ferry export`**
+
+| Flag | What it does |
+|---|---|
+| `--tool`, `-t` | The assistant to export from. Required. |
+| `--output`, `-o` | The folder to write. Defaults to a new `ferry-bundle-<time>` folder here. |
+| `--force` | Add to a folder that already holds something. An interrupted export resumes this way. With `--encrypt`, also replaces an existing sealed file. |
+| `--encrypt` | Also seal the bundle into one encrypted `.ferry` file. |
+| `--replace` | With `--encrypt`: delete the unencrypted folder, once the sealed file has been opened again to prove it works. |
+| `--passphrase` | The passphrase to seal with. See below. |
+
+**`ferry import`**
+
+| Flag | What it does |
+|---|---|
+| `--bundle`, `-b` | The bundle: a folder, or a sealed `.ferry` file. Required. |
+| `--tool`, `-t` | The assistant to import into. Required. |
+| `--dry-run` | Show everything that would happen. Nothing is written. |
+| `--on-conflict` | When the assistant already has a conversation: `skip` (keep its copy, the default), `rename` (keep both), or `overwrite` (replace its copy, after backing it up). |
+| `--conversation`, `-c` | Import only this conversation, by id. Repeat for more. |
+| `--path-remap OLD=NEW` | Read folders recorded under `OLD` as being under `NEW` — for a bundle made under a different home folder. Repeatable. |
+| `--allow-cross-tool` | Convert conversations that came from a different assistant. Without it they are refused. |
+| `--mode` | With `--allow-cross-tool`: `archive` (the default; keeps the most detail, for reading) or `continue` (drops thinking and tool output so you can carry on in it). |
+| `--passphrase` | The passphrase of a sealed bundle. See below. |
+
+The commands take the same safe answers the menu starts on. An import **backs
+up before it writes** (there is no flag to stop it), **keeps a conversation the
+assistant already has**, and **never converts across assistants** unless told
+to. It also never adds a folder to Claude Code's list of folders it may open:
+that is a change to another program's security settings, so only the menu
+offers it. A command import names those folders instead, and you open Claude
+Code once in each.
+
+**Passphrases.** Set `FERRY_PASSPHRASE` rather than passing `--passphrase`: a
+flag is kept in your shell history. In a terminal, leaving both out makes Ferry
+ask.
+
+**Exit codes.** `0` when everything worked. `1` when the work ran and part of
+it failed, or the assistant was not found. `2` when the command could not start
+— a flag was wrong or missing — and nothing was written.
+
+When a menu prompt cannot be shown, its error names the flag that answers it.
+Every one of those belongs to `ferry export`, `ferry import` or `ferry
+compact`, except `--into` on the inspect screen, which has no command yet.

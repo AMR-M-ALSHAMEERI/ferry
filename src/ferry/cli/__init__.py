@@ -8,12 +8,17 @@ the future VS Code extension, but they are deliberately the secondary route
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
 import typer
 
 from ferry import __version__
 from ferry.cli.menu import run_menu
 from ferry.cli.theme import THEMES, Capability, detect_capability, resolve_theme
 from ferry.cli.ui import UI
+
+if TYPE_CHECKING:
+    from ferry.adapters.base import ConversionMode, OnConflict
 
 __all__ = ["app", "main"]
 
@@ -98,6 +103,163 @@ def tools(
     ui = UI(resolve_theme(theme, capability=capability), capability=capability)
     results = scan(ui)
     raise typer.Exit(0 if any(r.installed for _, r in results) else 1)
+
+
+def _tool_callback(value: str) -> str:
+    """Reject an unknown assistant name early, with the valid ones listed."""
+    from ferry.adapters import REGISTRY
+
+    name = value.strip().lower()
+    if name not in REGISTRY:
+        valid = ", ".join(REGISTRY)
+        raise typer.BadParameter(f"unknown tool {value!r}. Choose one of: {valid}")
+    return name
+
+
+def _command_ui(theme: str | None, no_color: bool) -> UI:
+    capability = Capability.NO_COLOR if no_color else detect_capability()
+    return UI(resolve_theme(theme, capability=capability), capability=capability)
+
+
+_PASSPHRASE_HELP = (
+    "Passphrase for the sealed bundle. Prefer the environment variable: a flag "
+    "is kept in your shell history."
+)
+
+
+@app.command("export")
+def export_command(
+    tool: str = typer.Option(
+        ..., "--tool", "-t", callback=_tool_callback, help="The assistant to export from."
+    ),
+    output: str = typer.Option(
+        "",
+        "--output",
+        "-o",
+        help="Folder to write the bundle into. Defaults to a new ferry-bundle-<time> folder here.",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Add to a folder that already holds something; an interrupted export resumes "
+        "this way. With --encrypt, also replaces an existing sealed file.",
+    ),
+    encrypt: bool = typer.Option(
+        False, "--encrypt", help="Also seal the bundle into one encrypted .ferry file."
+    ),
+    passphrase: str | None = typer.Option(
+        None, "--passphrase", envvar="FERRY_PASSPHRASE", help=_PASSPHRASE_HELP
+    ),
+    replace: bool = typer.Option(
+        False,
+        "--replace",
+        help="With --encrypt: delete the unencrypted folder once the sealed file is proven "
+        "to open.",
+    ),
+    theme: str | None = typer.Option(None, "--theme", callback=_theme_callback),
+    no_color: bool = typer.Option(False, "--no-color"),
+) -> None:
+    """Export an assistant's conversations into a bundle.
+
+    Asks nothing when every answer is given as a flag, so it runs in a script.
+    """
+    from ferry.cli.commands import export_bundle
+
+    raise typer.Exit(
+        export_bundle(
+            _command_ui(theme, no_color),
+            tool=tool,
+            output=output,
+            force=force,
+            encrypt=encrypt,
+            passphrase=passphrase,
+            replace=replace,
+        )
+    )
+
+
+# Module-level because their values are lists: an Option built in the signature
+# of a repeatable flag is the mutable-default pattern ruff's B008 exists to catch.
+_CONVERSATION_OPTION = typer.Option(
+    None,
+    "--conversation",
+    "-c",
+    help="Import only this conversation, by id. Repeat for more. Default: all of them.",
+)
+_PATH_REMAP_OPTION = typer.Option(
+    None,
+    "--path-remap",
+    help="OLD=NEW: read folders recorded under OLD as being under NEW. Repeatable.",
+)
+
+
+@app.command("import")
+def import_command(
+    bundle: str = typer.Option(
+        ..., "--bundle", "-b", help="The bundle to import: a folder, or a sealed .ferry file."
+    ),
+    tool: str = typer.Option(
+        ..., "--tool", "-t", callback=_tool_callback, help="The assistant to import into."
+    ),
+    on_conflict: str = typer.Option(
+        "skip",
+        "--on-conflict",
+        help="When the assistant already has a conversation: skip (keep its copy), rename "
+        "(keep both), or overwrite (replace its copy, after backing it up).",
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show everything that would happen. Nothing is written."
+    ),
+    conversation: list[str] | None = _CONVERSATION_OPTION,
+    path_remap: list[str] | None = _PATH_REMAP_OPTION,
+    allow_cross_tool: bool = typer.Option(
+        False,
+        "--allow-cross-tool",
+        help="Convert conversations that came from a different assistant. Refused without it.",
+    ),
+    mode: str = typer.Option(
+        "archive",
+        "--mode",
+        help="With --allow-cross-tool: archive (keep the most detail, read-only) or continue "
+        "(drop thinking and tool output so you can carry on in it).",
+    ),
+    passphrase: str | None = typer.Option(
+        None, "--passphrase", envvar="FERRY_PASSPHRASE", help=_PASSPHRASE_HELP
+    ),
+    theme: str | None = typer.Option(None, "--theme", callback=_theme_callback),
+    no_color: bool = typer.Option(False, "--no-color"),
+) -> None:
+    """Import a bundle into an assistant.
+
+    Backs up before it writes, keeps any conversation the assistant already
+    has, and asks nothing when every answer is given as a flag.
+    """
+    from ferry.cli.commands import import_bundle
+
+    if on_conflict not in ("skip", "rename", "overwrite"):
+        raise typer.BadParameter(
+            f"unknown choice {on_conflict!r}. Choose one of: skip, rename, overwrite",
+            param_hint="--on-conflict",
+        )
+    if mode not in ("archive", "continue"):
+        raise typer.BadParameter(
+            f"unknown mode {mode!r}. Choose one of: archive, continue", param_hint="--mode"
+        )
+
+    raise typer.Exit(
+        import_bundle(
+            _command_ui(theme, no_color),
+            bundle=bundle,
+            tool=tool,
+            on_conflict=cast("OnConflict", on_conflict),
+            dry_run=dry_run,
+            conversations=conversation or (),
+            path_remap=path_remap or (),
+            allow_cross_tool=allow_cross_tool,
+            mode=cast("ConversionMode", mode),
+            passphrase=passphrase,
+        )
+    )
 
 
 @app.command("compact")

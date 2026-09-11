@@ -633,6 +633,36 @@ def _ask_new_passphrase(ui: UI) -> str | None:
     return first
 
 
+def seal_checked(ui: UI, target: Path, passphrase: str) -> Path | None:
+    """Seal a bundle, then prove the sealed file opens. ``None`` if either failed.
+
+    Shared by the export screen and ``ferry export --encrypt``, because the
+    check is the part that must never be skipped: it is what makes it safe for
+    either of them to delete the unencrypted copy afterwards.
+    """
+    try:
+        with ui.scanning("Sealing"):
+            sealed = seal_bundle(target, passphrase)
+    except (BundleError, OSError) as exc:
+        ui.error(f"could not seal the bundle: {exc}")
+        ui.blank()
+        return None
+
+    with ui.scanning("Checking it opens"):
+        confirmed = opens_with(sealed.path, passphrase)
+    if not confirmed:
+        # Should be impossible, and is checked anyway: this is the one place
+        # where being wrong costs the user everything.
+        ui.error(
+            "The sealed file did not open with that passphrase. Your bundle was left as it is."
+        )
+        ui.blank()
+        return None
+
+    ui.success(f"Sealed: {sealed.path}  ({sealed.bytes_written / 1024 / 1024:.1f} MB)")
+    return sealed.path
+
+
 def _offer_to_seal(ui: UI, target: Path) -> None:
     """After an export: encrypt the bundle into one file, if asked.
 
@@ -654,26 +684,8 @@ def _offer_to_seal(ui: UI, target: Path) -> None:
         ui.error(str(exc))
         return
 
-    try:
-        with ui.scanning("Sealing"):
-            sealed = seal_bundle(target, passphrase)
-    except (BundleError, OSError) as exc:
-        ui.error(f"could not seal the bundle: {exc}")
-        ui.blank()
+    if seal_checked(ui, target, passphrase) is None:
         return
-
-    with ui.scanning("Checking it opens"):
-        confirmed = opens_with(sealed.path, passphrase)
-    if not confirmed:
-        # Should be impossible, and is checked anyway: this is the one place
-        # where being wrong costs the user everything.
-        ui.error(
-            "The sealed file did not open with that passphrase. Your bundle was left as it is."
-        )
-        ui.blank()
-        return
-
-    ui.success(f"Sealed: {sealed.path}  ({sealed.bytes_written / 1024 / 1024:.1f} MB)")
 
     try:
         remove = ui.confirm("Delete the unencrypted copy?", default=False, hint="use --replace")
