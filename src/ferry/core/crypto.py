@@ -1,4 +1,4 @@
-"""Encrypting a stream of bytes, per PLAN.md §5 M7.
+"""Encrypting a stream of bytes.
 
 This module knows about files and keys and nothing about bundles. What gets
 encrypted, and when, is :mod:`ferry.core.sealed`.

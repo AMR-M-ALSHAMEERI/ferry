@@ -2,8 +2,7 @@
 
 Running bare ``ferry`` is the primary path: it scans for installed assistants
 and drops into an interactive menu. Flags exist underneath for scripting and for
-the future VS Code extension, but they are deliberately the secondary route
-(PLAN.md §5 M2).
+the future VS Code extension, but they are deliberately the secondary route.
 """
 
 from __future__ import annotations

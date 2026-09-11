@@ -52,7 +52,7 @@ def test_get_adapter_raises_on_unknown_name() -> None:
 
 
 def test_the_implemented_slots_hold_real_adapters_now() -> None:
-    """M3 and M4 each replaced a stub. Registration lives in ``ferry.adapters``."""
+    """Each adapter replaced a stub. Registration lives in ``ferry.adapters``."""
     from ferry.adapters.antigravity import AntigravityAdapter
     from ferry.adapters.claude_code import ClaudeCodeAdapter
     from ferry.adapters.codex import CodexAdapter
@@ -65,10 +65,10 @@ def test_the_implemented_slots_hold_real_adapters_now() -> None:
 
 
 def test_no_adapter_is_a_stub_any_more() -> None:
-    """Every tool in the registry has a real implementation as of M6.
+    """Every tool in the registry has a real implementation.
 
-    This assertion used to name the adapters still waiting, and was updated at
-    each milestone. There are none left, so what it now guards is the opposite:
+    This assertion used to name the adapters still waiting, and was updated as
+    each one was built. There are none left, so what it now guards is the opposite:
     a stub reappearing in the registry would mean a tool silently reporting
     itself as not installed on a machine that has it.
     """
@@ -77,7 +77,7 @@ def test_no_adapter_is_a_stub_any_more() -> None:
 
 
 def test_export_and_import_reach_a_real_adapter() -> None:
-    """They were stubs saying "arrives at M3" long after M3 and M4 had shipped.
+    """They were stubs saying "arrives later" long after two adapters had shipped.
 
     The assertion that replaced that message is now itself obsolete: the
     actions no longer print anything, they run. What must stay true is that
@@ -107,20 +107,20 @@ def test_an_action_that_really_is_unbuilt_still_names_its_milestone() -> None:
 
     buf.truncate(0)
     buf.seek(0)
-    menu._MILESTONE_FOR_ACTION["somethingelse"] = "M12"
+    menu._MILESTONE_FOR_ACTION["somethingelse"] = "next spring"
     try:
         menu._stub(ui, "somethingelse")
     finally:
         del menu._MILESTONE_FOR_ACTION["somethingelse"]
 
-    assert "M12" in buf.getvalue()
+    assert "next spring" in buf.getvalue()
 
 
 def test_stub_export_and_import_raise_not_implemented() -> None:
-    stub = NotImplementedAdapter("x", "Tool X", "M9")
-    with pytest.raises(NotImplementedError, match="M9"):
+    stub = NotImplementedAdapter("x", "Tool X", "a later release")
+    with pytest.raises(NotImplementedError, match="a later release"):
         list(stub.export(Path(".")))
-    with pytest.raises(NotImplementedError, match="M9"):
+    with pytest.raises(NotImplementedError, match="a later release"):
         list(stub.import_(Path("."), ImportOptions()))
 
 
@@ -576,7 +576,7 @@ def test_the_mono_banner_is_pure_ascii() -> None:
 def test_a_scan_shows_every_adapter_caveat(capsys) -> None:  # type: ignore[no-untyped-def]
     """A caveat is not a note. Notes are detail; a caveat is something the user
     must know before they trust an export, so it is printed on every scan.
-    PLAN.md M5 requires it for Copilot Chat specifically.
+    Copilot Chat is the reason it is required.
     """
     from ferry.adapters.base import Adapter, DetectResult
     from ferry.cli.menu import scan

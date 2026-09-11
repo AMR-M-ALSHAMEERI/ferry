@@ -1,8 +1,8 @@
 """Adapter package: the contract, and the registry of real implementations.
 
 ``base`` seeds :data:`~ferry.adapters.base.REGISTRY` with a stub per tool so the
-detection screen can render honestly before any adapter exists. Each milestone
-replaces one stub with the real thing, here -- importing the implementation from
+detection screen can render honestly before any adapter exists. Each adapter
+replaces its stub with the real thing here -- importing the implementation from
 ``base`` itself would be a cycle, since every adapter imports ``base``.
 """
 

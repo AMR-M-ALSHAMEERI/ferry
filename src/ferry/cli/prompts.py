@@ -1,8 +1,8 @@
 """Arrow-driven selection, with an optional live preview and a slash filter.
 
-The user should never have to type an identifier or a `y`/`n` (PROGRESS.md
-ledger #70, #71). Every choice in Ferry is made with the arrow keys, and this
-module is where that behaviour lives.
+The user should never have to type an identifier or a `y`/`n`. Every choice
+in Ferry is made with the arrow keys, and this module is where that behaviour
+lives.
 
 The split here is deliberate. :class:`SelectorModel` holds all the state —
 which item is under the cursor, what the filter is, what is visible — as plain
@@ -743,7 +743,7 @@ def run_path(question: str, *, theme: Theme, default: str = "") -> str | None:
             rather than written into the buffer beforehand. ``prompt()`` resets
             the buffer itself as it starts, so a default set in advance is
             silently wiped -- which is how the export screen lost the suggested
-            bundle name it had offered since M2.
+            bundle name it had offered from the start.
 
     Returns:
         The path, or ``None`` if the user backed out.

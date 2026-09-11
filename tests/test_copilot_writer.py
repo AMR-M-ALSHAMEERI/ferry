@@ -62,7 +62,7 @@ def test_the_internal_id_is_forced_to_match_the_filename() -> None:
 
 
 def test_a_conversation_with_no_original_document_gets_one_built() -> None:
-    """Was a refusal until M7b.2 Phase 2, and is now the whole feature.
+    """Was a refusal for a long time, and is now the whole feature.
 
     The refusal was right while Ferry could only replay a document it had
     read. Once VS Code was measured accepting a built one (#203, #204), the

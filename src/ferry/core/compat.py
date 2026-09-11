@@ -7,9 +7,8 @@ tool. What this module adds is the part that is not free -- **knowing which
 pairs actually work, and saying what is lost before anything is written.**
 
 **The table below is measured, not assumed.** Every ordered pair was tried with
-a real conversation from the human's own machine
-(``spikes/probe_cross_tool.py``): imported into a scratch store, then exported
-back out again, because *the import reported success* and *the conversation is
+a real conversation from a real machine: imported into a scratch store and
+exported back out again, because *the import reported success* and *the conversation is
 really there* are different claims and only the second is worth shipping.
 
 ======================  ==================================================
@@ -29,9 +28,8 @@ really there* are different claims and only the second is worth shipping.
 ======================  ==================================================
 
 **Unsupported is an answer, not a failure**, and this table no longer needs
-one. PLAN section 5 M7b permitted Antigravity-as-target to end the milestone
-refused, and the refusal above was written before it was measured -- the third
-in this file to be so.
+one. The plan permitted Antigravity-as-target to end refused, and the refusal
+above was written before it was measured -- the third in this file to be so.
 
 Measured at Antigravity 2.8.1, every clause of it was wrong. A conversation is
 seven tables with a plain schema and no migration bookkeeping; the codec parsed
@@ -49,10 +47,9 @@ conversation was not listed, which is what finally said so.
 that works was described here as a *readable transcript* and nothing more.
 Then a person typed into a converted conversation in Claude Code, in Copilot
 Chat and in Codex, and the assistant answered from the history it had been
-given (PROGRESS #201, #219). What remains true is narrower and still worth
-saying: the tool calls in a converted conversation were made by another
-assistant against another set of tools, and they are carried as text rather
-than as calls the target can run.
+given. What remains true is narrower and still worth saying: the tool calls in
+a converted conversation were made by another assistant against another set of
+tools, and they are carried as text rather than as calls the target can run.
 
 **A measurement has a version attached to it.** Codex was refused because an
 invented header was measured, at Codex 0.98, to make it discard the whole
@@ -65,12 +62,11 @@ wrong for having been true; what was missing was the version it was true of.
 
 **A reason here must be a measured one.** The first version of this table said
 Copilot was refused because the workspace-key derivation was unsolved. That was
-taken from the PLAN's original feasibility assessment and had been **false for
-six days** -- PROGRESS #124 solved the derivation, #130 verified it against
-folders it had never seen, and ``copilot/paths.py`` implements it. The refusal
-was right and the explanation was invented, which no test can catch. PLAN.md
-records what was expected; PROGRESS records what was found; where they
-disagree, PROGRESS wins.
+taken from the original feasibility assessment and had been **false for six
+days** -- the derivation was solved, verified against folders it had never
+seen, and ``copilot/paths.py`` implements it. The refusal was right and the
+explanation was invented, which no test can catch. Where what was expected
+and what was measured disagree, what was measured wins.
 
 **It happened twice.** The replacement blamed the chat index, which was true in
 the narrow sense that Ferry does not build one for a foreign conversation, and
@@ -109,7 +105,7 @@ CEILING = (
 )
 """The claim Ferry is willing to make, stated wherever a conversion is offered.
 
-PLAN section 1's honest-scope note, only more so. Said in the CLI, the README
+An honest-scope note, only more so. Said in the CLI, the README
 and ``docs/CROSS-TOOL.md``, because a person deciding whether to convert their
 history deserves to know what they will get before they spend an evening on it.
 """

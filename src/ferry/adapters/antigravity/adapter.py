@@ -12,8 +12,7 @@ those blobs, and that single fact decides the shape of this adapter:
 
 A conversation from another tool therefore cannot be written *into*
 Antigravity yet -- it has no database to restore -- and is reported as skipped
-rather than half-written. That is cross-tool migration, which PLAN.md puts at
-M7b.
+rather than half-written. That is cross-tool migration, which arrived later.
 """
 
 from __future__ import annotations
@@ -79,7 +78,7 @@ SQLITE_MAGIC: Final = b"SQLite format 3\x00"
 
 Here because a conversation is restored by copying a database into place, and
 "there is a file in the bundle" is not the same question as "that file is a
-database". The M7b probe found the difference the expensive way: handed a
+database". A probe found the difference the expensive way: handed a
 Claude Code conversation, this adapter copied its 1.6 MB **JSONL transcript**
 to ``conversations/<uuid>.db``, remapped it without complaint, and reported
 ``1 of 1 imported``. Nothing was there afterwards. A success message over an
@@ -812,9 +811,9 @@ class AntigravityAdapter(Adapter):
                 message=f"written, but not added to Antigravity's list: {exc}",
             )
 
-        # Set here rather than assumed to exist. A7b.8 was a whole phase spent
-        # on a field that was populated onto an object and then discarded, and
-        # ledger #220 was the same lesson again: setting the field and
+        # Set here rather than assumed to exist. A whole phase once went on a
+        # field that was populated onto an object and then discarded, and
+        # Codex taught the same lesson again: setting the field and
         # recording it are two halves, and a document promising provenance is
         # untrue without both.
         conversation.provenance = Provenance(

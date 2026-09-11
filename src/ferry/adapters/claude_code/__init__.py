@@ -1,4 +1,4 @@
-"""Claude Code adapter (PLAN.md §5 M3)."""
+"""Claude Code adapter."""
 
 from ferry.adapters.claude_code.adapter import SIDECAR_SUBDIR, ClaudeCodeAdapter
 

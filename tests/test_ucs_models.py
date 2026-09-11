@@ -1,4 +1,4 @@
-"""UCS model tests. Assertions are on real values, per PLAN.md §6.8.1."""
+"""UCS model tests. Assertions are on real values."""
 
 import json
 from datetime import UTC, datetime
@@ -60,13 +60,13 @@ def test_all_four_block_types_survive_serialisation(conversation: Conversation) 
 
 
 def test_thinking_signature_may_be_absent() -> None:
-    """Cross-tool import drops signatures (M7b) — the model must accept that."""
+    """Cross-tool import drops signatures — the model must accept that."""
     block = ThinkingBlock(text="reasoning with no signature")
     assert block.signature is None
 
 
 def test_null_timestamp_is_preserved_not_invented(conversation: Conversation) -> None:
-    """PLAN.md §3.2: never fabricate a timestamp the source did not store."""
+    """Never fabricate a timestamp the source did not store."""
     restored = Conversation.model_validate_json(conversation.model_dump_json())
     assert restored.messages[2].timestamp is None
     assert json.loads(conversation.model_dump_json())["messages"][2]["timestamp"] is None

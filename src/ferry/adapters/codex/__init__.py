@@ -1,4 +1,4 @@
-"""OpenAI Codex adapter (PLAN.md section 5 M4)."""
+"""OpenAI Codex adapter."""
 
 from ferry.adapters.codex.adapter import LARGE_SESSION_BYTES, CodexAdapter
 

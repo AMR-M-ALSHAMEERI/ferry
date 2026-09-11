@@ -16,8 +16,8 @@ regenerated pair is internally consistent but is not the original id. Every such
 loss is reported, never absorbed.
 
 Only *structural* fields are rewritten on the way in -- ``cwd`` and the absolute
-pointers to spilled tool output. Message content is never touched: PLAN.md
-section 3.2 says Ferry does not edit what the user wrote, and a path that
+pointers to spilled tool output. Message content is never touched: Ferry does
+not edit what the user wrote, and a path that
 appears inside a message is something the user or the assistant said, not a
 reference the tool will follow.
 """

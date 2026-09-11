@@ -1,4 +1,4 @@
-"""Bundle manifest model, per PLAN.md §3.3."""
+"""Bundle manifest model."""
 
 from datetime import datetime
 from typing import Literal

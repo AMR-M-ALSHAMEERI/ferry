@@ -1,7 +1,7 @@
 """The presentation layer. Everything a user sees goes through here.
 
-No milestone after M2 may print with ``rich`` or prompt with ``questionary``
-directly (PROGRESS.md ledger #64). Routing it all through one module is what
+Nothing outside this module may print with ``rich`` or prompt with
+``questionary`` directly. Routing it all through one module is what
 keeps theming consistent — the moment an adapter prints its own coloured output,
 the theme silently stops applying to half the interface.
 
@@ -460,12 +460,12 @@ class UI:
         Everything is ticked by default unless ``preselected`` says otherwise —
         the common case is "take all of it".
 
-        Ferry's own prompt, not questionary's. This method was written at M2 and
-        called by nothing until M7b.2, and the first time anyone saw it on
+        Ferry's own prompt, not questionary's. This method was written early and
+        called by nothing for a long time, and the first time anyone saw it on
         screen it was **black and white in the middle of a themed run**:
         questionary takes a pointer and a marker but no colours, so it ignored
-        the theme entirely. That is precisely the failure ledger #64 wrote the
-        rule against, sitting unnoticed inside the module whose docstring states
+        the theme entirely. That is precisely the failure the rule above was
+        written against, sitting unnoticed inside the module whose docstring states
         it — dead code cannot be caught by a rule nobody runs.
         """
         self._require_interactive(question, hint)
@@ -482,7 +482,7 @@ class UI:
         """Ask a yes/no question.
 
         Rendered as an arrow-selectable Yes/No, never as a typed ``[y/N]``
-        prompt (PROGRESS.md ledger #71).
+        prompt.
 
         ``default`` is deliberately a required argument: read operations should
         default to yes, anything that writes to a user's real data should

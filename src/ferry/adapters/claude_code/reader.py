@@ -309,8 +309,8 @@ def read_session(path: Path) -> SessionRead:
         out.notes.append(f"{path.name}: no messages; skipped")
         return out
     if not timestamps:
-        # created_at and updated_at are required and must not be invented
-        # (PLAN.md section 3.2). A transcript with messages but no timestamp
+        # created_at and updated_at are required and must not be invented.
+        # A transcript with messages but no timestamp
         # anywhere has never been observed; if one appears, it is skipped loudly
         # rather than stamped with the clock.
         out.warnings.append(f"{path.name}: no timestamps anywhere; skipped")

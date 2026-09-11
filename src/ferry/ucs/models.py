@@ -1,8 +1,8 @@
-"""Pydantic models for the Universal Conversation Schema (UCS), per PLAN.md §3.1.
+"""Pydantic models for the Universal Conversation Schema (UCS).
 
 UCS is the interchange format every adapter exports to and imports from.
-Schema version tracked here must match the version documented in PLAN.md §3
-and the generated JSON schema at schemas/ucs-<version>.json.
+Schema version tracked here must match the generated JSON schema at
+schemas/ucs-<version>.json.
 """
 
 from datetime import datetime
@@ -119,7 +119,7 @@ class Provenance(BaseModel):
     """Populated by the IMPORTING adapter when target tool != source_tool.
 
     Absent means the conversation has only ever lived in its source_tool.
-    See PLAN.md §3.2 "never present a foreign conversation as native".
+    The rule it exists for: never present a foreign conversation as native.
     """
 
     model_config = ConfigDict(extra="forbid")

@@ -1,4 +1,4 @@
-"""The ``SKILL.md`` that teaches an AI assistant to drive Ferry (PLAN.md §5 M8).
+"""The ``SKILL.md`` that teaches an AI assistant to drive Ferry.
 
 The file ships inside the package so an installed Ferry can hand it over:
 ``ferry skill`` prints it, ``ferry skill --install`` puts it where each

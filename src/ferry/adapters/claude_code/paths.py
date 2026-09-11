@@ -14,8 +14,7 @@ Both sources agree:
 Because the substitution is lossy (``a.b`` and ``a-b`` and ``a_b`` all become
 ``a-b``), it can never be reversed. Import must therefore derive the name from
 the *target* machine's working directory and never attempt to decode the old
-one. PLAN.md section 5 M3 says this explicitly and it is worth repeating here,
-next to the code that would be tempted to try.
+one. That is worth repeating next to the code that would be tempted to try.
 """
 
 from __future__ import annotations

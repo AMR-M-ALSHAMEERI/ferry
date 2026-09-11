@@ -138,8 +138,8 @@ def parent_thread(path: Path) -> UUID | None:
 
     for key in ("parent_thread_id", "session_id"):
         # `session_id` is the fallback because on a subagent it holds the
-        # parent's id rather than a second copy of `id` -- established at M4
-        # when overwriting it reparented a subagent to itself.
+        # parent's id rather than a second copy of `id` -- established when
+        # overwriting it reparented a subagent to itself.
         value = payload.get(key)
         if isinstance(value, str) and value and value != payload.get("id"):
             try:

@@ -100,7 +100,7 @@ def _document_of(conversation: Conversation) -> dict[str, Any]:
     if not isinstance(document, dict):
         raise ValueError(
             "conversation carries no original Copilot document; "
-            "cross-tool import into Copilot Chat is M7b"
+            "a conversation from another tool needs one built for it"
         )
     return document
 
@@ -115,9 +115,9 @@ def recorded_workspace_key(conversation: Conversation) -> str:
 def index_entry(conversation: Conversation) -> dict[str, Any]:
     """One row of the chat list, shaped as VS Code writes it.
 
-    Field set taken from real entries in both indexes; see ``PROGRESS.md``
-    §4.2. ``timing.created`` is required -- VS Code sorts the list by it, and
-    an entry without one sorts unpredictably rather than failing visibly.
+    Field set taken from real entries in both indexes. ``timing.created`` is
+    required -- VS Code sorts the list by it, and an entry without one sorts
+    unpredictably rather than failing visibly.
     """
     document = _document_of(conversation) if _has_document(conversation) else {}
     created = document.get("creationDate")
@@ -437,7 +437,7 @@ def synthesize_document(conversation: Conversation) -> dict[str, Any]:
     """Build a VS Code chat document for a conversation from another tool.
 
     **Every field here was measured, and the shape is the smallest one proven
-    to work** (PROGRESS #203, #204). A real document carries 24 fields per
+    to work.** A real document carries 24 fields per
     request, including the Copilot extension's own manifest, token counts,
     credits spent and model state. Ferry writes none of that: it would be
     inventing telemetry about a conversation that never happened in VS Code,

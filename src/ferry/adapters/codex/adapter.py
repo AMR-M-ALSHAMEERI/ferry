@@ -62,7 +62,7 @@ TOOL: Final[ToolName] = "codex"
 _PASTED_NAMESPACE = UUID("6ba7b814-9dad-11d1-80b4-00c04fd430c8")
 
 LARGE_SESSION_BYTES: Final = 100 * 1024 * 1024
-"""Warn above this. PLAN.md §5 M4 asks for a size guard; this is its threshold."""
+"""Warn above this. It is the size guard's threshold."""
 
 _OS_NAMES: dict[str, OSName] = {"Windows": "win32", "Darwin": "darwin", "Linux": "linux"}
 

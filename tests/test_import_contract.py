@@ -1,11 +1,12 @@
 """The promises every adapter's import makes, asked of all four.
 
 ``ImportOptions`` has carried ``backup``, ``dry_run`` and ``on_conflict`` since
-M3, and each adapter was tested against them in its own file -- except Copilot,
+the beginning, and each adapter was tested against them in its own file --
+except Copilot,
 whose import ignored the options object entirely for two milestones. Nothing
 caught it because nothing ever asked Copilot the questions the other three were
 being asked, and the CLI passed the defaults, so the gap was invisible right up
-until M7 made those options reachable.
+until the screens made those options reachable.
 
 **A dry run into Copilot Chat would have written**: a row into VS Code's chat
 index and a transcript file. That is the failure this file exists to make
@@ -189,7 +190,7 @@ def test_a_backup_is_announced_once_and_as_a_note(
     file copied, each carrying the same marker as "this conversation lost its
     thinking blocks" and each repeating an absolute path long enough to wrap the
     terminal. A marker that appears on everything stops meaning anything, which
-    is the fault of ledger #159 arriving by a different route.
+    is an old fault arriving by a different route.
     """
     home = tmp_path / "home"
     home.mkdir()

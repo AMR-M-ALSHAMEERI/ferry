@@ -56,7 +56,7 @@ _run_stamp: str | None = None
 
 
 def backup_root() -> Path:
-    """Where backups live, per PLAN.md §5 M7, unless :data:`BACKUP_ENV` says otherwise."""
+    """Where backups live, unless :data:`BACKUP_ENV` says otherwise."""
     override = os.environ.get(BACKUP_ENV)
     if override:
         return Path(override)

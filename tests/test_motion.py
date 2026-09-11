@@ -437,7 +437,7 @@ def test_menu_icons_are_uniform_in_character_length() -> None:
     An earlier version of this test demanded every glyph be East Asian Width
     Neutral, so that Ambiguous characters — one cell in a Latin terminal, two
     in one configured for CJK — could not make the column ragged. That rule was
-    dropped deliberately (PROGRESS.md ledger #91): Ferry's identity is built
+    dropped deliberately: Ferry's identity is built
     almost entirely from Ambiguous glyphs. The wordmark letterforms, the hull
     and the wake `≈` are all Ambiguous, and only `▸` and `◂` are Neutral, so
     enforcing Neutrality meant the icons could not be drawn from the brand's

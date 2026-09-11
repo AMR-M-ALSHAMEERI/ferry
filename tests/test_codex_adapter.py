@@ -398,7 +398,7 @@ def test_export_does_not_touch_the_source(
 def test_the_reader_never_reads_a_whole_rollout(source: Path, monkeypatch) -> None:
     """Proven structurally, not measured.
 
-    PLAN.md §5 M4 forbids whole-file reads because a rollout can reach hundreds
+    Whole-file reads are forbidden because a rollout can reach hundreds
     of megabytes. A benchmark can only say "it did not this time"; making the
     whole-file APIs raise says it *cannot*.
     """
@@ -606,7 +606,7 @@ def test_export_reports_an_absent_source_instead_of_raising(tmp_path: Path) -> N
 def test_a_large_session_is_flagged_before_it_is_read(
     source: Path, tmp_path: Path, monkeypatch
 ) -> None:
-    """PLAN.md §5 M4 asks for a size guard; the user should hear about it first."""
+    """A large rollout trips the size guard; the user should hear about it first."""
     monkeypatch.setattr("ferry.adapters.codex.adapter.LARGE_SESSION_BYTES", 100)
     adapter = CodexAdapter(env={"CODEX_HOME": str(source)})
 
@@ -620,7 +620,7 @@ def test_a_cross_tool_import_records_where_it_came_from(
     """A foreign conversation is written, and says so.
 
     This asserted a refusal until 2026-09-06. Now that Codex accepts a built
-    header, PLAN.md §3.2 is carried by the record instead of by the format's
+    header, the rule is carried by the record instead of by the format's
     inability: the conversation is written, and a provenance stamp says where
     it came from and what the conversion cost. **The rule was never "refuse",
     it was "never pass a conversion off as native"** -- refusing was simply the

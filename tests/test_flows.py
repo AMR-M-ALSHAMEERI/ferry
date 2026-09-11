@@ -651,7 +651,7 @@ class TestImportOptionsScreen:
     """One screen carrying the options, instead of three prompts.
 
     `ImportOptions` has carried `dry_run`, `on_conflict` and `path_remap` since
-    M3 and the import screen passed `ImportOptions()` -- the defaults, always.
+    the import screen passed `ImportOptions()` -- the defaults, always.
     Everything below existed and was unreachable, including the path remapping
     the whole Antigravity milestone was built around: a bundle restored onto
     another machine had every recorded path left wrong.

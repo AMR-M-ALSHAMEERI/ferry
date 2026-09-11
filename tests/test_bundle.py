@@ -1,4 +1,4 @@
-"""Bundle tests, per PLAN.md M1 and §6.8.1.
+"""Bundle tests.
 
 The round-trip test reloads with an independent parser (json.loads) rather than
 trusting the writer's own logic to confirm its own output.
@@ -78,7 +78,7 @@ def test_add_conversation_updates_manifest_counts(
 def test_has_conversation_supports_resumable_export(
     tmp_path: Path, manifest: Manifest, conversation: Conversation
 ) -> None:
-    """Adapters must be able to skip already-written files when resuming (PLAN.md §4)."""
+    """Adapters must be able to skip already-written files when resuming."""
     bundle = Bundle.create(tmp_path / "b", manifest)
     assert bundle.has_conversation(CONV_ID) is False
     bundle.add_conversation(conversation)
@@ -135,7 +135,7 @@ def test_full_round_trip_preserves_content(
 def test_pack_refuses_overwrite_without_force(
     tmp_path: Path, manifest: Manifest, conversation: Conversation
 ) -> None:
-    """PLAN.md §6.1: refuse to overwrite a bundle file without force."""
+    """Refuse to overwrite a bundle file without force."""
     bundle = Bundle.create(tmp_path / "build", manifest)
     bundle.add_conversation(conversation)
     dest = tmp_path / "out.zip"

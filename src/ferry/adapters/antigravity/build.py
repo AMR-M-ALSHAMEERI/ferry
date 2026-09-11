@@ -71,8 +71,8 @@ BUILD_NOTES = (
 """What building a conversation costs, said in the record as well as on screen.
 
 The provenance block is the copy that outlives the confirmation screen, so it
-carries the assessment's notes and these -- the same rule Codex learned at
-ledger #220 when it stored only half of them.
+carries the assessment's notes and these -- the same rule Codex learned when
+it stored only half of them.
 """
 
 USER_INPUT: Final = 14

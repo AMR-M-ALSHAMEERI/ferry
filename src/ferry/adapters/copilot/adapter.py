@@ -380,8 +380,8 @@ class CopilotAdapter(Adapter):
                 yield event
 
         # Said once, at the end, as a note. Six lines carrying the warning
-        # marker for something entirely routine is the fault of ledger #159
-        # reintroduced -- and a marker that appears on everything stops meaning
+        # marker for something entirely routine is an old fault reintroduced
+        # -- and a marker that appears on everything stops meaning
         # anything. The directory is what someone needs; the filenames are in
         # its manifest.
         if saved:

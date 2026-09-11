@@ -1,4 +1,4 @@
-"""The SKILL.md that teaches an AI assistant to drive Ferry (PLAN.md §5 M8).
+"""The SKILL.md that teaches an AI assistant to drive Ferry.
 
 What matters most is that it never names a command or a flag Ferry does not
 have: an assistant follows the file literally, and a flag that does not exist

@@ -1,4 +1,4 @@
-"""Detect, export, and the path-remapped import M6 exits on."""
+"""Detect, export, and the path-remapped import."""
 
 from __future__ import annotations
 

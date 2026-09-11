@@ -1,6 +1,7 @@
 """Replaying a Copilot Chat transcript.
 
-**This is the highest-risk component in M5 and the reason it is built first.**
+**This is the highest-risk component of the Copilot adapter, and the reason it
+is built first.**
 
 A session file is not a document. It is a log of edits to one: the first line
 is a snapshot, every line after it changes the snapshot in place. Reconstructing
@@ -14,7 +15,7 @@ all, and would report success while doing it. That is the failure this module
 exists to prevent, and it is why the replayer is tested on its own rather than
 only through the adapter.
 
-Record shape, verified against VS Code 1.134.0 (see ``PROGRESS.md`` §4.2)::
+Record shape, verified against VS Code 1.134.0::
 
     {"kind": 0, "v": {...}}                     snapshot, replaces everything
     {"kind": 1, "k": ["a", "b"], "v": x}        set: doc["a"]["b"] = x

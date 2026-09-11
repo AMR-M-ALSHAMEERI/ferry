@@ -59,7 +59,7 @@ class TestStrings:
         """A chunk that parses as a message may also be text, and both matter.
 
         Returning only the structural reading is exactly the bug that hid every
-        long message during the M6 probe (PROGRESS.md ledger #150).
+        long message during the Antigravity probe.
         """
         # Text that is also valid protobuf. "2" is a tag byte (field 6, wire
         # 2) and the space after it is a length of 32, so these bytes read

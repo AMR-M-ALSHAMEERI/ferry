@@ -1,6 +1,6 @@
 """Themes, icon sets, and terminal-capability fallback for Ferry's interface.
 
-Four themes are defined (PLAN.md §5 M2):
+Four themes are defined:
 
 - ``harbor``  — the default identity theme, teal and amber
 - ``compass`` — the cooler identity theme, sky and indigo
@@ -150,7 +150,7 @@ TEXT_ONLY_GLYPHS: Final = frozenset(
 An allow-list rather than a deny-list, because "is this an emoji?" is not
 something Python can answer: `unicodedata` has no emoji property, and the
 emoji-capable characters are scattered through the BMP rather than sitting in
-one range. Four glyphs shipped in the first M2 build before this existed —
+one range. Four glyphs shipped in the first build before this existed —
 ``✔`` U+2714, ``✖`` U+2716, ``◼`` U+25FC and ``◻`` U+25FB all carry the Unicode
 Emoji property and rendered as colour emoji in the user's terminal.
 

@@ -7,7 +7,7 @@ built during an import and then dropped on the floor -- assigned to an object
 that went out of scope, serialised nowhere, read by nothing. **Three documents
 promised it and the file never carried it**, so a converted conversation was
 permanently indistinguishable from one that had really happened in the target
-tool. Found by rehearsing acceptance item A7b.8; ledger #209.
+tool. Found by rehearsing the acceptance checklist by hand.
 
 **Why a file of Ferry's own, and not a field in the target's transcript.**
 Writing the stamp into the tool's own file is the version that travels: copy

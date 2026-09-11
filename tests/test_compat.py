@@ -1,7 +1,7 @@
 """Cross-tool migration: which pairs work, what they cost, and what is refused.
 
-The measured facts these tests encode come from ``spikes/probe_cross_tool.py``,
-run against the four real stores: every ordered pair imported into a scratch
+The measured facts these tests encode came from a probe run against the four
+real stores: every ordered pair imported into a scratch
 store and then exported back out, because *the import reported success* and
 *the conversation is really there* are different claims.
 
@@ -83,7 +83,7 @@ class TestTheMatrix:
 
     @pytest.mark.parametrize("source", [t for t in TOOLS if t != "copilot"])
     def test_copilot_accepts_all_three_others(self, source: str) -> None:
-        """Measured at M7b.2 Phase 2.
+        """Measured when Copilot became a target.
 
         The document is built rather than replayed, to the smallest shape VS
         Code was proven to accept: it listed the conversation, read the title
@@ -181,7 +181,7 @@ class TestWhatAConversionCosts:
 
 
 class TestTheFalseWrite:
-    """The defect the M7b probe found, kept fixed.
+    """The defect the cross-tool probe found, kept fixed.
 
     Handed a Claude Code conversation with ``allow_cross_tool=True``, the
     Antigravity importer copied its 1.6 MB **JSONL transcript** into
@@ -288,7 +288,7 @@ class TestAskingBeforeWriting:
         assert sum(1 for e in events if e.kind == "progress") == 1
 
     def test_a_dry_run_prints_the_cost_not_only_the_size(self, tmp_path: Path) -> None:
-        """PLAN M7b: a dry run must show the conversion notes it would record.
+        """A dry run must show the conversion notes it would record.
 
         "Would write 400 KB" is equally true of a conversion that drops every
         tool result, and is not something a person can decide on.
@@ -318,7 +318,7 @@ class TestWhatWasWrittenSaysWhereItCameFrom:
     def test_provenance_records_the_notes_the_person_was_shown(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """PLAN §3.2: never present a converted conversation as native.
+        """Never present a converted conversation as native.
 
         The notes recorded are the assessment's *and* the rebuild's. A
         provenance block saying less than the confirmation screen would be the
@@ -359,7 +359,8 @@ class TestWhatWasWrittenSaysWhereItCameFrom:
 class TestAConvertedCallIsNotWrittenAsACall:
     """The line between a converted transcript and a forgery.
 
-    Found by rehearsing A7b.4 against real data, not by a failing test: a
+    Found by rehearsing the acceptance checklist against real data, not by a
+    failing test: a
     conversation converted into Claude Code carried a native ``tool_use`` block
     named after an **Antigravity** tool, complete with an id and an input, in
     the exact shape of a call Claude Code had made. Nothing had run. The screen

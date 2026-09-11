@@ -3,7 +3,7 @@
 Antigravity stores its conversations as protobuf blobs inside SQLite, and
 importing one onto a different machine means rewriting the absolute paths
 buried in those blobs. Paths appear at **fourteen or more distinct field
-paths** (``PROGRESS.md`` section 4.3), so this is not an edge case in the
+paths**, so this is not an edge case in the
 format, it is most of what an import does.
 
 A path cannot be replaced with a byte-level search and replace. Every
@@ -36,8 +36,8 @@ fixed-width fields and no groups. What made writing a conversation hard was
 never the encoding. It was knowing which fields to write, which is
 ``schema.py``'s job and was answered by measurement.
 
-That also settles PLAN.md section 8 open question 2 -- ship a compiled
-``_pb2.py`` or compile at install time -- by removing the question. There is no
+That also settles the open question of whether to ship a compiled
+``_pb2.py`` or compile at install time, by removing the question. There is no
 ``protoc``, no build step, and no ``protobuf`` dependency. ``schema.proto``
 still exists beside this file, as the documentation of what the field numbers
 mean.
@@ -238,9 +238,9 @@ def strings(data: bytes, *, _path: Path = (), _depth: int = 0) -> list[tuple[Pat
     **A chunk that parses as a nested message is also reported as a string when
     it is valid text**, and both readings come back. That is not hedging. Long
     text frequently parses as a message by coincidence, and returning only the
-    structural reading hid every message over a certain length during the M6
-    probe -- a bug that produced a confident and wrong conclusion about the
-    user's data before its own control caught it (``PROGRESS.md`` ledger #150).
+    structural reading hid every message over a certain length during the
+    Antigravity probe -- a bug that produced a confident and wrong conclusion about the
+    user's data before its own control caught it.
     """
     fields = parse(data)
     if fields is None:

@@ -13,10 +13,9 @@ are lost with no error and no warning.
 So the skip checks. It costs a re-read, paid only when a duplicate is actually
 found, which on real data is close to never.
 
-**This is shared rather than per-adapter deliberately** (see ``PROGRESS.md``
-ledger #114): the skip-by-id pattern is in all three adapters, so the risk is
-in all three, and one of them having a guard the others lack is how the next
-adapter inherits the fault.
+**This is shared rather than per-adapter deliberately:** the skip-by-id pattern
+is in all three adapters, so the risk is in all three, and one of them having a
+guard the others lack is how the next adapter inherits the fault.
 """
 
 from __future__ import annotations

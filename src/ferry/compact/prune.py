@@ -41,8 +41,8 @@ _NAMED_ERROR = re.compile(
 )
 """Lines that **name** what went wrong.
 
-Every alternative was measured against the human's own stores
-(``spikes/probe_errors.py``, counts only). What is *not* here is as deliberate:
+Every alternative was measured against real stores, counts only. What is
+*not* here is as deliberate:
 a bare "failed" or "failure" fires on 15% of Codex results and almost all of
 them are a passing tool reporting a failing test.
 

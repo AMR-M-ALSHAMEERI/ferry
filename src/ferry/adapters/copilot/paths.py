@@ -11,7 +11,7 @@ slug or an encoding of the path -- it is a digest, and for a folder the digest
 covers **the folder's creation time as well as its path**, which is why no
 amount of guessing from the path alone can produce it. The rule below is read
 from VS Code's own ``main.js`` and verified against four real directories on
-this machine; see ``PROGRESS.md`` §4.2.
+this machine.
 
 Verified against VS Code 1.134.0 on Windows.
 """
@@ -60,11 +60,11 @@ Sits *beside* the workspace keys rather than inside one, so it is shared across
 every workspace.
 
 **Ferry does not read images from here, and should not start.** This directory
-is transient: it held two PNGs during M5 and VS Code had deleted it a few hours
-later, while both images were still fully recoverable from the transcripts,
+is transient: it held two PNGs one afternoon and VS Code had deleted it a few
+hours later, while both images were still fully recoverable from the transcripts,
 where they are stored base64-encoded. Reading the directory would have begun
-silently returning nothing. The name is kept because the self-check fingerprints
-it when it exists.
+silently returning nothing. The name is kept because it is still worth
+recognising when it exists.
 """
 
 

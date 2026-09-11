@@ -6,7 +6,7 @@ target, and the two are frequently different operating systems.
 
 ``pathlib`` is the wrong tool for that job and wrong in a way that only shows
 up on the other platform, which is how it reached CI green on Windows and red
-on Linux and macOS during M3.
+on Linux and macOS.
 """
 
 from __future__ import annotations

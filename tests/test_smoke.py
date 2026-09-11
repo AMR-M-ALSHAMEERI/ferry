@@ -1,4 +1,4 @@
-"""M0 smoke test: the package imports and the CLI app exists."""
+"""Smoke test: the package imports and the CLI app exists."""
 
 import ferry
 from ferry.cli import app

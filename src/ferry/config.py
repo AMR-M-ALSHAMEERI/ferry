@@ -1,7 +1,7 @@
 """User settings stored in ``~/.ferry/config.json``.
 
 Only preferences live here — never conversation data, and never anything from a
-bundle. API keys arrive later (M7, Compact), which is why the file is written
+bundle. API keys arrive later, which is why the file is written
 with owner-only permissions from the start.
 
 Every read is defensive. A corrupt or unreadable config must degrade to

@@ -11,8 +11,8 @@ rows: the six were the ones the picker offered. ``codex resume <id>`` finds a
 conversation with no row, which is how Phase 3 was verified, but nobody
 migrating their history knows the id -- **they open the picker.**
 
-This retires the note at ledger #111, which recorded a rebuilt rollout resuming
-with ``threads`` empty. That was true at Codex 0.98.
+This retires an older note that recorded a rebuilt rollout resuming with
+``threads`` empty. That was true at Codex 0.98.
 
 Two settings here are **security decisions, not formatting**, and both are
 written at the cautious end:

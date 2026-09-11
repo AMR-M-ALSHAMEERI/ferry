@@ -1,4 +1,4 @@
-"""Bundle creation, reading, packing and validation, per PLAN.md §3.3.
+"""Bundle creation, reading, packing and validation.
 
 A bundle is a directory while it is being built, and a zip once packed:
 
@@ -8,7 +8,7 @@ A bundle is a directory while it is being built, and a zip once packed:
     attachments/<conversation-uuid>/<attachment-uuid>.<ext>
     source_raw/<uuid>.bin
 
-Writes use the atomic tmp+rename pattern required by PLAN.md §6.3 so an
+Writes use the atomic tmp+rename pattern so an
 interrupted or disk-full write cannot leave a half-written file in place.
 """
 
@@ -233,7 +233,7 @@ class Bundle:
     # ---------- source_raw ----------
 
     def source_raw_path(self, conversation_id: UUID) -> Path:
-        """Where this conversation's original-format bytes live (PLAN.md 3.3)."""
+        """Where this conversation's original-format bytes live."""
         return self.root / SOURCE_RAW_DIR / f"{conversation_id}.bin"
 
     def has_source_raw(self, conversation_id: UUID) -> bool:
@@ -242,7 +242,7 @@ class Bundle:
     def add_source_raw(self, conversation_id: UUID, source: Path) -> Path:
         """Copy a conversation's original file in verbatim.
 
-        Opt-in per PLAN.md 3.3 and the reason a same-tool re-import can be
+        Opt-in, and the reason a same-tool re-import can be
         byte-perfect: UCS is a lossy common denominator by construction, and
         this is the copy that does not go through it.
         """
@@ -486,7 +486,7 @@ class Bundle:
     # ---------- packing ----------
 
     def pack(self, dest: Path, *, force: bool = False) -> Path:
-        """Zip the bundle directory. Refuses to overwrite without force (PLAN.md §6.1)."""
+        """Zip the bundle directory. Refuses to overwrite without force."""
         if dest.exists() and not force:
             raise BundleError(f"{dest} already exists (pass force=True to overwrite)")
         dest.parent.mkdir(parents=True, exist_ok=True)

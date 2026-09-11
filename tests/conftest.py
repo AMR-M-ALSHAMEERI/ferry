@@ -1,4 +1,4 @@
-"""Shared fixtures. Synthetic UCS objects only — no real conversation data (PLAN.md §6.6)."""
+"""Shared fixtures. Synthetic UCS objects only — no real conversation data."""
 
 from datetime import UTC, datetime
 from uuid import UUID

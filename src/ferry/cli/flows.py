@@ -2,7 +2,7 @@
 
 Two working adapters existed for a while with no way to reach them from the
 interface, and the menu still told anyone who picked Export that it would
-"arrive at M3" -- a milestone that had shipped. This module is that wiring, and
+"arrive later", long after it had. This module is that wiring, and
 nothing more: it picks a tool, picks a place, runs the adapter and renders the
 events it yields.
 

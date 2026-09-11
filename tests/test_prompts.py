@@ -791,7 +791,7 @@ class TestPathPromptKeys:
 
 
 class TestPathPromptDefault:
-    """The suggestion the export screen has offered since M2.
+    """The suggestion the export screen has offered from the start.
 
     ``PromptSession.prompt()`` resets its own buffer as it starts, so a default
     written into the buffer beforehand is silently wiped. Replacing
@@ -918,10 +918,10 @@ class TestPathPromptTheme:
 class TestTheChecklist:
     """Ticking several things at once, in Ferry's own colours.
 
-    This prompt existed from M2 and was called by nothing until M7b.2. The
+    This prompt existed early and was called by nothing for a long time. The
     first time anyone saw it, it rendered **black and white in the middle of a
     themed run** -- it went through questionary, which takes a pointer and a
-    marker but no colours. Ledger #64's rule was written against exactly that,
+    marker but no colours. The rule was written against exactly that,
     and it was being broken inside the module whose docstring states it,
     because dead code cannot be caught by a rule nobody runs.
     """

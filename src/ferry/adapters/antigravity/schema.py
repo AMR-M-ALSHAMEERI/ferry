@@ -3,8 +3,8 @@
 Nothing here was guessed from a field's size or position. Every mapping was
 derived by joining ``brain/<uuid>/.system_generated/logs/transcript.jsonl`` --
 which is plain JSON and names its step types in words -- to ``steps.idx``
-through ``step_index``, which is the verification technique PLAN.md M6 asks
-for. The counts in the comments are how many real steps agreed.
+through ``step_index``. Every mapping below was verified that way, and the
+counts in the comments are how many real steps agreed.
 
 Two things about that oracle shape the code:
 
@@ -14,8 +14,7 @@ Two things about that oracle shape the code:
 * **The transcript's ``content`` is a rendering, not the stored string.** It is
   routinely *longer* than the field it came from, so a mapping must be checked
   by containment in both directions. Checking one direction found nothing and
-  nearly produced a confident, wrong claim about the user's data
-  (``PROGRESS.md`` ledger #150).
+  nearly produced a confident, wrong claim about the user's data.
 
 ``step_payload`` is a oneof: field 5 carries metadata common to every step, and
 each step type puts its own content at its own field number -- USER_INPUT at

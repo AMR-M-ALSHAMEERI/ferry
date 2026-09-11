@@ -47,16 +47,16 @@ dependencies = [
     # twelve CI legs while the local venv carried on passing: an undeclared
     # dependency is invisible until the environment that never had it.
     #
-    # No questionary. It was declared at M0 for the prompts and superseded at
-    # M2 by these screens, which the themes require: a questionary prompt takes
-    # a pointer and a marker but no colours, so it renders black and white in
-    # the middle of a themed run. Its last caller went at M7b.2 (#199).
+    # No questionary. It was declared early for the prompts and superseded by
+    # these screens, which the themes require: a questionary prompt takes a
+    # pointer and a marker but no colours, so it renders black and white in
+    # the middle of a themed run. Its last caller is gone.
     "prompt_toolkit>=3.0",
     "pydantic>=2",
     "rich>=13",
     "httpx>=0.27",
     "pyperclip>=1.9",
-    # Bundle encryption (M7). AES-256-GCM and scrypt both come from here, so
+    # Bundle encryption. AES-256-GCM and scrypt both come from here, so
     # Ferry implements no cryptography of its own beyond framing.
     "cryptography>=42",
 ]

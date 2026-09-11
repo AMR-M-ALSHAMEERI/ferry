@@ -10,7 +10,7 @@ which is how a promise stays broken through a green suite.
 So the tests here are deliberately about the *round trip* rather than about the
 function that writes the record. Import a foreign conversation, export the
 target again, and ask the conversation where it came from. That is the question
-acceptance item A7b.8 asks, and it is the only phrasing the old defect could
+the acceptance checklist asks, and it is the only phrasing the old defect could
 not have survived.
 """
 

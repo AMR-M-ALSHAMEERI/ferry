@@ -1,6 +1,6 @@
 """``ferry export`` and ``ferry import``: the menu's work, without the menu.
 
-For scripts, for an assistant driving Ferry from a shell (PLAN.md §5 M8), and
+For scripts, for an assistant driving Ferry from a shell, and
 for anyone who already knows what they want. Every question the screens ask is
 a flag here, and a question with no flag and no terminal to ask it on is an
 error that names the flag -- never a prompt that hangs waiting for input nobody
@@ -367,8 +367,8 @@ def import_bundle(
     """Import a bundle into ``tool``. Returns an exit code.
 
     Backs up before writing, always: the screen offers no way to turn that off
-    and neither does this (PLAN.md §6.1 allows it only behind a confirmation,
-    and a script has nobody to confirm).
+    and neither does this: turning it off is allowed only behind a
+    confirmation, and a script has nobody to confirm.
     """
     _mark(ui)
     remap = _parse_remap(path_remap)

@@ -429,7 +429,7 @@ def test_export_is_resumable(adapter: ClaudeCodeAdapter, tmp_path: Path) -> None
 def test_export_does_not_touch_the_source(
     adapter: ClaudeCodeAdapter, source: Path, tmp_path: Path
 ) -> None:
-    """The single most important safety property in the project (PLAN.md §6.8.2)."""
+    """The single most important safety property in the project."""
     before = {path: sha256_file(path) for path in sorted(source.rglob("*")) if path.is_file()}
 
     list(adapter.export(tmp_path / "bundle"))
@@ -491,7 +491,7 @@ def test_import_rewrites_the_working_directory_in_every_record(
 def test_import_leaves_message_content_alone(
     exported: Path, target: ClaudeCodeAdapter, tmp_path: Path
 ) -> None:
-    """Ferry rewrites references, never what anyone said (PLAN.md §3.2)."""
+    """Ferry rewrites references, never what anyone said."""
     list(target.import_(exported, ImportOptions(path_remap=((SAMPLE_CWD, "/home/bob/widget"),))))
 
     records = read_jsonl(
@@ -764,7 +764,7 @@ def test_a_conversation_the_bundle_stored_no_workspace_for_lands_somewhere_and_s
 def test_a_cross_tool_import_records_where_it_came_from(
     target: ClaudeCodeAdapter, tmp_path: Path, manifest
 ) -> None:
-    """PLAN.md §3.2: never present a foreign conversation as native."""
+    """Never present a foreign conversation as native."""
     conversation_id = UUID("dddddddd-0000-4000-8000-000000000009")
     bundle = Bundle.create(tmp_path / "foreign", manifest)
     bundle.add_conversation(
@@ -871,7 +871,7 @@ def test_a_broken_bundle_is_reported_rather_than_raised(
 def test_export_import_export_gives_back_the_same_conversations(
     adapter: ClaudeCodeAdapter, exported: Path, target: ClaudeCodeAdapter, tmp_path: Path
 ) -> None:
-    """The test PLAN.md §6.8.1 asks for: a lossy mapping shows up as a diff here."""
+    """A lossy mapping shows up as a diff here."""
     list(target.import_(exported, ImportOptions()))
 
     list(target.export(tmp_path / "again"))

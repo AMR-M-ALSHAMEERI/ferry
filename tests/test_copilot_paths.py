@@ -1,6 +1,7 @@
 """Locating VS Code's chat stores, and naming its workspace directories.
 
-The key derivation is the part worth testing hardest. It was blocking for M5
+The key derivation is the part worth testing hardest. It was the blocking
+unknown
 for a reason: the digest covers the folder's **creation time** as well as its
 path, so it cannot be guessed, and getting it wrong does not raise -- it names
 a directory that does not exist, and an import would write where VS Code never

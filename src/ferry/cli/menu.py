@@ -1,9 +1,8 @@
 """The interactive flows: scan, top-level menu, and the per-action stubs.
 
-Every action on this menu reaches real behaviour as of M7c.
-The wordmark, the
-scan screen, the theme picker, the slash filter and the non-interactive guard
-are all real, so later milestones fill in behaviour behind a finished interface.
+Every action on this menu reaches real behaviour. The wordmark, the scan
+screen, the theme picker, the slash filter and the non-interactive guard were
+built first, so the behaviour was filled in behind a finished interface.
 """
 
 from __future__ import annotations
@@ -44,14 +43,14 @@ keyed by the same value.
 _MILESTONE_FOR_ACTION: dict[str, str] = {}
 """Actions that genuinely do not exist yet, and when they arrive.
 
-Empty since M7c, when Compact -- the last of them -- was built.
+Empty since Compact -- the last of them -- was built.
 """
 
 _WIRED = frozenset({"export", "import", "inspect", "compact", "remove", "backups"})
 """Actions that reach a real adapter.
 
-These were stubs reporting "arrives at M3" long after M3 and M4 had shipped --
-two working adapters with no way to reach them. :mod:`ferry.cli.flows` is the
+These were stubs reporting "arrives later" long after two adapters had
+shipped, with no way to reach either of them. :mod:`ferry.cli.flows` is the
 wiring; this set is what routes to it.
 """
 

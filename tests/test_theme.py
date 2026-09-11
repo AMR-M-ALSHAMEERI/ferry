@@ -76,7 +76,7 @@ def test_mono_icons_are_pure_ascii() -> None:
 
 
 def test_every_unicode_icon_is_on_the_allow_list() -> None:
-    """Emoji were ruled out (ledger #62), but "is this an emoji?" cannot be
+    """Emoji were ruled out, but "is this an emoji?" cannot be
     computed — the emoji-capable characters are scattered through the BMP.
 
     Regression: the original check was `ord(ch) < 0x1F000`, which passed four

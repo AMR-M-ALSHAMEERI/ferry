@@ -345,7 +345,7 @@ class TestTheRecordOfAConversion:
         assert exported.provenance.original_tool == "codex"
 
     def test_a_built_conversation_says_where_it_came_from(self, tmp_path: Path) -> None:
-        """The field was set on an object and dropped once before (A7b.8), and
+        """The field was set on an object and dropped once before, and
         recorded without the costs once after (#220). Both halves, both times."""
         item = a_conversation(
             source_tool="codex",

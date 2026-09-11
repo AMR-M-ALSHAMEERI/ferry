@@ -5,8 +5,7 @@ for every ``tool_use`` block: *what kind of thing was this, and what was its
 target?* The four tools answer it in four unrelated ways, so the mapping lives
 here as data rather than as branches scattered through the extractor.
 
-Measured from the human's own stores, not assumed (``spikes/probe_tool_inputs.py``
-and ``spikes/probe_targets.py`` -- keys and markers only, no content):
+Measured from real stores, not assumed -- keys and markers only, never content:
 
 ======================  =========================================
 ``claude-code``         ``file_path`` / ``command``, structured
@@ -51,7 +50,7 @@ class Call:
     command: str = ""
     """Empty when the tool records no command line -- a real case, not a
     failure. Antigravity's ``RUN_COMMAND`` stores the shell and the binary name
-    and not the line that was typed; see the M7c spec section 5.3."""
+    and not the line that was typed."""
 
 
 OTHER = Call()

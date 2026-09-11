@@ -138,7 +138,7 @@
     },
     "Provenance": {
       "additionalProperties": false,
-      "description": "Populated by the IMPORTING adapter when target tool != source_tool.\n\nAbsent means the conversation has only ever lived in its source_tool.\nSee PLAN.md \u00a73.2 \"never present a foreign conversation as native\".",
+      "description": "Populated by the IMPORTING adapter when target tool != source_tool.\n\nAbsent means the conversation has only ever lived in its source_tool.\nThe rule it exists for: never present a foreign conversation as native.",
       "properties": {
         "original_tool": {
           "enum": [

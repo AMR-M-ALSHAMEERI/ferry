@@ -351,7 +351,7 @@ def test_a_conversation_from_another_tool_needs_asking_for(  # type: ignore[no-u
 ) -> None:
     """Cross-tool is refused unless it is asked for, exactly as elsewhere.
 
-    Copilot was ``unsupported`` as a target until M7b.2 Phase 2, and the reason
+    Copilot was ``unsupported`` as a target for a long time, and the reason
     was wrong twice on the way (#193, #203). It is supported now because the
     document is built rather than replayed, so what is left to protect is the
     rule that nobody converts anything by accident.
@@ -367,8 +367,8 @@ def test_a_conversation_from_another_tool_needs_asking_for(  # type: ignore[no-u
     assert sum(1 for e in events if e.kind == "progress") == 0
     skipped = [e.message for e in events if e.kind == "skipped"]
     assert any("must be asked for explicitly" in message for message in skipped)
-    # Never a milestone name: "this arrives at M7b" was true until M7b arrived.
-    assert not any("M7b" in message for message in skipped)
+    # Never "this arrives later": that stops being true on the day it arrives.
+    assert not any("arrives" in message for message in skipped)
 
 
 def test_import_reports_a_bundle_it_cannot_open(tmp_path: Path, target) -> None:  # type: ignore[no-untyped-def]
@@ -471,10 +471,10 @@ def test_the_files_a_tool_named_survive_a_round_trip(tmp_path: Path, monkeypatch
 
 
 class TestBuildingADocumentForAForeignConversation:
-    """M7b.2 Phase 2: writing a conversation Copilot never had.
+    """Writing a conversation Copilot never had.
 
-    The shape asserted here is the one VS Code was **measured** to accept
-    (PROGRESS #203, #204): it listed the conversation, took the title out of
+    The shape asserted here is the one VS Code was **measured** to accept:
+    it listed the conversation, took the title out of
     the document rather than the index, and rendered the reply. A real Copilot
     request carries 24 fields including the extension's own manifest, token
     counts and credits. None of that is written, because writing it would mean

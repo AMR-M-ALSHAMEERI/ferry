@@ -3,7 +3,7 @@
 **Real schema, invented content.** The table definitions and field numbers are
 copied from Antigravity 2.8.1 so the tests exercise the shapes the adapter will
 actually meet; every string in them was written for this file and no part of
-any real conversation appears here (PLAN.md section 6.6).
+any real conversation appears here.
 
 The protobuf is assembled by hand rather than by a library, which is the point:
 if the encoder here and the decoder under test shared code, a round-trip test
