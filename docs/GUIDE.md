@@ -433,6 +433,30 @@ ask.
 it failed, or the assistant was not found. `2` when the command could not start
 — a flag was wrong or missing — and nothing was written.
 
+### Letting an AI assistant drive Ferry
+
+Ferry ships a `SKILL.md`: one page that teaches an AI coding assistant when to
+use Ferry and exactly how, including the safety rules above. With it, you can
+ask in plain words - *"move my Claude Code chats to my new laptop"* - and the
+assistant runs the commands, asking you before anything that writes.
+
+```bash
+ferry skill --install
+```
+
+That puts it where Claude Code looks for skills, `~/.claude/skills/ferry/`.
+Start a new Claude Code session and it is there; `/ferry` calls it directly.
+An older or edited copy already there is kept unless you add `--force`, and is
+backed up before it is replaced.
+
+For any other assistant, `ferry skill` prints the file: point the assistant at
+it, or paste it into the chat. The same file is `SKILL.md` at the root of
+Ferry's repository.
+
+Two things the skill tells an assistant never to do: import into the app it is
+running inside while that app is open - it hands you the command to run from
+another terminal instead - and choose a passphrase for you.
+
 When a menu prompt cannot be shown, its error names the flag that answers it.
 Every one of those belongs to `ferry export`, `ferry import` or `ferry
 compact`, except `--into` on the inspect screen, which has no command yet.

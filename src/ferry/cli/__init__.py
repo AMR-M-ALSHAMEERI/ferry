@@ -337,6 +337,52 @@ def import_command(
     )
 
 
+@app.command("skill", cls=FerryCommand)
+def skill_command(
+    install: bool = typer.Option(
+        False,
+        "--install",
+        help="Install it as a Claude Code skill, in ~/.claude/skills/ferry/.",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="With --install: replace a different SKILL.md already there, after backing it up.",
+    ),
+    theme: str | None = typer.Option(
+        None,
+        "--theme",
+        metavar="NAME",
+        callback=_theme_callback,
+        help=_THEME_HELP,
+        rich_help_panel=_APPEARANCE,
+    ),
+    no_color: bool = typer.Option(
+        False, "--no-color", help=_NO_COLOR_HELP, rich_help_panel=_APPEARANCE
+    ),
+) -> None:
+    """Print the SKILL.md that teaches an AI assistant to use Ferry.
+
+    Prints to standard output, so it pipes, or can be pasted into any
+    assistant. --install puts it where Claude Code looks for skills.
+    """
+    from ferry.skill import skill_text
+
+    if force and not install:
+        raise typer.BadParameter("only means something with --install", param_hint="--force")
+    if not install:
+        try:
+            typer.echo(skill_text(), nl=False)
+        except (BrokenPipeError, OSError):
+            # `ferry skill | head` closes the pipe early; that is not an error.
+            return
+        return
+
+    from ferry.cli.commands import install_skill
+
+    raise typer.Exit(install_skill(_command_ui(theme, no_color), force=force))
+
+
 @app.command("compact", cls=FerryCommand)
 def compact_command(
     bundle: str = typer.Argument(

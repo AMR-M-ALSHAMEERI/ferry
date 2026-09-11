@@ -46,7 +46,16 @@ from ferry.core.crypto import WrongPassphrase
 from ferry.core.sealed import SEALED_SUFFIX, is_sealed, unsealed
 from ferry.ucs import Conversation
 
-__all__ = ["FAILED", "OK", "PASSPHRASE_ENV", "REFUSED", "export_bundle", "import_bundle"]
+__all__ = [
+    "FAILED",
+    "OK",
+    "PASSPHRASE_ENV",
+    "REFUSED",
+    "export_bundle",
+    "import_bundle",
+    "install_skill",
+    "skill_path",
+]
 
 OK: Final = 0
 
@@ -407,7 +416,7 @@ def _import_into(ui: UI, adapter: Adapter, root: Path, options: ImportOptions) -
     missing = sorted(options.only - held)
     if missing:
         ui.error(f"Not in this bundle: {', '.join(missing)}")
-        ui.info("Run `ferry inspect` on it to see the conversations it holds.")
+        ui.info("`ferry compact` on the bundle, with no --conversation, lists the ids it holds.")
         return REFUSED
 
     tools = ", ".join(opened.manifest.tools_included) or "nothing"
@@ -434,3 +443,61 @@ def _import_into(ui: UI, adapter: Adapter, root: Path, options: ImportOptions) -
         total=len(options.only) if options.only else len(held),
     )
     return FAILED if kinds["error"] else OK
+
+
+def skill_path() -> Path:
+    """Where Claude Code looks for Ferry's skill.
+
+    Claude Code's documentation names ``~/.claude/skills/<name>/SKILL.md`` for
+    a person's own skills, and says nothing about ``CLAUDE_CONFIG_DIR``. This
+    uses the same Claude Code home the adapter reads conversations from, which
+    is ``~/.claude`` unless that variable moves it - one answer to "where is
+    Claude Code?" across Ferry, and the one the tests already isolate.
+    """
+    from ferry.adapters.claude_code.paths import config_root
+    from ferry.skill import SKILL_NAME
+
+    return config_root() / "skills" / SKILL_NAME / "SKILL.md"
+
+
+def install_skill(ui: UI, *, force: bool = False) -> int:
+    """Put ``SKILL.md`` where Claude Code looks for skills. Returns an exit code.
+
+    A copy that already matches is left alone and reported. A different one -
+    an older Ferry's, or the person's own edits - is refused without
+    ``--force``, and backed up before it is replaced with it.
+    """
+    from ferry.core.backup import back_up
+    from ferry.skill import skill_text
+
+    text = skill_text()
+    target = skill_path()
+    if target.is_file():
+        try:
+            current = target.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            ui.error(f"could not read {target}: {exc}")
+            return FAILED
+        if current == text:
+            ui.success(f"Already installed and up to date: {target}")
+            return OK
+        if not force:
+            ui.error(f"There is already a different SKILL.md at {target}.")
+            ui.info("Pass --force to replace it. The one there now is backed up first.")
+            return REFUSED
+        try:
+            saved = back_up(target, "claude-code")
+        except OSError as exc:
+            ui.error(f"could not back it up, so it was left as it is: {exc}")
+            return FAILED
+        ui.detail(f"The previous one was saved to {saved}")
+
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8", newline="\n")
+    except OSError as exc:
+        ui.error(f"could not write {target}: {exc}")
+        return FAILED
+    ui.success(f"Installed for Claude Code: {target}")
+    ui.info("Claude Code finds it in a new session. Typing /ferry there calls it directly.")
+    return OK
