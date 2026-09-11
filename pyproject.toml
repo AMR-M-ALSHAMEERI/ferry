@@ -5,11 +5,39 @@ build-backend = "hatchling.build"
 [project]
 name = "ferry-cli"
 version = "0.1.0"
-description = "Back up and migrate your local AI assistant conversation history across Claude Code, OpenAI Codex, GitHub Copilot Chat, and Google Antigravity IDE."
+description = "Back up, restore and move your AI coding assistant conversations across Claude Code, OpenAI Codex, GitHub Copilot Chat and Google Antigravity."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
 authors = [{ name = "Ferry contributors" }]
+keywords = [
+    "claude-code",
+    "codex",
+    "copilot",
+    "antigravity",
+    "backup",
+    "migration",
+    "conversations",
+    "cli",
+]
+# Read by the PyPI page and by the Python-versions badge in the README. No
+# licence classifier: `license` above is an SPDX expression, and the packaging
+# standard forbids stating it twice.
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Utilities",
+]
 
 dependencies = [
     "typer>=0.12",
@@ -32,6 +60,12 @@ dependencies = [
     # Ferry implements no cryptography of its own beyond framing.
     "cryptography>=42",
 ]
+
+[project.urls]
+Homepage = "https://github.com/AMR-M-ALSHAMEERI/ferry"
+Documentation = "https://github.com/AMR-M-ALSHAMEERI/ferry/blob/main/docs/GUIDE.md"
+Issues = "https://github.com/AMR-M-ALSHAMEERI/ferry/issues"
+Changelog = "https://github.com/AMR-M-ALSHAMEERI/ferry/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 dev = [

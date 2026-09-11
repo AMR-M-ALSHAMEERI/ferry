@@ -1,331 +1,344 @@
 # Architecture
 
-Ferry has three layers with hard boundaries. Each is testable in isolation, and
-each can be replaced without touching the others.
+Ferry has three layers with firm boundaries between them. Each can be tested on
+its own, and each can be replaced without touching the others.
 
-```
+```text
 ┌─────────────────────────────────────────────────────────┐
-│  CLI layer (interactive prompts, menus, progress bars)  │
-│  - typer (commands) + questionary (prompts)             │
-│  - Knows about: user flow. Nothing about storage.       │
+│  CLI layer: the menu, the commands, the screens         │
+│    typer for commands, prompt_toolkit and rich          │
+│    Knows about the person. Nothing about storage.       │
 └─────────────────────────────────────────────────────────┘
                           │
 ┌─────────────────────────────────────────────────────────┐
-│  Core layer (orchestration, bundle format, registry)    │
-│  - Universal Conversation Schema (UCS)                  │
-│  - Bundle packing/unpacking (zip + manifest)            │
-│  - Adapter registry, conflict resolution, dry-run       │
+│  Core layer: bundles, the schema, backups, records      │
+│    The Universal Conversation Schema (UCS)              │
+│    Bundles, sealing, backups, provenance                │
 └─────────────────────────────────────────────────────────┘
                           │
 ┌─────────────────────────────────────────────────────────┐
-│  Adapter layer (per-tool I/O)                           │
-│  - One adapter per tool: detect(), export(), import_()  │
-│  - Knows about: that tool's files. Nothing else.        │
+│  Adapter layer: one adapter per tool                    │
+│    detect(), export(), import_(), and taking back       │
+│    Knows about that tool's files. Nothing else.         │
 └─────────────────────────────────────────────────────────┘
 ```
 
-**Why it matters:** the CLI can become a GUI without touching core. An adapter
-can be rewritten without touching other adapters. New tools drop in as new
-adapters.
+**Why it matters:** the interface could become a graphical one without touching
+the core, an adapter can be rewritten without touching the others, and a new
+tool arrives as a new adapter.
 
 ## The Universal Conversation Schema (UCS)
 
-Every adapter exports to UCS and imports from UCS. It is the contract that
-decouples adapters from each other.
+Every adapter exports to UCS and imports from it. It is the contract that keeps
+the adapters independent of each other.
 
 - Models: `src/ferry/ucs/models.py`
 - Generated JSON schema: `schemas/ucs-<version>.json`
-- Regenerate after model changes: `python scripts/gen_schema.py`
+- After changing the models: `python scripts/gen_schema.py`
 
-`tests/test_schema_current.py` fails if the checked-in schema drifts from the
-models, so the two cannot silently diverge.
+`tests/test_schema_current.py` fails if the checked-in schema no longer matches
+the models, so the two cannot quietly drift apart.
 
 ### Current version: 1.3
 
 | Version | Change |
 |---|---|
-| 1.0 | Initial schema |
-| 1.1 | Added the `thinking` content block (with optional `signature`) |
-| 1.2 | Added the optional `provenance` block for cross-tool migration |
+| 1.0 | The first schema |
+| 1.1 | Added the `thinking` content block, with an optional `signature` |
+| 1.2 | Added the optional `provenance` block, for conversions between tools |
 | 1.3 | Added the `image` content block; `tool_use` gained an optional `id` |
 
-**1.2 bundles cannot be read by 1.3, and no converter is provided.** 1.2 was
-never released, so there is no bundle anywhere that needs one.
+**Version 1.3 cannot read 1.2 bundles, and there is no converter.** Version 1.2
+was never released, so no bundle anywhere needs one.
 
-**Schema rules that matter when writing an adapter:**
+**Rules that matter when writing an adapter:**
 
-- **Additive only.** Adding fields is fine; removing or renaming one means a
-  version bump. **A new member of a content-block union is not additive** — the
-  models reject unknown `type` values outright, so a reader built for the older
-  version refuses the document rather than ignoring the block. That is what
-  1.3 was for.
-- **An image block holds no bytes.** It carries an `attachment_id` pointing at
-  an entry in `attachments[]`, where the file is stored and checksummed. Tools
-  keep images inline as base64; re-embedding them in UCS would drag megabytes
-  of encoded pixels through every read, diff and round-trip. The block exists
-  to record *where in the conversation* the picture was, which is the one thing
-  an attachment list cannot say.
-- **Never fabricate data.** If the source tool did not store a timestamp, the
-  UCS field is `null` — not `now()`, not `"unknown"`.
-- **`source_raw` is the escape hatch** for lossless same-tool round trips.
-- **Never present a foreign conversation as native.** If an adapter writes a
-  conversation whose `source_tool` differs from the tool being written into, it
-  must populate `provenance` and list every lossy conversion in
-  `conversion_notes`.
+- **Only ever add.** Adding a field is fine. Removing or renaming one needs a
+  new version. **A new kind of content block is not an addition,** because the
+  models reject a `type` they do not know, so a reader built for the older
+  version refuses the whole document rather than skipping the block. That is
+  what version 1.3 was for.
+- **An image block holds no image.** It carries an `attachment_id` pointing to
+  an entry in `attachments[]`, where the file is stored and checksummed. The
+  tools keep images inline as base64, and copying them into UCS would drag
+  megabytes of encoded pixels through every read and comparison. The block
+  exists to record *where in the conversation* the picture was, which an
+  attachment list alone cannot say.
+- **Never make data up.** If the source tool did not store a timestamp, the UCS
+  field is `null`, not `now()` and not `"unknown"`.
+- **`source_raw` is the way out** when UCS cannot hold something, and it is
+  what makes restoring into the same tool exact.
+- **Never pass a foreign conversation off as native.** An adapter writing a
+  conversation whose `source_tool` differs from its own tool must fill in
+  `provenance` and list everything lost in `conversion_notes`.
 
-All models use `extra="forbid"`, so an adapter typo fails loudly at validation
-rather than silently dropping a field.
+All models use `extra="forbid"`, so a typo in an adapter fails loudly when the
+document is checked, instead of silently dropping a field.
 
 ### Content blocks
 
-Four discriminated types, keyed on `type`:
+Five types, told apart by `type`:
 
 | Block | Carries |
 |---|---|
-| `text` | plain message text |
-| `thinking` | reasoning text, plus an optional vendor `signature` |
-| `tool_use` | tool `name` and `input` |
-| `tool_result` | `tool_use_id` and `output` |
+| `text` | Plain message text |
+| `thinking` | Reasoning text, and optionally the vendor's `signature` |
+| `tool_use` | The tool's `name` and `input`, and optionally an `id` |
+| `tool_result` | The `tool_use_id` it answers, and the `output` |
+| `image` | An `attachment_id` naming the file in `attachments[]` |
 
-An unknown block type is rejected rather than accepted and ignored — a tool
-emitting something UCS cannot represent is a problem to surface, not swallow.
+An unknown block type is rejected rather than accepted and ignored. A tool
+producing something UCS cannot represent is a problem to show, not to hide.
 
 ## Bundles
 
-A bundle is a directory while being built and a zip once packed:
+A bundle is a folder:
 
-```
+```text
 manifest.json
 conversations/<uuid>.json
 attachments/<conversation-uuid>/<attachment-uuid>.<ext>
-source_raw/<uuid>.bin          # optional
+source_raw/<uuid>.bin          optional
 ```
 
-Implementation: `src/ferry/core/bundle.py`, `src/ferry/core/manifest.py`.
+Sealing packs that folder into a zip and encrypts it.
 
-**Safety properties built into the Bundle class:**
+The code is in `src/ferry/core/bundle.py` and `src/ferry/core/manifest.py`.
 
-- **Atomic writes.** Every write goes to `.tmp`, is fsynced, then renamed — a
-  crash or full disk cannot leave a half-written file in place.
-- **Refuses to overwrite** an existing archive without `force=True`.
-- **Attachment checksums are verified on write**, not just recorded, so a
-  truncated copy is caught immediately.
-- **Zip extraction rejects path traversal.** Entries resolving outside the
-  destination are refused, so a malicious bundle cannot write elsewhere on disk.
-- **`validate()` returns a list of problems rather than raising** on the first
-  one, so the CLI can show every fault in a bundle at once.
-- **`has_conversation()`** lets an adapter skip already-written files when
-  resuming an interrupted export.
+**Safety built into the `Bundle` class:**
+
+- **Writes are atomic.** Every file is written to a temporary name, flushed to
+  disk, then renamed into place, so a crash or a full disk cannot leave half a
+  file behind.
+- **An existing archive is never overwritten** without `force=True`.
+- **Attachment checksums are checked as they are written,** not only recorded,
+  so a truncated copy is caught at once.
+- **Unzipping refuses to escape the destination.** An entry that would land
+  outside it is refused, so a malicious bundle cannot write elsewhere on disk.
+- **`validate()` returns a list of problems** rather than stopping at the first
+  one, so the interface can show every fault in a bundle at once.
+- **`has_conversation()`** lets an adapter skip what is already written when an
+  interrupted export runs again.
 
 ### Looking inside a bundle, and deleting from it
 
 `ferry.core.summary.summarise()` describes a bundle without importing it: what
-each conversation is, when it happened, how much of the bundle it accounts for,
-and **which folders the conversations were recorded in** — the list the import
-screen cannot afford to compute, since answering it means opening every
-conversation file and one Codex conversation is 53 MB.
+each conversation is, when it happened, how much of the bundle it takes up, and
+**which folders the conversations were recorded in**. The import screen cannot
+afford to work that last one out, because it means opening every conversation
+file, and one Codex conversation can be 53 MB.
 
-It reads with `json.loads`, deliberately **not** through the UCS models. A
-53 MB conversation validated through pydantic builds tens of thousands of
-objects to answer six questions, and a conversation that *fails* validation
-still has to appear in the list — a bundle you cannot read is precisely the one
-you need to look at, and possibly the one you want to delete.
+It reads with `json.loads` and deliberately does **not** go through the UCS
+models. Checking a 53 MB conversation through pydantic builds tens of thousands
+of objects to answer six questions, and a conversation that *fails* checking
+still has to appear in the list. A bundle you cannot read is exactly the one
+you need to look at, and perhaps the one you want to delete.
 
 **A count here is a count of the bundle, not of the tool.** A Codex bundle
-holding five conversations and one subagent thread reports six, because six
-conversation documents is what it holds. The scan screen reports what the
-application lists; this screen reports what the file contains. Both are true
-and they are answers to different questions.
+holding five conversations and one subagent reports six, because it holds six
+conversation documents. The scan screen reports what the application lists;
+this screen reports what the file holds. Both are true, and they answer
+different questions.
 
 **Deleting** (`Bundle.delete_conversation`, `delete_bundle`) is the only thing
-Ferry does after which the data is simply gone — every other write leaves the
-source tool holding the original. Three properties follow:
+Ferry does after which data is simply gone, because every other write leaves
+the source tool holding the original. Three things follow:
 
-- **A conversation is not one file.** The document, `attachments/<uuid>/`,
-  `source_raw/<uuid>.bin` and its sidecars go together, and the manifest count
-  and `tools_included` move with them. Removing the document alone leaves a
-  bundle that still validates while carrying orphaned megabytes — for an
-  Antigravity conversation, the original database, which is most of its size.
-- **A copy is kept first when deleting one conversation**, and a failed backup
-  aborts the delete rather than being skipped. Deleting a *whole* bundle
-  defaults the other way: a bundle is routinely gigabytes, and copying one in
-  order to delete it is a rename the user did not ask for.
-- **`delete_bundle` refuses any directory without a `manifest.json`.** It is
-  the only place Ferry removes a tree it did not create, and that check is what
+- **A conversation is more than one file.** The document,
+  `attachments/<uuid>/`, `source_raw/<uuid>.bin` and its companions go
+  together, and the manifest's count and `tools_included` move with them.
+  Removing the document alone would leave a bundle that still checks out while
+  carrying orphaned megabytes: for an Antigravity conversation, the original
+  database, which is most of its size.
+- **A copy is kept first when one conversation is deleted,** and if the copy
+  fails, the delete stops rather than going ahead. Deleting a *whole* bundle
+  works the other way: a bundle can be gigabytes, and copying one in order to
+  delete it would be a move nobody asked for.
+- **`delete_bundle` refuses any folder without a `manifest.json`.** It is the
+  only place Ferry removes a folder it did not create, and that check is what
   stands between a mistyped path and someone's Documents folder.
 
 ### Sealed bundles
 
-A **sealed bundle** is a single `.ferry` file: the packed bundle, encrypted
-whole with AES-256-GCM under a key derived from a passphrase by scrypt.
-Nothing about it is readable without that passphrase — not the conversation
-count, not which tools it came from, not the date it was made.
+A **sealed bundle** is a single `.ferry` file: the packed bundle, encrypted as
+a whole with AES-256-GCM under a key made from a passphrase with scrypt.
+Nothing about it can be read without that passphrase, not the number of
+conversations, not which tools they came from, not when it was made.
 
-Implementation: `src/ferry/core/crypto.py` (framing) and
-`src/ferry/core/sealed.py` (what gets sealed, and when).
+The code is in `src/ferry/core/crypto.py` (the framing) and
+`src/ferry/core/sealed.py` (what is sealed, and when).
 
-**Why sealing rather than encrypting each file as it is written.** Encrypting
-in place would mean every read and write path learning about keys: four
-adapters, `validate()`, `inspect`, the attachment checksums. Nine places, all
-of them recently stabilised, and a mistake in any of them is *silent* — files
-that look encrypted and can never be opened again. Sealing puts encryption in
-one auditable place that either works or visibly does not.
+**Why seal the whole bundle rather than encrypt each file.** Encrypting each
+file as it was written would mean every read and write path learning about
+keys: four adapters, `validate()`, the inspect screen, the attachment
+checksums. A mistake in any of them would be *silent*, leaving files that look
+encrypted and can never be opened. Sealing puts encryption in one place that
+can be checked, and that either works or visibly does not.
 
-**What that costs, and it is stated in the UI too.** The unencrypted bundle
+**What that costs, which the interface also says.** The unencrypted bundle
 exists on disk while it is being made, and again under `~/.ferry/open` while
-Ferry reads a sealed one. Both are deleted. On most filesystems the blocks are
-not overwritten, so a forensic tool could recover them until that space is
-reused. **Sealing protects a bundle you carry or store; it does not protect
-the machine that made it.**
+Ferry reads a sealed one. Both are deleted afterwards, but on most disks the
+data is not overwritten, so a recovery tool could find it until the space is
+reused. **Sealing protects a bundle you carry or store. It does not protect the
+machine that made it.**
 
-**The framing, because AES-GCM alone does not give these:**
+**The framing adds what AES-GCM alone does not:**
 
 - **A frame cannot be moved.** Its number is part of its nonce.
 - **The end is authenticated.** Each 1 MiB frame says whether it is the last,
   and that flag is covered by the tag. Without it, cutting a file *between*
-  frames leaves every remaining frame intact and decryption simply stops at
-  EOF — handing back two thirds of a conversation as though it were whole.
-- **A failure leaves nothing.** Output is renamed into place only once the
-  last frame authenticates. Half a plaintext is worse than none, because it
-  reads as content.
+  frames would leave every remaining frame intact, and decryption would stop at
+  the end of the file and hand back two thirds of a conversation as though it
+  were complete.
+- **A failure leaves nothing.** The output is renamed into place only once the
+  last frame is authenticated. Half a decrypted file is worse than none,
+  because it reads as real content.
 
-**Operational rules the flow enforces:**
+**Rules the interface enforces:**
 
-- The passphrase is asked twice. There is no recovery.
+- The passphrase is asked for twice. There is no recovery.
 - The sealed file is opened again with the same passphrase **before** the
-  unencrypted bundle can be deleted, and deleting it is a separate question.
-- Changing a sealed bundle is offered two ways, because unseal-edit-reseal is
-  three chances to lose the only copy and that is an argument for care, not for
-  refusing. **Unsealing to a folder** writes the bundle out and leaves the
-  `.ferry` file alone — nothing existing is rewritten. **Delete-and-reseal**
-  writes the new file *beside* the old one, reopens it with the same passphrase
-  to prove it is readable, and only then renames it into place; a crash before
-  that rename leaves the previous file untouched.
-- The passphrase a bundle was opened with is what it is sealed again with.
-  A different one would keep the filename and quietly stop opening the way it
-  did yesterday.
-- Ferry never stores a passphrase, and never puts one in a log or an error.
+  unencrypted bundle can be deleted, and deleting it is asked separately.
+- A sealed bundle can be changed in two ways. **Unsealing to a folder** writes
+  the bundle out and leaves the `.ferry` file alone. **Deleting and sealing
+  again** writes the new file *beside* the old one, opens it again with the same
+  passphrase to prove it can be read, and only then renames it into place, so a
+  crash before that leaves the previous file untouched.
+- A bundle is sealed again with the passphrase it was opened with. A different
+  one would keep the file name and quietly stop opening the way it did
+  yesterday.
+- Ferry never stores a passphrase, and never writes one into a log or an error.
 
 Measured on the reference machine: a 36.2 MB Antigravity bundle seals to
-11.7 MB in 1.8 s and opens in 1.8 s; key derivation is 0.26 s, once per bundle.
+11.7 MB in 1.8 seconds and opens in 1.8 seconds. Turning the passphrase into a
+key takes 0.26 seconds, once per bundle.
 
-## Adapter contract
+## Adapters
 
-Every adapter implements three methods (see PLAN.md §4 for the full signature):
+Every adapter implements the contract described in
+[ADAPTERS.md](ADAPTERS.md):
 
-- `detect()` — never raises; reports `installed`, `version`, `data_paths`,
-  a conversation count estimate, and human-readable notes
-- `export(dest_bundle_dir)` — yields `ExportEvent`s; must be resumable
-- `import_(bundle_dir, options)` — yields `ImportEvent`s; backs up by default
+- `detect()` never raises, and reports whether the tool is installed, its
+  version, where its data is, how many conversations it has, and notes for the
+  person.
+- `export(dest_bundle_dir)` yields `ExportEvent`s and must be resumable.
+- `import_(bundle_dir, options)` yields `ImportEvent`s and backs up by default.
+- A set of optional methods describes how to take back what an import wrote.
 
-`import_()` reads UCS files from a bundle. It has never required that those
-files came from its own tool — which is what makes cross-tool migration
-possible without new import machinery.
+The four real adapters are registered in `ferry/adapters/__init__.py`.
+
+`import_()` reads UCS files from a bundle, and it has never required that those
+files came from its own tool. That is what makes moving between tools possible
+without new import machinery.
 
 ### `ImportOptions`, and holding every adapter to them
 
 | Option | Meaning |
 |---|---|
 | `backup` | Copy anything about to be overwritten into `~/.ferry/backups` first. On by default. |
-| `dry_run` | Report what would happen. **Write nothing.** |
-| `on_conflict` | `skip` (default), `rename`, or `overwrite`. |
-| `path_remap` | `(old_prefix, new_prefix)` pairs, applied in order, first match wins. |
-| `allow_cross_tool` | Permit a conversation from a different tool. Off by default. |
+| `dry_run` | Report what would happen, and **write nothing**. |
+| `on_conflict` | `skip` (the default), `rename` or `overwrite`. |
+| `path_remap` | `(old_prefix, new_prefix)` pairs, tried in order; the first match wins. |
+| `allow_cross_tool` | Allow a conversation from a different tool. Off by default. |
+| `mode` | `archive` (the default) or `continue`, for a conversation crossing tools. |
+| `only` | Conversation ids to import. Empty means all of them. |
+| `trust_folders` | Let the target open the folders written into, where it needs telling. Off by default; only the menu turns it on, and only when the person agrees. |
 
-Every adapter was tested against these in its own test file — except Copilot,
-whose import ignored the options object entirely for two milestones. **A dry
-run into Copilot Chat would have written**: a row into VS Code's chat index and
-a transcript file. Nothing caught it, because the CLI passed the defaults and
-never set `dry_run`, so the option was only reachable from tests nobody had
-written.
+Every adapter was tested against these in its own test file, except Copilot,
+whose import ignored the options entirely for two milestones. **A dry run into
+Copilot Chat would have written** a row into VS Code's chat index and a
+transcript file. Nothing caught it, because the interface passed the defaults
+and never set `dry_run`, so the option could only be reached from tests nobody
+had written.
 
 `tests/test_import_contract.py` now asks all four adapters the same questions,
-so a fifth adapter inherits the whole contract by being added to `BUILDERS`.
+so a fifth adapter inherits the whole contract just by being added to
+`BUILDERS`.
 
 ### What `rename` means
 
-All four tools identify a conversation by its id **and put that id in the
-filename**. Writing `<uuid>-1.jsonl` that still says `sessionId: <uuid>` inside
-produces a session contradicting itself — and, in Claude Code, one sharing its
-spilled tool output with the file it was trying not to overwrite.
+All four tools identify a conversation by its id **and put that id in the file
+name**. Writing `<uuid>-1.jsonl` while the file still says `sessionId: <uuid>`
+inside produces a conversation that contradicts itself, and in Claude Code one
+that shares its stored tool output with the very file it was trying not to
+overwrite.
 
-So `rename` imports a **new identity**: a fresh id carried into the filename,
-the records, and anything keyed on it. Antigravity refuses instead, with a
-reason — its id is written through protobuf blobs Ferry has no schema to
-re-identify, and a half-re-identified database is worse than no copy.
+So `rename` imports a **new identity**: a fresh id in the file name, in the
+records, and in anything keyed on it. Antigravity refuses instead, and says
+why: its id is written through encoded records Ferry cannot safely re-identify,
+and half a re-identified database is worse than no copy at all.
 
 ### Backups
 
-`ferry.core.backup` writes one directory per Ferry run —
-`~/.ferry/backups/<timestamp>/<tool>/` — with a `manifest.jsonl` recording each
-file's original path. Each adapter previously had its own copy of this helper,
-computing the timestamp per file (so an import crossing a second boundary split
-across directories) and recording nothing about where the file came from, which
-made the copies useless for the one thing a backup is for. Antigravity wrote
-its `.bak` *beside the original*, inside the store Antigravity itself reads.
+`ferry.core.backup` writes one folder per Ferry run,
+`~/.ferry/backups/<timestamp>/<tool>/`, with a `manifest.jsonl` recording each
+file's original path. Each adapter used to have its own version of this, which
+worked out the timestamp per file, so an import crossing a second boundary was
+split across folders, and recorded nothing about where a file came from, which
+made the copies useless for the one thing a backup is for.
 
-Nothing prunes backups. A tool that quietly deletes copies it made of someone's
-conversation history has misunderstood its job.
+Ferry never deletes backups on its own. The person removes them from *Clean up
+backups*.
 
 ## Layout
 
-```
+```text
 src/ferry/
-├── cli/          typer app, interactive menus
-├── core/         bundle, manifest, orchestration
-├── ucs/          pydantic schema models
-├── adapters/     one subpackage per tool
+├── cli/          the menu, commands, screens and themes
+├── core/         bundles, sealing, backups, provenance
+├── ucs/          the schema models
+├── adapters/     one package per tool, plus taking back an import
 ├── compact/      turning a conversation into a document, offline
-└── config.py     settings storage
-scripts/          maintained tooling (schema generation, self-checks)
-schemas/          generated JSON schema, checked in
+├── skill/        SKILL.md, shipped inside the package
+└── config.py     saved settings
+scripts/          schema generation, the logo, the self-checks
+schemas/          the generated JSON schema, checked in
 ```
 
-## The CLI layer (M2)
+## The CLI layer
 
-The interface is deliberately interactive-first: running bare `ferry` scans for
-installed assistants and drops into a menu, rather than requiring the user to
-know command names. Flags exist underneath for scripting and for the planned
-VS Code extension, but they are the secondary path.
+Running `ferry` on its own scans for assistants and opens a menu, so nobody
+needs to learn command names first. Underneath, the same work is available as
+commands for scripts and for AI assistants: `ferry tools`, `ferry export`,
+`ferry import`, `ferry remove`, `ferry compact` and `ferry skill`.
 
-```
-ferry.cli.__init__   typer app, flags, non-TTY guard
-ferry.cli.menu       scan screen + top-level menu loop
-ferry.cli.ui         THE presentation layer — all output and prompts
-ferry.cli.theme      palettes, icon sets, capability detection
-ferry.adapters.base  Adapter ABC, events, registry
+```text
+ferry.cli.__init__    the typer app, commands and flags
+ferry.cli.commands    export, import and remove, without the menu
+ferry.cli.menu        the scan screen and the menu
+ferry.cli.flows       the screens behind each menu item
+ferry.cli.ui          THE presentation layer: all output and prompts
+ferry.cli.helpstyle   Ferry's theme and wordmark on --help
+ferry.cli.theme       palettes, symbol sets, terminal detection
 ```
 
 ### Everything on screen goes through `ferry.cli.ui`
 
-No module outside `ferry.cli` may import `rich` or `questionary` directly. The
-moment an adapter prints its own coloured output, half the interface stops
-respecting the active theme and the degradation rules below silently stop
-applying. `UI` is the only sanctioned way to write to the terminal.
+No module outside `ferry.cli` may import `rich` or `prompt_toolkit` directly.
+The moment an adapter printed its own coloured output, half the interface would
+stop following the active theme, and the fallbacks below would quietly stop
+applying. `UI` is the only way to write to the terminal.
 
-### Themes and degradation
+It also escapes everything it prints. `rich` reads square brackets as
+formatting, and the plain text symbols are square brackets, so without that
+`[ok]` and `[i]` would vanish from piped output.
 
-Four themes ship: `harbor` (default), `compass`, `classic`, and `mono`.
-Selection order is `--theme` → `FERRY_THEME` → `harbor`. An unrecognised name
-falls back to the default rather than raising — a typo should never block
-someone migrating their history.
+### Themes and fallbacks
 
-Two independent capability checks then constrain the result:
+Four themes ship: `harbor` (the default), `compass`, `classic` and `mono`. The
+theme is chosen from `--theme`, then `FERRY_THEME`, then the saved choice, then
+`harbor`. An unknown name falls back to the default rather than stopping Ferry,
+because a typo should never block someone moving their history.
+
+Two independent checks then limit the result:
 
 | Condition | Effect |
 |---|---|
-| Not a TTY, `NO_COLOR`, or `TERM=dumb` | Whole theme drops to `mono` |
-| Stream encoding cannot represent the glyphs | Icons drop to ASCII, **colours kept** |
+| Not a terminal, `NO_COLOR` set, or `TERM=dumb` | The whole theme drops to `mono` |
+| The output's encoding cannot show the symbols | Symbols drop to plain text, **colours kept** |
 
-The second check is a crash guard, not a cosmetic one. Windows consoles
-routinely report `cp1252`, which has no mapping for `✔` — printing one there
-raises `UnicodeEncodeError` and takes the process down. `supports_unicode()`
-probes the stream's encoding with the full glyph set and downgrades the icons
-alone, so a Windows user still gets a coloured interface.
-
-### Adapters at M2
-
-`ferry.adapters.base` defines the contract from PLAN.md §4. All four adapters
-are `NotImplementedAdapter` stubs that report `installed=False` with the
-milestone they arrive at. They deliberately do **not** invent conversation
-counts — the scan screen tells the truth about what exists today.
+The second check prevents a crash, not just an ugly screen. Windows consoles
+often use `cp1252`, which cannot encode `✓`, and printing one there raises
+`UnicodeEncodeError` and stops the program. `supports_unicode()` tries the full
+symbol set against the output's encoding and swaps only the symbols, so a
+Windows user still gets a coloured interface.

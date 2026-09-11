@@ -1,151 +1,176 @@
-# Ferry
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/AMR-M-ALSHAMEERI/ferry/main/docs/assets/ferry-logo-dark.svg">
+    <img src="https://raw.githubusercontent.com/AMR-M-ALSHAMEERI/ferry/main/docs/assets/ferry-logo-light.svg" alt="Ferry: carry your conversations across" width="440">
+  </picture>
+</p>
 
-Back up and migrate your local AI assistant conversation history — export to a
-portable bundle, re-import on a new machine, or carry it across to a different
-assistant entirely — across **Claude Code**, **OpenAI Codex**,
-**GitHub Copilot Chat**, and **Google Antigravity IDE**.
+<p align="center">
+  <a href="https://github.com/AMR-M-ALSHAMEERI/ferry/actions/workflows/ci.yml"><img src="https://github.com/AMR-M-ALSHAMEERI/ferry/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://pypi.org/project/ferry-cli/"><img src="https://img.shields.io/pypi/v/ferry-cli" alt="PyPI version"></a>
+  <a href="https://pypi.org/project/ferry-cli/"><img src="https://img.shields.io/pypi/pyversions/ferry-cli" alt="Python versions"></a>
+  <a href="https://github.com/AMR-M-ALSHAMEERI/ferry/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey" alt="Platforms: Windows, macOS, Linux">
+</p>
 
-**Status:** pre-release, actively under construction. Not yet published to PyPI.
+<p align="center">
+  Works with Claude Code, OpenAI Codex, GitHub Copilot Chat and Google Antigravity.
+</p>
 
-## Cross-tool migration
-
-Ferry's Universal Conversation Schema is designed so a conversation is not
-locked to the tool that created it. **All four tools are targets** — Claude
-Code, GitHub Copilot Chat, OpenAI Codex and Google Antigravity. A conversation
-from any of them is written into any of them with every message and every word
-intact, listed where that tool lists its own conversations, and openable from
-the same place.
-
-Every one of those four was refused at some point, and every refusal turned out
-to describe a gap in the measurement rather than in the tool. The last one,
-Antigravity, was recorded as impossible because a conversation is stored as
-protobuf inside SQLite; what actually stood in the way was a second index the
-app reads and nothing had noticed.
-
-Conversion is **off by default**. When a bundle holds conversations from
-another tool, Ferry counts what converting them would cost — signatures that
-cannot be reissued, tool calls that become text — and asks, with the option
-that converts nothing under the cursor. The result is marked as converted in
-its `provenance` record rather than passed off as native.
-
-**You can open a migrated conversation and keep working in it.** That was not
-true when this was first written, and it was tested rather than assumed:
-someone typed into a converted conversation in each of the three targets and
-the assistant replied, reading the history it had been given.
-
-What does not come with it is the *session* — the tool calls in a converted
-conversation were made by a different assistant against a different set of
-tools, and they are carried as readable text, not as calls the new tool can
-re-run. If you want a short handoff to paste into a fresh session instead of
-the whole history, **Compact** still does that better.
-
-See [docs/CROSS-TOOL.md](docs/CROSS-TOOL.md) for the full table and what each
-conversion costs.
-
-## What Ferry does NOT do
-
-Importing history makes conversations *visible and browsable* in the target
-tool again, exactly as if you'd never switched machines. It does **not** make
-the AI automatically "remember" the thread — no current tool re-loads full
-conversation history into context on a new message. Ferry's optional
-**Compact** feature is the workaround: it turns a conversation into a document
-you can paste as the first message in a new session.
-
-Compact runs **entirely on your machine**. There is no API key, no account, no
-cost, and no model — it works offline, and it adds nothing to Ferry's install.
-It also invents nothing: every line of what it produces is either quoted from
-your conversation word for word or counted from it. What it gives up in
-exchange is narrative. It can quote you the three facts; it cannot write the
-sentence that joins them.
-
-This applies to cross-tool migration too. A migrated conversation can be
-continued — the assistant reads the transcript it was given and answers from
-it — but nothing re-loads a whole history into a model's context on your
-behalf, in any tool, converted or not.
+Ferry backs up the conversation history your AI coding assistants keep on your
+computer, and puts it back: on the same machine, on a new one, or in a
+different assistant altogether. It runs entirely on your machine and never
+changes the history it reads from.
 
 ## Install
+
+Ferry needs Python 3.11 or newer.
 
 ```bash
 pip install ferry-cli
 ```
 
-(Not yet published — this will work once v0.1.0 ships.)
-
-## Quickstart
+No Python? [uv](https://docs.astral.sh/uv/) installs Ferry together with a
+Python of its own, without touching the rest of your system:
 
 ```bash
-ferry            # launch the interactive menu
-ferry --version  # print the installed version
+uv tool install ferry-cli
 ```
 
-Arrow keys move, Enter chooses, Escape backs out of any screen without doing
-anything. Ferry finds your assistants, and everything else is two steps:
-**export to a bundle**, then **import from it** — on this machine, another
-machine, or into a different assistant.
+Either way, the command you run is `ferry`.
 
-**[docs/GUIDE.md](docs/GUIDE.md) is the walkthrough**: every screen, what each
-option does, and what it costs. Worth reading before the first import, because
-that is the one part of Ferry that writes into your real conversation history.
+## Moving to a new laptop
 
-## Supported tools
+On the old machine, export each assistant you use into a bundle. A bundle is an
+ordinary folder you can copy anywhere.
 
-| Tool | Status |
-|---|---|
-| Claude Code | export and import |
-| OpenAI Codex | export and import |
-| GitHub Copilot Chat | export and import |
-| Google Antigravity IDE | export and import |
+```bash
+ferry export --tool claude-code --output ferry-claude-code
+```
 
-Ferry counts the conversations **each application lists**, which is not the
-same as the files on disk: an unused chat panel writes a file nobody had a
-conversation in, and a subagent gets a file of its own that the tool never
-shows you. Everything is still carried into the bundle; it is just not counted
-as a conversation you had.
+Copy the folder to the new machine, close the assistant there, and import it.
+The first run is a preview that writes nothing:
+
+```bash
+ferry import --bundle ferry-claude-code --tool claude-code --dry-run
+```
+
+```bash
+ferry import --bundle ferry-claude-code --tool claude-code
+```
+
+That is the whole idea. Backing up, restoring and moving to another assistant
+are all the same two steps: export to a bundle, then import from it.
+
+## The menu
+
+Run `ferry` on its own and it finds your assistants, tells you what it sees,
+and offers everything as a menu you move through with the arrow keys:
+
+```text
+  ✓  Claude Code          2.1.266 · 4 conversations
+  ✓  OpenAI Codex         0.146.0-alpha.3.1 · 5 conversations
+  ✓  GitHub Copilot Chat  1.136.2 · 5 conversations
+  ✓  Antigravity          2.12.2 · 2 conversations
+```
+
+Escape backs out of any screen without doing anything, and every screen that
+writes starts on the option that writes nothing. The
+[guide](https://github.com/AMR-M-ALSHAMEERI/ferry/blob/main/docs/GUIDE.md)
+walks through each one.
+
+## Supported assistants
+
+| Assistant | Export | Import | Last checked with |
+|---|---|---|---|
+| Claude Code | yes | yes | 2.1.266 |
+| OpenAI Codex | yes | yes | 0.146.0-alpha.3.1 |
+| GitHub Copilot Chat | yes | yes | VS Code 1.136.2 |
+| Google Antigravity | yes | yes | 2.12.2 |
+
+None of these tools publish their storage formats. Ferry reads them as they
+are, and [FORMATS.md](https://github.com/AMR-M-ALSHAMEERI/ferry/blob/main/docs/FORMATS.md)
+records what was found and on which version. A tool update can change a format
+without warning, so if something looks wrong after an update, the
+[troubleshooting page](https://github.com/AMR-M-ALSHAMEERI/ferry/blob/main/docs/TROUBLESHOOTING.md)
+is the place to start.
+
+## Moving a conversation to a different assistant
+
+A conversation from any of the four can be written into any of the others, and
+you can open it there and carry on working in it. Ferry only converts when you
+ask, tells you first what the conversion costs, and marks the result as
+converted rather than passing it off as native.
+
+Two things do not survive the trip. The assistant's private reasoning is signed
+by the company whose model produced it, so no other assistant can accept it.
+And tool calls, such as commands the old assistant ran, arrive as readable text
+rather than as calls the new assistant can run again.
+[CROSS-TOOL.md](https://github.com/AMR-M-ALSHAMEERI/ferry/blob/main/docs/CROSS-TOOL.md)
+has the details.
+
+## Letting an AI assistant drive Ferry
+
+Ferry ships with a skill file that teaches an AI coding assistant when to use
+Ferry and how, including the rules it must keep. Install it for Claude Code with:
+
+```bash
+ferry skill --install
+```
+
+After that you can simply ask, *"move my Claude Code chats to my new laptop"*,
+and the assistant runs the commands, checking with you before anything that
+writes. For other assistants, `ferry skill` prints the file so you can hand it
+over.
+
+## What Ferry does not do
+
+**It moves conversations, not memory.** A conversation you restore or convert
+keeps its own context, and you can pick it up where you left off. Some
+assistants also keep separate notes about you that apply to every chat, and
+those stay behind. Project instruction files such as `CLAUDE.md` and
+`AGENTS.md` live in your project folder, so they travel with your code anyway.
+
+It does not reach cloud chat history, such as claude.ai or chatgpt.com, only
+what is stored on your computer. It does not move your project files either:
+copy those the way you normally would.
+
+If you would rather carry the gist of a long conversation than all of it,
+**Compact** turns one conversation into a short document to paste into a new
+session. It runs offline, with no account or model, and every line it writes is
+either quoted from your conversation or counted from it.
 
 ## Safety
 
-- Ferry never modifies your source conversation data — it only reads.
-- **Ferry makes no network calls at all.** Nothing it reads leaves this
-  machine, and there is nothing to configure to keep it that way.
-- **Preview first.** The import screen offers to show you exactly what would
-  change, writing nothing, before you commit to it. That option is the one
-  under the cursor.
-- Anything an import would replace is copied into
-  `~/.ferry/backups/<timestamp>/` first, with a record of where each file came
-  from so it can be put back. Nothing prunes them on its own; *Clean up
-  backups* lists them and deletes only the ones you tick.
-- If a conversation is already there, Ferry leaves it alone unless you say
-  otherwise. You can also keep both copies, or replace it.
-- A bundle made on another machine records that machine's home folder; if it
-  is not on this one, Ferry asks where those folders live now rather than
-  restoring paths that point nowhere.
-- Close the target IDE before importing.
-- **Encryption is optional and irreversible if you lose the passphrase.** After
-  an export, Ferry offers to seal the bundle into a single `.ferry` file
-  (AES-256-GCM, passphrase stretched with scrypt). It asks twice, checks the
-  sealed file opens before offering to remove the unencrypted copy, and never
-  stores the passphrase anywhere. Sealing protects a bundle you carry or store
-  — not the machine that made it.
-- **Inspect** shows you what is in a bundle without importing it — every
-  conversation, its size, and the folders it expects to find. Deleting lives on
-  that same screen, because you delete something after looking at it. Deleting
-  one conversation keeps a copy in `~/.ferry/backups` first; deleting a whole
-  bundle does not, and says so.
-- **What Ferry imported, it can take back.** *Delete conversations Ferry
-  imported* removes a conversation Ferry converted into an assistant — the file
-  and the entry that makes the assistant list it — and only while it is still
-  exactly what Ferry wrote. One you have opened and carried on is yours, and is
-  shown as staying. Nothing is ticked to begin with, a copy goes to
-  `~/.ferry/backups` first, and a restore of your own conversation is never
-  offered.
-- **A sealed bundle can be changed too.** Inspect offers to unseal it into a
-  folder you can work with, leaving the `.ferry` file exactly where it is; or
-  to delete a conversation and seal it again in one step. The second one never
-  writes in place — the new file is written beside the old one, opened again
-  with the same passphrase to prove it is readable, and only then replaces it.
+- **Your original history is never changed.** Exporting only reads.
+- **No network calls.** Nothing Ferry reads ever leaves your computer.
+- **Close the assistant before importing into it.** VS Code and Antigravity
+  keep their conversation lists in memory and would undo an import made while
+  they are open. Ferry checks and tells you.
+- **Backups come first.** Anything an import replaces, and anything a delete
+  removes, is copied into `~/.ferry/backups` beforehand. Ferry never deletes a
+  backup on its own.
+- **What is already there stays.** If an assistant already has a conversation,
+  Ferry keeps its copy unless you choose otherwise.
+- **Encryption is optional, and there is no recovery.** Ferry can seal a bundle
+  into a single encrypted `.ferry` file. It asks for the passphrase twice and
+  proves the file opens before offering to remove the unencrypted copy. Lose
+  the passphrase and the bundle cannot be opened by anyone.
+- **What Ferry imported, it can take back,** but only while nobody has worked
+  in it since, and never a conversation of your own.
 
-See [docs/CROSS-TOOL.md](docs/CROSS-TOOL.md) for moving a conversation
-between assistants, [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for
-contributing, and
-[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) when something does not go
-the way it should.
+## Documentation
+
+| Page | For |
+|---|---|
+| [Guide](https://github.com/AMR-M-ALSHAMEERI/ferry/blob/main/docs/GUIDE.md) | Every screen and every command |
+| [Moving between assistants](https://github.com/AMR-M-ALSHAMEERI/ferry/blob/main/docs/CROSS-TOOL.md) | What converting costs, and what works |
+| [Troubleshooting](https://github.com/AMR-M-ALSHAMEERI/ferry/blob/main/docs/TROUBLESHOOTING.md) | When something does not show up |
+| [Storage formats](https://github.com/AMR-M-ALSHAMEERI/ferry/blob/main/docs/FORMATS.md) | Where each assistant keeps its history |
+| [Architecture](https://github.com/AMR-M-ALSHAMEERI/ferry/blob/main/docs/ARCHITECTURE.md) and [adapters](https://github.com/AMR-M-ALSHAMEERI/ferry/blob/main/docs/ADAPTERS.md) | How Ferry is built |
+| [Development](https://github.com/AMR-M-ALSHAMEERI/ferry/blob/main/docs/DEVELOPMENT.md) | Setting up to contribute |
+| [Changelog](https://github.com/AMR-M-ALSHAMEERI/ferry/blob/main/CHANGELOG.md) | What changed in each release |
+
+## License
+
+MIT. See [LICENSE](https://github.com/AMR-M-ALSHAMEERI/ferry/blob/main/LICENSE).

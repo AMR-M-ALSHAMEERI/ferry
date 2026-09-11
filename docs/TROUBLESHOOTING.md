@@ -1,170 +1,187 @@
 # Troubleshooting
 
-Things that go wrong, why, and what to do. Ordered roughly by how often they
-come up.
+Things that go wrong, why they happen, and what to do about them, roughly in
+order of how often they come up.
 
-If something here does not match what you are seeing, that is worth reporting —
-a wrong answer in this file is worse than a missing one.
+If something here does not match what you are seeing, please report it. A wrong
+answer in this file is worse than a missing one.
 
 ## Ferry says a tool is not installed, but it is
 
-Ferry looks for the tool's **conversation store**, not the application. A tool
-installed but never used has no store yet, and Ferry will say it is not there.
+Ferry looks for the tool's **conversation store**, not for the application
+itself. A tool that is installed but has never been used has no store yet, so
+Ferry reports it as not found.
 
-Open the tool, have one conversation, and scan again.
+Open the tool, have one conversation, and run `ferry tools` again.
 
 If you have used it and Ferry still cannot see it, the store is somewhere Ferry
-does not expect — a portable install, a non-default data directory, a
-`--user-data-dir` flag, or a VS Code fork that is not Antigravity. Ferry reads
-each tool's documented location; it does not search your disk.
+does not expect: a portable install, a non-default data folder, a
+`--user-data-dir` flag, or a VS Code fork other than Antigravity. Ferry reads
+each tool's usual location, or the one its environment variable points to. It
+does not search your disk.
 
 ## The count does not match what the application shows
 
-This is usually Ferry being right, and it will tell you why in the line under
-the count.
+This is usually Ferry being right, and it explains why in the line under the
+count.
 
 | What you see | What it means |
 |---|---|
-| *N empty* | The tool wrote a file when a chat panel opened and you never typed anything. VS Code does this constantly. Not a conversation, not exported. |
-| *N not shown by the app* | A subagent thread. Codex and Antigravity give a spawned agent its own file, and the application never lists it. Ferry counts it separately rather than inflating the total. |
-| *N duplicates* | Two files claiming the same conversation id. Counted once. |
+| *N empty* | The tool wrote a file when a chat panel opened and nothing was ever typed. VS Code does this often. It is not a conversation and it is not exported. |
+| *N not shown by the app* | A subagent. Codex and Antigravity give an agent they start their own file, and the application never lists it. Ferry counts it separately rather than inflating the total. |
+| *N duplicates* | Two files claiming the same conversation. Counted once. |
 
-Ferry counts **conversations**, not files. Every adapter used to count files,
-and every adapter was wrong in at least one of these four ways.
+Ferry counts **conversations**, not files. Counting files was wrong in at least
+one of these three ways for every tool.
 
-## "There is nothing at that path" / "is not a bundle"
+## "There is nothing at that path" or "is not a bundle"
 
 The path prompt tells you which of four things went wrong:
 
-- **There is nothing at `<path>`** — the path does not exist. Check for a typo;
-  what you typed is still in the line, so you can fix the character.
-- **`<name>` is not a bundle — there is no manifest.json in it** — that folder
-  is not a Ferry bundle. If your bundles live *inside* it, Ferry will offer
-  them instead of complaining.
-- **`<name>` is a file, not a bundle** — you pointed at a document. A bundle is
-  a folder, or a sealed `.ferry` file.
-- **named like a sealed bundle but does not begin like one** — the file is
-  called `.ferry` but is not one. Either it was renamed, or it is truncated or
-  damaged.
+- **There is nothing at `<path>`.** The path does not exist. Check for a typo.
+  What you typed stays in the line, so you only need to fix the character.
+- **`<name>` is not a bundle, there is no manifest.json in it.** That folder is
+  not a Ferry bundle. If your bundles are *inside* it, Ferry offers them
+  instead.
+- **`<name>` is a file, not a bundle.** A bundle is a folder, or a sealed
+  `.ferry` file.
+- **Named like a sealed bundle but does not begin like one.** The file ends in
+  `.ferry` but is not one. It was renamed, or it is truncated or damaged.
 
-Pasting a path from Windows Explorer's **Copy as path** works — the quotes it
-adds are stripped.
+A path pasted from Windows Explorer's **Copy as path** works: Ferry removes the
+quotes it adds.
 
-Escape leaves the prompt at any point. So does pressing enter on an empty line.
+Escape leaves the prompt at any point, and so does pressing Enter on an empty
+line.
 
 ## A sealed bundle will not open
 
 The message says the passphrase may be wrong **or** the file may have been
-altered, and that Ferry cannot tell those apart. That is literally true, not a
-hedge: the authentication check fails identically for both, by design.
+altered, and that Ferry cannot tell the two apart. That is literally true: the
+check that fails is the same for both, by design.
 
-Things worth checking, in order:
+Worth checking, in this order:
 
-1. **The passphrase.** You get three tries per attempt; escape leaves
-   immediately and does not spend one.
-2. **The file transfer.** A bundle sent over a channel that "helpfully"
-   converts line endings, or truncated by a failed copy, will not open. Compare
-   the file size with the original.
-3. **The file itself.** A single flipped bit anywhere in a sealed bundle makes
-   it unopenable. This is the point of sealing, not a defect — but it means a
-   sealed bundle on failing storage is a sealed bundle you may lose.
+1. **The passphrase.** The menu gives you three tries, and Escape leaves
+   without using one up. A command tries the passphrase it was given once.
+2. **The copy.** A bundle sent through something that changes line endings, or
+   cut short by a failed copy, will not open. Compare its size with the
+   original.
+3. **The file itself.** A single changed bit anywhere in a sealed bundle makes
+   it impossible to open. That is the point of sealing, but it also means a
+   sealed bundle on failing storage is one you can lose.
 
 **There is no recovery without the passphrase.** Not by Ferry, not by anyone.
-No reset, no hint, nowhere it is stored.
+There is no reset, no hint, and nowhere it is stored.
 
 ## I imported, but the conversations are not in the application
 
-Three causes, most common first.
+The most common causes, in order:
 
-**The application was running.** Close the target tool completely before
-importing. Every one of the four caches its conversation list in memory and
-writes it back on exit, which can overwrite what Ferry just wrote.
+**The application was open.** VS Code and Antigravity keep their conversation
+list in memory and write it back when they close, which can undo what Ferry
+just wrote. Close the tool completely, then import again.
 
-**Copilot Chat needs its index.** A conversation file alone is invisible to VS
-Code; the workspace's chat index has to list it too. Ferry writes both. If you
-copied files by hand instead, that is the missing half.
+**Copilot Chat needs its index.** A conversation file on its own is invisible
+to VS Code: the workspace's chat index has to list it too. Ferry writes both.
+If you copied files by hand, that is the missing half.
 
-**The conversation belongs to a workspace that is not open.** Copilot and
+**The conversation belongs to a folder that is not open.** Copilot and
 Antigravity file conversations under the project they happened in. Open that
 folder and look again.
 
-## The conversation is there but every path in it is wrong
+**Codex only lists the folder you are in.** Run `codex resume` from the project
+folder the conversation happened in. The Codex desktop app lists everything.
 
-A conversation records the absolute path of the directory it happened in, and
-that path is usually wrong on a new machine — a different username, a different
-drive.
+## Claude Code lists the conversation but will not open it
 
-When a bundle records a home folder that is not on this machine, Ferry asks
-where those folders live now, before writing anything. If you skipped that
-prompt, re-import and answer it.
+Claude Code only opens conversations in folders it has been told to trust. An
+import from the menu offers to add new folders for you. An import from a
+command never changes that setting and names the folders instead. Start Claude
+Code once in each of those folders, accept the trust question, and the
+conversation opens.
+
+## The conversation is there, but every path in it is wrong
+
+A conversation records the full path of the folder it happened in, and that
+path is usually different on a new machine: another username, another drive.
+
+When a bundle records a home folder that is not on this machine, the menu asks
+where those folders are now, before writing anything, and a command prints the
+exact `--path-remap OLD=NEW` to add. If you skipped that, import again and
+answer it.
 
 ## Something was overwritten and I want it back
 
-Ferry copies a file into `~/.ferry/backups/<timestamp>/<tool>/` before
-overwriting it, and records where it came from in `manifest.jsonl` beside it.
-That file is one line per copy, in plain JSON:
+Before replacing a file, Ferry copies it into
+`~/.ferry/backups/<timestamp>/<tool>/` and records where it came from in
+`manifest.jsonl` beside it. That file has one line per copy, in plain JSON:
 
-```
+```text
 {"tool": "...", "original": "...", "stored": "...", "backed_up_at": "..."}
 ```
 
-Copy the file back to the path in `original`, with the tool closed.
+Close the tool, then copy the file back to the path in `original`.
 
-Backups are per Ferry run, not per file, so one import produces one folder you
-can read.
+Backups are grouped by Ferry run, not by file, so one import produces one
+folder you can read.
 
-**Deleting a whole bundle does not back it up**, and the screen says so before
-it does it. A bundle *is* the backup — there is nowhere for a copy to go.
+**Deleting a whole bundle does not back it up,** and the screen says so first.
+A bundle *is* the backup, so there is nowhere for a copy to go.
 
-## Deleting a conversation from a bundle did not free the space I expected
+## Deleting a conversation from a bundle freed more space than expected
 
-It freed more, most likely. A conversation is not one file: the UCS document,
-its `attachments/<id>/` folder, and `source_raw/<id>.bin` — the original file
-Ferry carried across, which for an Antigravity conversation is a whole SQLite
-database and most of its size.
+A conversation is not one file. It is the conversation document, its
+`attachments/<id>/` folder, and `source_raw/<id>.bin`, the original file Ferry
+carried across. For an Antigravity conversation that original is a whole
+database and most of the size.
 
-The screen names the file count and the megabytes before asking.
+The screen shows the number of files and the megabytes before it asks.
 
 ## An unsealed folder is sitting on my disk
 
 Unsealing writes a plain, unencrypted copy of every conversation in the bundle.
-Ferry warns before doing it and leaves the folder where you asked for it —
-deleting it when you are done is yours to do.
+Ferry warns you first and leaves the folder where you asked. Deleting it when
+you are done is up to you.
 
-Note that deleting it removes the directory entry, not the blocks. On most
-filesystems a forensic tool could recover them until that space is reused.
-**Sealing protects a bundle you carry or store; it does not protect the machine
-that made it.** If you need the second thing, you need full-disk encryption.
+Deleting a file removes its entry, not the data on the disk. On most disks a
+recovery tool could find it again until that space is reused. **Sealing
+protects a bundle you carry or store. It does not protect the machine that made
+it.** For that, use full disk encryption.
 
-## Ferry is slow on a large store
+## Ferry is slow with a large store
 
-Two operations dominate, and both are honest work:
+Two things take real time, and both are doing honest work:
 
-- **Sealing and opening.** Key derivation is deliberately expensive — about a
-  quarter of a second — and is what makes a weak passphrase costly to attack.
-  It happens once per bundle, not per file.
-- **Reading Antigravity.** Conversations are protobuf blobs inside SQLite
-  databases, and Ferry parses every one.
+- **Sealing and opening.** Turning a passphrase into a key is deliberately
+  slow, about a quarter of a second, because that is what makes a weak
+  passphrase expensive to guess. It happens once per bundle, not once per file.
+- **Reading Antigravity.** Its conversations are stored as encoded records
+  inside databases, and Ferry decodes every one.
 
-A 140 MB bundle across four tools seals in about five seconds on a normal
+A 140 MB bundle across four tools seals in about five seconds on an ordinary
 laptop.
 
 ## Windows: a path is too long
 
-Windows refuses paths over 260 characters unless long paths are enabled. Deep
-workspace-storage folders plus a long bundle name can cross it.
+Windows refuses paths longer than 260 characters unless long paths are turned
+on. VS Code's deep storage folders plus a long bundle name can go over.
 
-Put the bundle somewhere short — `C:\bundles\` rather than a nested Downloads
-folder — or enable long path support in Windows.
+Keep the bundle somewhere short, such as `C:\bundles\` rather than a folder
+several levels inside Downloads, or turn on long path support in Windows.
 
 ## Nothing here matches
 
-Run the self-check for the milestone that covers what you are doing:
+Run this and include its output when you report the problem:
 
 ```bash
-make verify-m7
+ferry tools
 ```
 
-It prints a numbered PASS/FAIL line per property, runs against the real data on
-your machine, never prints conversation content, and never modifies anything.
-The failing line is the useful thing to report.
+It lists each assistant Ferry can see, with its version and conversation
+count, and never prints anything from your conversations.
+
+If you are working from a copy of Ferry's source, the self-checks go further.
+`make verify-m3` through `make verify-m8` each test one area against the real
+data on your computer, print one PASS or FAIL line per check, never print
+conversation content, and never change anything.
