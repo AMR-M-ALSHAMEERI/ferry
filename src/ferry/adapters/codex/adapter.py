@@ -18,6 +18,7 @@ import json
 import platform
 import shutil
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final
@@ -42,6 +43,7 @@ from ferry.adapters.codex.index import (
     thread_row,
     upsert_thread_row,
 )
+from ferry.adapters.codex.opened import content_fingerprint, opened_not_changed
 from ferry.adapters.codex.reader import SessionRead, parent_thread, read_rollout
 from ferry.adapters.codex.writer import REBUILD_NOTES, Rebuild, rollout_lines, rollout_stamp
 from ferry.adapters.conflict import reidentify, rename_note
@@ -446,6 +448,14 @@ class CodexAdapter(Adapter):
         except ThreadIndexLocked as exc:
             raise RemovalBlocked(str(exc)) from exc
 
+    def only_opened(self, written: Path, was: provenance_store.Written) -> bool:
+        """Whether Codex has re-filed this rollout without it being carried on.
+
+        See :mod:`ferry.adapters.codex.opened`: opening rewrites every line into
+        Codex's current format and keeps the conversation exactly.
+        """
+        return opened_not_changed(written, was)
+
     # ---------- import ----------
 
     def import_(self, bundle_dir: Path, options: ImportOptions) -> Iterator[ImportEvent]:
@@ -641,11 +651,17 @@ class CodexAdapter(Adapter):
                 )
 
         if conversation.provenance is not None:
+            written = provenance_store.fingerprint(destination)
+            if written is not None:
+                # A second checksum, over what Codex keeps when it re-files a
+                # rollout in its current format on opening it. Without it,
+                # opening an imported conversation once makes it undeletable.
+                written = replace(written, content=content_fingerprint(destination))
             provenance_store.record(
                 TOOL,
                 conversation.id,
                 conversation.provenance,
-                written=provenance_store.fingerprint(destination),
+                written=written,
                 title=conversation.title,
             )
 

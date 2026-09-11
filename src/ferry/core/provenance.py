@@ -116,8 +116,25 @@ class Written:
     sha256: str
     bytes: int
 
+    content: str | None = None
+    """A second checksum, over what survives the tool opening the file.
+
+    Only for a tool that rewrites a file just by showing it, so thoroughly that
+    no checksum of the bytes can survive: Codex re-files an older rollout in its
+    current format on opening. What the adapter chooses to cover is what it
+    measured the rewrite keeping. ``None`` everywhere else, and in every record
+    written before this existed.
+    """
+
     def as_json(self) -> dict[str, str | int]:
-        return {"path": self.path, "sha256": self.sha256, "bytes": self.bytes}
+        document: dict[str, str | int] = {
+            "path": self.path,
+            "sha256": self.sha256,
+            "bytes": self.bytes,
+        }
+        if self.content is not None:
+            document["content"] = self.content
+        return document
 
 
 def fingerprint(path: Path) -> Written | None:
@@ -217,8 +234,12 @@ def written_file(
     if not isinstance(found, dict):
         return None
     try:
+        content = found.get("content")
         return Written(
-            path=str(found["path"]), sha256=str(found["sha256"]), bytes=int(found["bytes"])
+            path=str(found["path"]),
+            sha256=str(found["sha256"]),
+            bytes=int(found["bytes"]),
+            content=content if isinstance(content, str) else None,
         )
     except (KeyError, TypeError, ValueError):
         return None
