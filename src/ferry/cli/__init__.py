@@ -394,12 +394,33 @@ def remove_command(
     )
 
 
+def _skill_tool_callback(value: str | None) -> str | None:
+    """Accept any assistant Ferry knows, or ``all``, with the valid names on a typo."""
+    if value is None:
+        return None
+    from ferry.adapters import REGISTRY
+
+    name = value.strip().lower()
+    if name != "all" and name not in REGISTRY:
+        valid = ", ".join([*REGISTRY, "all"])
+        raise typer.BadParameter(f"unknown tool {value!r}. Choose one of: {valid}")
+    return name
+
+
 @app.command("skill", cls=FerryCommand)
 def skill_command(
     install: bool = typer.Option(
         False,
         "--install",
-        help="Install it as a Claude Code skill, in ~/.claude/skills/ferry/.",
+        help="Install it for every assistant Ferry finds, each in the folder it reads skills from.",
+    ),
+    tool: str | None = typer.Option(
+        None,
+        "--tool",
+        "-t",
+        metavar="TOOL",
+        callback=_skill_tool_callback,
+        help=f"With --install: only this assistant, one of {_TOOL_NAMES}; or all.",
     ),
     force: bool = typer.Option(
         False,
@@ -421,12 +442,14 @@ def skill_command(
     """Print the SKILL.md that teaches an AI assistant to use Ferry.
 
     Prints to standard output, so it pipes, or can be pasted into any
-    assistant. --install puts it where Claude Code looks for skills.
+    assistant. --install puts it where each assistant looks for skills.
     """
     from ferry.skill import skill_text
 
     if force and not install:
         raise typer.BadParameter("only means something with --install", param_hint="--force")
+    if tool and not install:
+        raise typer.BadParameter("only means something with --install", param_hint="--tool")
     if not install:
         try:
             typer.echo(skill_text(), nl=False)
@@ -437,7 +460,7 @@ def skill_command(
 
     from ferry.cli.commands import install_skill
 
-    raise typer.Exit(install_skill(_command_ui(theme, no_color), force=force))
+    raise typer.Exit(install_skill(_command_ui(theme, no_color), tool=tool, force=force))
 
 
 @app.command("compact", cls=FerryCommand)

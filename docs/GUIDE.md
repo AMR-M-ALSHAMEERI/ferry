@@ -454,10 +454,26 @@ or deletes.
 ferry skill --install
 ```
 
-That puts it where Claude Code looks for skills, `~/.claude/skills/ferry/`.
-Start a new Claude Code session and it is there, and `/ferry` calls it
-directly. An older or edited copy already there is kept unless you add
-`--force`, and is backed up before it is replaced.
+That installs it for every assistant Ferry finds on your computer, each in the
+folder its own documentation names. To install for one assistant only, name it
+with `--tool`:
+
+| Command | Puts the skill in | Read by |
+|---|---|---|
+| `ferry skill --install --tool claude-code` | `~/.claude/skills/ferry/` | Claude Code, and Copilot |
+| `ferry skill --install --tool codex` | `~/.agents/skills/ferry/` | OpenAI Codex, and Copilot |
+| `ferry skill --install --tool antigravity` | `~/.gemini/config/skills/ferry/` | Google Antigravity |
+| `ferry skill --install --tool copilot` | `~/.copilot/skills/ferry/` | GitHub Copilot Chat |
+| `ferry skill --install --tool all` | Each of these, for every assistant Ferry finds | All of them |
+
+GitHub Copilot in VS Code reads the Claude Code and Codex folders as well as
+its own. So when Ferry installs for either of those, it gives Copilot no copy
+of its own, which would only risk Ferry being listed twice.
+
+Start a new session in the assistant and the skill is there. In Claude Code and
+Copilot, `/ferry` calls it directly. A copy that is already up to date is left
+alone. An older or edited copy is kept unless you add `--force`, and is backed
+up before it is replaced.
 
 For any other assistant, `ferry skill` prints the file. Point the assistant at
 it, or paste it into the chat. The same file is `SKILL.md` at the root of

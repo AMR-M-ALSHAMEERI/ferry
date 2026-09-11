@@ -36,6 +36,7 @@ The first release.
 - Compact: turn one conversation into a short document to start a new session
   with, offline and without an account or a model.
 - A skill file that teaches an AI coding assistant to use Ferry safely, and
-  `ferry skill --install` to add it to Claude Code.
+  `ferry skill --install` to add it to Claude Code, OpenAI Codex, GitHub
+  Copilot Chat and Google Antigravity.
 - Automatic backups before any import replaces or any delete removes, and a
   screen to clean them up.

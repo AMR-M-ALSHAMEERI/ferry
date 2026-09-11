@@ -64,7 +64,6 @@ __all__ = [
     "import_bundle",
     "install_skill",
     "remove_imported",
-    "skill_path",
 ]
 
 OK: Final = 0
@@ -455,50 +454,41 @@ def _import_into(ui: UI, adapter: Adapter, root: Path, options: ImportOptions) -
     return FAILED if kinds["error"] else OK
 
 
-def skill_path() -> Path:
-    """Where Claude Code looks for Ferry's skill.
-
-    Claude Code's documentation names ``~/.claude/skills/<name>/SKILL.md`` for
-    a person's own skills, and says nothing about ``CLAUDE_CONFIG_DIR``. This
-    uses the same Claude Code home the adapter reads conversations from, which
-    is ``~/.claude`` unless that variable moves it - one answer to "where is
-    Claude Code?" across Ferry, and the one the tests already isolate.
-    """
-    from ferry.adapters.claude_code.paths import config_root
-    from ferry.skill import SKILL_NAME
-
-    return config_root() / "skills" / SKILL_NAME / "SKILL.md"
+def _found_here(tool: str) -> bool:
+    """Whether Ferry finds this assistant on this computer."""
+    try:
+        return REGISTRY[tool].detect().installed
+    except Exception:  # noqa: BLE001 - detect() must never raise; trust nothing
+        return False
 
 
-def install_skill(ui: UI, *, force: bool = False) -> int:
-    """Put ``SKILL.md`` where Claude Code looks for skills. Returns an exit code.
+def _install_one(ui: UI, tool: str, target: Path, text: str, force: bool) -> int:
+    """Put ``SKILL.md`` in one assistant's skills folder. Returns an exit code.
 
-    A copy that already matches is left alone and reported. A different one -
-    an older Ferry's, or the person's own edits - is refused without
-    ``--force``, and backed up before it is replaced with it.
+    A copy that already matches is left alone and reported. A different one,
+    an older Ferry's or the person's own edits, is refused without ``--force``,
+    and backed up before it is replaced.
     """
     from ferry.core.backup import back_up
-    from ferry.skill import skill_text
 
-    text = skill_text()
-    target = skill_path()
+    name = REGISTRY[tool].display_name
     if target.is_file():
         try:
             current = target.read_text(encoding="utf-8", errors="replace")
         except OSError as exc:
-            ui.error(f"could not read {target}: {exc}")
+            ui.error(f"{name}: could not read {target}: {exc}")
             return FAILED
         if current == text:
-            ui.success(f"Already installed and up to date: {target}")
+            ui.success(f"{name}: already installed and up to date, {target}")
             return OK
         if not force:
-            ui.error(f"There is already a different SKILL.md at {target}.")
+            ui.error(f"{name}: there is already a different SKILL.md at {target}.")
             ui.info("Pass --force to replace it. The one there now is backed up first.")
             return REFUSED
         try:
-            saved = back_up(target, "claude-code")
+            saved = back_up(target, tool)
         except OSError as exc:
-            ui.error(f"could not back it up, so it was left as it is: {exc}")
+            ui.error(f"{name}: could not back it up, so it was left as it is: {exc}")
             return FAILED
         ui.detail(f"The previous one was saved to {saved}")
 
@@ -506,11 +496,50 @@ def install_skill(ui: UI, *, force: bool = False) -> int:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text, encoding="utf-8", newline="\n")
     except OSError as exc:
-        ui.error(f"could not write {target}: {exc}")
+        ui.error(f"{name}: could not write {target}: {exc}")
         return FAILED
-    ui.success(f"Installed for Claude Code: {target}")
-    ui.info("Claude Code finds it in a new session. Typing /ferry there calls it directly.")
+    ui.success(f"Installed for {name}: {target}")
     return OK
+
+
+def install_skill(ui: UI, *, tool: str | None = None, force: bool = False) -> int:
+    """Put ``SKILL.md`` where assistants look for skills. Returns an exit code.
+
+    With no ``tool``, or ``all``, it goes to every assistant Ferry finds on this
+    computer, each in the folder its own documentation names. GitHub Copilot is
+    left out when Claude Code or Codex is among them, because VS Code reads
+    their folders too, and a copy of its own would only risk listing Ferry
+    twice. Naming Copilot on its own always gives it its own copy.
+
+    One kept copy does not stop the others: each assistant is reported on its
+    own line, and the exit code is ``1`` when some went in and some did not.
+    """
+    from ferry.skill import COPILOT_ALSO_READS, skill_destinations, skill_text
+
+    destinations = skill_destinations()
+    if tool is not None and tool != "all":
+        chosen = [tool]
+    else:
+        chosen = [name for name in destinations if _found_here(name)]
+        if not chosen:
+            ui.error("Ferry found no assistant on this computer to install the skill for.")
+            ui.info("Name one with --tool: claude-code, codex, copilot or antigravity.")
+            return REFUSED
+        if "copilot" in chosen and any(other in chosen for other in COPILOT_ALSO_READS):
+            chosen.remove("copilot")
+            ui.info(
+                "GitHub Copilot Chat reads the Claude Code and Codex skill folders too, "
+                "so it needs no copy of its own."
+            )
+
+    text = skill_text()
+    results = [_install_one(ui, name, destinations[name], text, force) for name in chosen]
+    ui.info("Each assistant finds it in its next new session.")
+    if all(result == OK for result in results):
+        return OK
+    if all(result == REFUSED for result in results):
+        return REFUSED
+    return FAILED
 
 
 def _list_imported(ui: UI, adapter: Adapter, found: Sequence[Candidate]) -> None:

@@ -112,7 +112,9 @@ has the details.
 ## Letting an AI assistant drive Ferry
 
 Ferry ships with a skill file that teaches an AI coding assistant when to use
-Ferry and how, including the rules it must keep. Install it for Claude Code with:
+Ferry and how, including the rules it must keep. Claude Code, OpenAI Codex,
+GitHub Copilot Chat and Google Antigravity all read the same kind of file, and
+one command installs it for every one of them Ferry finds on your computer:
 
 ```bash
 ferry skill --install
@@ -120,8 +122,7 @@ ferry skill --install
 
 After that you can simply ask, *"move my Claude Code chats to my new laptop"*,
 and the assistant runs the commands, checking with you before anything that
-writes. For other assistants, `ferry skill` prints the file so you can hand it
-over.
+writes. `ferry skill` on its own prints the file, for any other assistant.
 
 ## What Ferry does not do
 

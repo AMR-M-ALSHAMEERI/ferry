@@ -155,7 +155,9 @@ staying, and Ferry will not delete it. It refuses while the app is open.
 
 ### `ferry skill`
 
-Prints this file. `ferry skill --install` installs it as a Claude Code skill.
+Prints this file. `ferry skill --install` installs it for every assistant
+Ferry finds on this computer, and `--tool` names one instead: `claude-code`,
+`codex`, `copilot`, `antigravity` or `all`.
 
 ## Safety rules
 

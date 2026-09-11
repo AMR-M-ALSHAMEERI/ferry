@@ -9,6 +9,7 @@ from ferry.core import Manifest, SourceMachine
 from ferry.core import provenance as provenance_store
 from ferry.core.backup import BACKUP_ENV
 from ferry.core.sealed import OPEN_ENV
+from ferry.skill import SKILLS_HOME_ENV
 from ferry.ucs import (
     Attachment,
     Conversation,
@@ -43,6 +44,10 @@ def _isolate_user_config(tmp_path_factory, monkeypatch):
     # test unsealed into the developer's real ~/.ferry/open, and the real
     # backups folder filled with copies whose originals were under it.
     monkeypatch.setenv(OPEN_ENV, str(fake.parent / "open"))
+    # And where Codex and Copilot keep a person's skills, which is under the
+    # home folder itself: `ferry skill --install` would otherwise write into the
+    # developer's real ~/.agents and ~/.copilot.
+    monkeypatch.setenv(SKILLS_HOME_ENV, str(fake.parent / "skills-home"))
     return fake
 
 

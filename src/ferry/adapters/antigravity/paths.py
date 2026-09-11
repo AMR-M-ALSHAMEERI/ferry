@@ -103,6 +103,19 @@ def projects_dir(env: os._Environ[str] | dict[str, str] | None = None) -> Path:
     return Path.home() / ".gemini" / "config" / "projects"
 
 
+def skills_dir(env: os._Environ[str] | dict[str, str] | None = None) -> Path:
+    """Where Antigravity looks for a person's own skills: ``~/.gemini/config/skills``.
+
+    From Antigravity's own documentation, checked 2026-09-12. It sits beside
+    ``antigravity/`` like :func:`projects_dir`, and is redirected the same way.
+    """
+    environ = os.environ if env is None else env
+    override = environ.get(DATA_DIR_ENV)
+    if override:
+        return Path(override).parent / "config" / "skills"
+    return Path.home() / ".gemini" / "config" / "skills"
+
+
 def conversation_databases(
     env: os._Environ[str] | dict[str, str] | None = None,
 ) -> list[Path]:

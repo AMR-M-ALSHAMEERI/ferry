@@ -10,8 +10,8 @@ checks 1, 3 and 4. They go through the installed ``ferry`` in a subprocess
 rather than importing the CLI, because an assistant following the file meets
 the command line, not the Python objects behind it.
 
-Check 6 reads the copy installed for Claude Code, if there is one, and only
-reads it: a stale skill is reported, never rewritten.
+Check 6 reads every copy installed for an assistant, and only reads them: a
+stale skill is reported, never rewritten.
 """
 
 from __future__ import annotations
@@ -23,11 +23,11 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from ferry.cli.commands import skill_path
-from ferry.skill import SKILL_NAME, skill_text
+from ferry.skill import SKILL_NAME, skill_destinations, skill_text
 
 ROOT = Path(__file__).resolve().parents[2]
-DESCRIPTION_LIMIT = 1536
+DESCRIPTION_LIMIT = 1024
+"""The strictest limit among the tools that read the skill: VS Code's."""
 
 
 @dataclass
@@ -114,13 +114,18 @@ def check_printed() -> Result:
 
 
 def check_installed() -> Result:
-    target = skill_path()
-    if not target.is_file():
-        return Result(None, "not installed for Claude Code on this machine")
-    current = target.read_text(encoding="utf-8", errors="replace")
-    if current == skill_text():
-        return Result(True, "installed copy is current")
-    return Result(False, "installed copy is out of date - ferry skill --install --force")
+    installed = {tool: path for tool, path in skill_destinations().items() if path.is_file()}
+    if not installed:
+        return Result(None, "not installed for any assistant on this machine")
+    text = skill_text()
+    stale = [
+        tool
+        for tool, path in installed.items()
+        if path.read_text(encoding="utf-8", errors="replace") != text
+    ]
+    if stale:
+        return Result(False, f"out of date for {', '.join(stale)} - ferry skill --install --force")
+    return Result(True, f"current for {', '.join(installed)}")
 
 
 CHECKS = [
@@ -129,7 +134,7 @@ CHECKS = [
     ("every command it names exists", check_commands),
     ("every flag it names is in --help", check_flags),
     ("ferry skill prints it unchanged", check_printed),
-    ("the copy installed for Claude Code", check_installed),
+    ("the copies installed for assistants", check_installed),
 ]
 
 
