@@ -24,7 +24,9 @@ ferry
 
 Arrow keys move, Enter chooses, **Escape backs out** of any screen without
 doing anything. Typing `/` filters the menu, so `/theme` jumps to the theme
-picker.
+picker. A list longer than the screen scrolls with the cursor and says how many
+rows are above and below; Page Up and Page Down move a screen at a time, Home
+and End jump to either end.
 
 Ferry needs a real terminal. Run it from your own terminal window, not from a
 pipe or a script — it will say so and exit cleanly rather than hanging.

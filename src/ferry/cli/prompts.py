@@ -18,6 +18,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from prompt_toolkit.application import Application
+from prompt_toolkit.application.current import get_app
 from prompt_toolkit.completion import PathCompleter
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import StyleAndTextTuples
@@ -108,6 +109,10 @@ class SelectorModel:
         self._filter = ""
         self.cursor = max(0, min(initial, len(self._items) - 1))
         self.filtering = False
+        self.top = 0
+        """The first visible item drawn, when the list is longer than the screen."""
+        self.page = 10
+        """How many rows the last frame showed, which is what a page key moves by."""
 
     @property
     def items(self) -> list[SelectorItem]:
@@ -151,10 +156,49 @@ class SelectorModel:
             return
         self.cursor = (self.cursor + delta) % count
 
+    def jump(self, delta: int) -> None:
+        """Move by a page, stopping at either end rather than wrapping.
+
+        Wrapping suits one step on a short menu. A page key that wrapped would
+        carry someone from row 130 of 141 to row 3, which is not "a bit further
+        down" by anyone's reading.
+        """
+        count = len(self.visible)
+        if count == 0:
+            self.cursor = 0
+            return
+        self.cursor = max(0, min(count - 1, min(self.cursor, count - 1) + delta))
+
+    def window(self, rows: int) -> tuple[int, int]:
+        """The slice of visible items to draw in ``rows`` lines, cursor always inside it.
+
+        The list scrolls only as far as it must: the view stays put while the
+        cursor moves within it, and moves one row at a time when the cursor
+        pushes past an edge. A list that fits is drawn whole from the top.
+
+        This is the fix for a real report. Both pickers drew every row and never
+        said where the cursor was, so on the backups list -- 141 rows -- moving
+        past the bottom of the screen carried the cursor into rows nobody could
+        see, and the list never followed it.
+        """
+        count = len(self.visible)
+        if rows <= 0 or count <= rows:
+            self.top = 0
+            return 0, count
+        self.page = rows
+        cursor = min(self.cursor, count - 1)
+        if cursor < self.top:
+            self.top = cursor
+        elif cursor >= self.top + rows:
+            self.top = cursor - rows + 1
+        self.top = max(0, min(self.top, count - rows))
+        return self.top, self.top + rows
+
     def set_filter(self, text: str) -> None:
         """Replace the filter and move the cursor back to the first match."""
         self._filter = text
         self.cursor = 0
+        self.top = 0
 
     def start_filtering(self) -> None:
         """Enter filter mode, triggered by ``/``."""
@@ -221,6 +265,54 @@ def _style_for(theme: Theme, token: str) -> str:
     return _ANSI_NAMES.get(value, "")
 
 
+MIN_ROWS = 3
+"""The fewest list rows drawn, however small the terminal. Fewer is not a list."""
+
+_INDICATOR_LINES = 2
+"""The "more above" and "more below" lines, reserved whenever the list scrolls so
+the frame keeps one height and nothing below it jumps as they come and go."""
+
+_SPARE_LINES = 1
+"""Kept free at the bottom, so the last line never pushes the frame off the top."""
+
+
+def _lines(fragments: Fragments) -> int:
+    return sum(fragment[1].count("\n") for fragment in fragments)
+
+
+def _span(model: SelectorModel, height: int | None, chrome: int) -> tuple[int, int, bool]:
+    """Which rows fit, given ``height`` terminal lines and ``chrome`` lines of everything else.
+
+    ``height`` is ``None`` when the terminal size is unknown -- and in tests --
+    and then the whole list is drawn, which is what happened before.
+    """
+    count = len(model.visible)
+    if height is None:
+        return 0, count, False
+    rows = max(MIN_ROWS, height - chrome - _INDICATOR_LINES - _SPARE_LINES)
+    if count <= rows:
+        model.window(rows)
+        return 0, count, False
+    start, end = model.window(rows)
+    return start, end, True
+
+
+def _more(count: int, where: str, theme: Theme, indent: int) -> Fragments:
+    """One "more above/below" line, or a blank one holding its place."""
+    if not count:
+        return [("", "\n")]
+    line = f"{' ' * indent}{theme.icons.ellipsis} {count} more {where}\n"
+    return [(_style_for(theme, "dim"), line)]
+
+
+def _terminal_rows() -> int | None:
+    """The terminal's height, read on every redraw so a resize is followed."""
+    try:
+        return get_app().output.get_size().rows
+    except Exception:  # noqa: BLE001 - no size means draw everything, as before
+        return None
+
+
 def _render(
     model: SelectorModel,
     theme: Theme,
@@ -230,10 +322,14 @@ def _render(
     tick: int = 0,
     current: str | None = None,
     back: bool = False,
+    height: int | None = None,
 ) -> Fragments:
     """Build the frame shown on each redraw.
 
     Args:
+        height: Terminal lines available. When the list does not fit, only the
+            rows around the cursor are drawn, between "more above" and "more
+            below" lines. ``None`` draws the whole list.
         tick: Animation tick. Only the row under the cursor animates — six
             icons moving at once is noise, and animating just the selected one
             doubles as a second cursor indicator for the same redraw cost.
@@ -280,10 +376,22 @@ def _render(
         out += marker(icons.info, dim)
         out += [(text, title), ("", "\n\n")]
 
+    # Built before the list so its height is known: the rows the list gets are
+    # whatever the title, the preview and the footer leave.
+    highlighted = model.current
+    below: Fragments = []
+    if preview is not None and highlighted is not None:
+        below = [("", "\n"), *preview(highlighted)]
+    chrome = (2 if title else 0) + _lines(below) + 2
+    start, end, scrolled = _span(model, height, chrome)
+
     visible = model.visible
     if not visible:
         out += [(dim, f"  no match for {model.filter!r}\n")]
-    for index, item in enumerate(visible):
+    if scrolled:
+        out += _more(start, "above", theme, 3 + cell)
+    for index in range(start, end):
+        item = visible[index]
         selected = index == min(model.cursor, len(visible) - 1)
         label_style = primary if selected else (dim if model.filtering else text)
         if item.motion is not None:
@@ -314,11 +422,10 @@ def _render(
             # leaves you guessing what you would be changing away from.
             out += [(accent, f"   {icons.selected} in use")]
         out += [("", "\n")]
+    if scrolled:
+        out += _more(len(visible) - end, "below", theme, 3 + cell)
 
-    highlighted = model.current
-    if preview is not None and highlighted is not None:
-        out += [("", "\n")]
-        out += preview(highlighted)
+    out += below
 
     out += [("", "\n")]
     # The footer names what the keys do *here*, because what escape does
@@ -335,9 +442,10 @@ def _render(
         out += [(dim, f"  {keys}\n")]
     else:
         leave = "esc back" if back else "esc cancel"
-        keys = f"up/down move  {sep}  enter select  {sep}  {leave}"
+        move = f"up/down move  {sep}  pgup/pgdn page" if scrolled else "up/down move"
+        keys = f"{move}  {sep}  enter select  {sep}  {leave}"
         if allow_filter:
-            keys = f"up/down move  {sep}  enter select  {sep}  / filter  {sep}  {leave}"
+            keys = f"{move}  {sep}  enter select  {sep}  / filter  {sep}  {leave}"
         out += [(dim, f"  {keys}\n")]
     return out
 
@@ -362,6 +470,24 @@ def build_bindings(model: SelectorModel, *, allow_filter: bool = True) -> KeyBin
     @kb.add("c-n")
     def _down(event: object) -> None:
         model.move(1)
+
+    # For lists longer than the screen. A page is whatever the last frame
+    # showed, so one press moves exactly one screenful.
+    @kb.add("pageup")
+    def _page_up(event: object) -> None:
+        model.jump(-model.page)
+
+    @kb.add("pagedown")
+    def _page_down(event: object) -> None:
+        model.jump(model.page)
+
+    @kb.add("home")
+    def _first(event: object) -> None:
+        model.jump(-len(model.visible))
+
+    @kb.add("end")
+    def _last(event: object) -> None:
+        model.jump(len(model.visible))
 
     @kb.add("enter")
     def _accept(event) -> None:  # type: ignore[no-untyped-def]
@@ -477,7 +603,17 @@ def run_select(
     kb = build_bindings(model, allow_filter=allow_filter)
 
     control = FormattedTextControl(
-        lambda: _render(model, theme, title, preview, allow_filter, tick(), current, back),
+        lambda: _render(
+            model,
+            theme,
+            title,
+            preview,
+            allow_filter,
+            tick(),
+            current,
+            back,
+            height=_terminal_rows(),
+        ),
         focusable=True,
         show_cursor=False,
     )
@@ -756,6 +892,7 @@ def _render_multi(
     ticked: set[str],
     theme: Theme,
     title: str,
+    height: int | None = None,
 ) -> Fragments:
     """The checklist frame.
 
@@ -778,10 +915,17 @@ def _render_multi(
     if title:
         out += [(dim, f"  {icons.info} "), (text, title), ("", "\n\n")]
 
+    # Title, then the blank, count and keys lines of the footer.
+    start, end, scrolled = _span(model, height, (2 if title else 0) + 3)
+    indent = 3 + len(icons.cursor) + cell + 1
+
     visible = model.visible
     if not visible:
         out += [(dim, f"  no match for {model.filter!r}\n")]
-    for index, item in enumerate(visible):
+    if scrolled:
+        out += _more(start, "above", theme, indent)
+    for index in range(start, end):
+        item = visible[index]
         selected = index == min(model.cursor, len(visible) - 1)
         on = item.value in ticked
         box = icons.selected if on else icons.unselected
@@ -789,6 +933,8 @@ def _render_multi(
         out += [(accent if on else dim, box.center(cell) + " ")]
         out += [(primary if selected else (dim if model.filtering else text), item.label)]
         out += [("", "\n")]
+    if scrolled:
+        out += _more(len(visible) - end, "below", theme, indent)
 
     out += [("", "\n")]
     out += [(dim, f"  {len(ticked)} of {len(model.items)} chosen\n")]
@@ -796,8 +942,9 @@ def _render_multi(
         out += [(accent, "  / "), (text, model.filter), (primary, "_")]
         out += [(dim, f"    enter apply  {sep}  esc cancel filter\n")]
     else:
+        move = f"up/down move  {sep}  pgup/pgdn page" if scrolled else "up/down move"
         keys = (
-            f"up/down move  {sep}  space tick  {sep}  a all  {sep}  "
+            f"{move}  {sep}  space tick  {sep}  a all  {sep}  "
             f"/ filter  {sep}  enter accept  {sep}  esc cancel"
         )
         out += [(dim, f"  {keys}\n")]
@@ -831,7 +978,7 @@ def run_multiselect(
     kb = multiselect_bindings(model, ticked)
 
     control = FormattedTextControl(
-        lambda: _render_multi(model, ticked, theme, title),
+        lambda: _render_multi(model, ticked, theme, title, height=_terminal_rows()),
         focusable=True,
         show_cursor=False,
     )
