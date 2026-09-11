@@ -143,7 +143,10 @@ Follow these even when asked to hurry.
    yourself: give the person the exact command, and ask them to close the app
    and run it from a separate terminal.
 2. **Preview first.** Run an import with `--dry-run`, show the person what it
-   says, and only then run it for real.
+   says, and only then run it for real. If the preview says anything will be
+   left out or lost - older messages of a long conversation, images, tool
+   output - say so plainly, with the numbers, and ask before the real import,
+   even if the person already said to go ahead.
 3. **Leave the backups alone.** Never delete anything under `~/.ferry/backups/`.
 4. **Keep what is already there.** Use the default `--on-conflict skip`. Pass
    `overwrite` only when the person has asked for it in those words.
@@ -152,8 +155,11 @@ Follow these even when asked to hurry.
    Explain first that converting loses detail: the model's private thinking
    cannot move between vendors, and tool calls become readable text. Some
    pairs are refused outright, and Ferry says why.
-6. **Never choose a passphrase.** Ask the person for it, or let them set
-   `FERRY_PASSPHRASE` themselves. There is no way to recover a sealed bundle
+6. **Never choose a passphrase.** Offer the person a choice. They can type it
+   to you - tell them it then stays in this conversation's history - or you
+   give them the exact command and they run it themselves in their own
+   terminal, setting `FERRY_PASSPHRASE` there, so it never passes through the
+   chat. Either is their call. There is no way to recover a sealed bundle
    without it - not by Ferry, not by anyone.
 7. **Treat bundles as private.** They hold the person's real conversations. Do
    not open them to read their contents, do not paste their contents anywhere,
@@ -174,8 +180,8 @@ ferry export --tool claude-code --output ~/ferry-move-claude-code
 ```
 
 Repeat the export for each assistant the person wants to move, into a
-separate folder each. To encrypt, ask the person to set `FERRY_PASSPHRASE` and
-add `--encrypt --replace`; that leaves one `.ferry` file per assistant. The
+separate folder each. To encrypt, settle the passphrase as safety rule 6 says
+and add `--encrypt --replace`; that leaves one `.ferry` file per assistant. The
 person copies the folders or files to the new machine.
 
 On the new machine, with Ferry installed and the assistant closed:
