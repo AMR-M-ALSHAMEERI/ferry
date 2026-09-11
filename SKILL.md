@@ -33,11 +33,14 @@ Everything runs on this machine. Ferry makes no network calls.
 ## Before you start
 
 1. Run `ferry tools` to see which assistants are on this machine. It exits `1`
-   when none are found. If `ferry` itself is not found, ask the person to
-   install it (`pip install ferry-cli`).
-2. The tool names every command takes are `claude-code`, `codex`, `copilot`
+   when none are found.
+2. If `ferry` itself is not found, Ferry is not installed. Offer to install it
+   with `pip install ferry-cli`, and run that yourself once the person agrees.
+   If `ferry` is still not found afterwards, `python -m ferry` runs the same
+   program - use it in place of `ferry` in every command below.
+3. The tool names every command takes are `claude-code`, `codex`, `copilot`
    and `antigravity`.
-3. Bare `ferry` opens an interactive menu that needs a person at the keyboard.
+4. Bare `ferry` opens an interactive menu that needs a person at the keyboard.
    Do not run it yourself; use the commands below.
 
 Every command exits `0` when everything worked, `1` when it ran and part of it
