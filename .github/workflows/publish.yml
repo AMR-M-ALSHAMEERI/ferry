@@ -1,0 +1,39 @@
+name: Publish
+
+# Publishing a GitHub release builds Ferry and uploads it to PyPI.
+#
+# No API token is stored anywhere. PyPI is told once, in its own settings, that
+# this repository and this workflow file are allowed to publish ferry-cli, and
+# GitHub proves the job's identity at run time. That is trusted publishing.
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    # The name must match the environment named on PyPI's publisher form.
+    environment:
+      name: pypi
+      url: https://pypi.org/p/ferry-cli
+
+    permissions:
+      # Lets the job ask GitHub for the short-lived identity token PyPI checks.
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build the wheel and the source archive
+        run: |
+          python -m pip install --upgrade build
+          python -m build
+
+      - name: Upload to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
