@@ -95,20 +95,7 @@ at empty temporary folders, and the same goes for Ferry's own backups and
 records, so running the suite on a machine full of real history changes
 nothing.
 
-## Self-checks against real data
-
-The tests use invented conversations. The self-checks use yours, read only:
-
-```bash
-make verify-m8
-```
-
-There is one per milestone, from `verify-m1` to `verify-m8`. Each prints a
-numbered PASS, FAIL or SKIP line per check, never prints conversation content,
-and never changes anything. Run the one that covers the area you are working
-on.
-
-## Other scripts
+## Scripts
 
 | Command | What it does |
 |---|---|
@@ -118,6 +105,5 @@ on.
 ## Without make
 
 On Windows without `make`, run the commands directly: `pip install -e ".[dev]"`
-and `pre-commit install` instead of `make install`, the four checking commands
-above instead of `make check`, and `python scripts/selfcheck/verify_m8.py`
-instead of `make verify-m8`.
+and `pre-commit install` instead of `make install`, and the four checking
+commands above instead of `make check`.

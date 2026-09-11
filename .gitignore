@@ -49,6 +49,11 @@ coverage.xml
 *.pbtxt
 rollout-*.jsonl
 
+# Self-checks that run against the real conversation stores on this machine --
+# local-only by human decision (2026-09-12). They are development aids, named
+# after the private plan's milestones. Only the project's own source ships.
+scripts/selfcheck/
+
 # Spike/throwaway probe code — ENTIRE folder is local-only (human decision 2026-08-21).
 # These scripts read real conversation directories; they are never committed.
 spikes/

@@ -180,8 +180,3 @@ ferry tools
 
 It lists each assistant Ferry can see, with its version and conversation
 count, and never prints anything from your conversations.
-
-If you are working from a copy of Ferry's source, the self-checks go further.
-`make verify-m3` through `make verify-m8` each test one area against the real
-data on your computer, print one PASS or FAIL line per check, never print
-conversation content, and never change anything.
