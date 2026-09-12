@@ -2,7 +2,7 @@
 
 Every release of Ferry, newest first.
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-09-12)
 
 The first release.
 
