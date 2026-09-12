@@ -10,9 +10,10 @@ those blobs, and that single fact decides the shape of this adapter:
   it. It does not rebuild one from UCS, because rebuilding would mean
   inventing the parts Ferry could not read.
 
-A conversation from another tool therefore cannot be written *into*
-Antigravity yet -- it has no database to restore -- and is reported as skipped
-rather than half-written. That is cross-tool migration, which arrived later.
+A conversation from another tool has no database to restore, so it is **built**
+instead: :mod:`ferry.adapters.antigravity.build` assembles one from UCS and
+lists it in the store the app actually reads. That came later, once the format
+had been measured rather than assumed, and the reasoning is in that module.
 """
 
 from __future__ import annotations
