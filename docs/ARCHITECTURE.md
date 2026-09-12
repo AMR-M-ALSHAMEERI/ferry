@@ -42,9 +42,9 @@ the models, so the two cannot quietly drift apart.
 ### Current schema version: 1.3
 
 This is the version of the conversation format, recorded as `ucs_version` in
-every conversation file inside a bundle. It is not Ferry's own version, which is
-0.1.0 and is what `ferry --version` prints. The two move independently: a new
-release of Ferry does not change the format unless the format itself changes.
+every conversation file inside a bundle. It is not Ferry's own version, the
+number `ferry --version` prints. The two move independently: a new release of
+Ferry does not change the format unless the format itself changes.
 
 | Schema version | Change |
 |---|---|
