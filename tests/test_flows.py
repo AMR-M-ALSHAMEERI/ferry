@@ -29,6 +29,7 @@ from ferry.adapters.base import (
     ImportEvent,
     ImportOptions,
 )
+from ferry.adapters.dedup import ALREADY_THERE
 from ferry.cli.flows import (
     _describe,
     _report,
@@ -353,11 +354,47 @@ def test_an_adapter_error_is_reported_as_a_failure(tmp_path: Path) -> None:
     assert "1 failed" in ui.text
 
 
+def test_a_resume_says_where_the_conversations_went(tmp_path: Path) -> None:
+    """ "0 exported" alone reads like a failure.
+
+    It is the right answer for a resume with nothing new since, but only the
+    count of what was already carried says so.
+    """
+    adapter = _Recorder(
+        events=[
+            ExportEvent(kind="skipped", message=f"{ALREADY_THERE}"),
+            ExportEvent(kind="skipped", message=f"{ALREADY_THERE}"),
+            ExportEvent(kind="done", message="0 of 2 sessions exported"),
+        ]
+    )
+    ui = _Answers(path=str(tmp_path / "bundle"))
+
+    run_export(ui, scanned(adapter))
+
+    assert "0 of 2 sessions exported, 2 already in the bundle" in ui.text
+
+
+def test_a_skip_that_is_not_a_resume_is_not_counted_as_one(tmp_path: Path) -> None:
+    """Both are skips. Only one of them is good news."""
+    adapter = _Recorder(
+        events=[
+            ExportEvent(kind="skipped", message="no messages"),
+            ExportEvent(kind="done", message="0 of 1 sessions exported"),
+        ]
+    )
+    ui = _Answers(path=str(tmp_path / "bundle"))
+
+    run_export(ui, scanned(adapter))
+
+    assert "already in the bundle" not in ui.text
+
+
 def test_skipped_conversations_are_counted_separately(tmp_path: Path) -> None:
+    """A skip that is not a resume. The message decides which it is."""
     adapter = _Recorder(
         events=[
             ExportEvent(kind="progress", message="ok"),
-            ExportEvent(kind="skipped", message="already in bundle"),
+            ExportEvent(kind="skipped", message="no messages"),
         ]
     )
     ui = _Answers(path=str(tmp_path / "bundle"))

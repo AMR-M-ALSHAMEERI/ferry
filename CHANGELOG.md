@@ -14,6 +14,8 @@ Every release of Ferry, newest first.
   is how an interrupted export resumes.
 - Naming a file rather than a folder is refused with a plain message.
 - An error during an export is printed as one line.
+- A resumed export says how many conversations were already in the bundle,
+  rather than only that it exported none.
 
 ## 0.1.0 (2026-09-12)
 

@@ -41,6 +41,7 @@ from ferry.adapters.base import (
     RemoveOptions,
 )
 from ferry.adapters.census import count_of
+from ferry.adapters.dedup import ALREADY_THERE
 from ferry.adapters.removal import Candidate, remove, survey
 from ferry.cli.ui import UI, NonInteractiveError
 from ferry.core import Bundle, BundleError, BundleSummary, delete_bundle, summarise
@@ -428,6 +429,7 @@ def _report(
     something had gone wrong.
     """
     kinds: Counter[str] = Counter()
+    already = 0
     notes: list[str] = []
     warnings: list[str] = []
     errors: list[str] = []
@@ -453,6 +455,8 @@ def _report(
                 bar.describe(_shorten(event.message))
             elif event.kind == "skipped":
                 bar.advance()
+                if event.message.startswith(ALREADY_THERE):
+                    already += 1
             elif event.kind == "note":
                 notes.append(event.message)
             elif event.kind == "warning":
@@ -474,8 +478,17 @@ def _report(
     # writes were subagent trajectories rather than conversations, say.
     skipped = kinds.get("skipped", 0)
     summary = summary_line or f"{handled} {noun}"
-    if skipped and not summary_line:
-        summary += f", {skipped} skipped"
+    # A resume reports nothing exported, which reads like a failure until it
+    # says where the conversations went. The adapter's own closing line
+    # counts what it wrote and cannot know this, so it is added either way;
+    # the rest of the skips are left to that line when it wrote one.
+    tail = []
+    if already:
+        tail.append(f"{already} already in the bundle")
+    if skipped - already and not summary_line:
+        tail.append(f"{skipped - already} skipped")
+    if tail:
+        summary += ", " + ", ".join(tail)
     if errors:
         ui.error(f"{summary}, {len(errors)} failed")
     else:

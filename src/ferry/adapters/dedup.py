@@ -25,7 +25,14 @@ from uuid import UUID
 
 from ferry.ucs import Conversation
 
-__all__ = ["DuplicateVerdict", "compare_duplicate"]
+__all__ = ["ALREADY_THERE", "DuplicateVerdict", "compare_duplicate"]
+
+ALREADY_THERE = "already in bundle"
+"""How a skip says *this one was carried on an earlier run*.
+
+The export screen reads it to tell a resume apart from a conversation that
+could not be carried. Both are skips; only one of them is good news.
+"""
 
 
 @dataclass(frozen=True)
@@ -61,14 +68,14 @@ def compare_duplicate(
         what a duplicate is expected to be, and warning about those would put
         noise in front of the user on every resumed export.
     """
-    plain = DuplicateVerdict("already in bundle")
+    plain = DuplicateVerdict(ALREADY_THERE)
     if incoming is None or existing is None:
         return plain
     if len(incoming.messages) <= len(existing.messages):
         return plain
 
     return DuplicateVerdict(
-        message="already in bundle (a longer copy exists - see warning)",
+        message=f"{ALREADY_THERE} (a longer copy exists - see warning)",
         warning=(
             f"{source_name} holds {len(incoming.messages)} messages but the bundle already "
             f"has this conversation with {len(existing.messages)}; the longer copy was not "

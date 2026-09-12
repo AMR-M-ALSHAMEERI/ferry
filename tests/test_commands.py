@@ -150,10 +150,15 @@ def test_an_empty_folder_is_the_bundle(source: Path, tmp_path: Path) -> None:
 
 
 def test_force_carries_on_with_a_bundle(source: Path, exported: Path) -> None:
-    """The one thing ``--force`` is for: an interrupted export resuming."""
+    """The one thing ``--force`` is for: an interrupted export resuming.
+
+    The closing line has to account for the conversations, or a resume that
+    had nothing new to do reports "0 exported" and reads like a failure.
+    """
     again = runner.invoke(app, ["export", "-t", "claude-code", "-o", str(exported), "--force"])
     assert again.exit_code == OK, again.output
     assert len(Bundle.open(exported).list_conversations()) == 1
+    assert "1 already in the bundle" in _said(again)
 
 
 def test_a_bundle_without_force_is_refused_and_says_which(source: Path, exported: Path) -> None:
