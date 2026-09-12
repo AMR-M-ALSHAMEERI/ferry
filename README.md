@@ -7,8 +7,8 @@
 
 <p align="center">
   <a href="https://github.com/AMR-M-ALSHAMEERI/ferry/actions/workflows/ci.yml"><img src="https://github.com/AMR-M-ALSHAMEERI/ferry/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://pypi.org/project/ferry-cli/"><img src="https://img.shields.io/pypi/v/ferry-cli?cacheSeconds=3600" alt="PyPI version"></a>
-  <a href="https://pypi.org/project/ferry-cli/"><img src="https://img.shields.io/pypi/pyversions/ferry-cli?cacheSeconds=3600" alt="Python versions"></a>
+  <a href="https://pypi.org/project/ferry-cli/"><img src="https://img.shields.io/pypi/v/ferry-cli?cacheSeconds=300" alt="PyPI version"></a>
+  <a href="https://pypi.org/project/ferry-cli/"><img src="https://img.shields.io/pypi/pyversions/ferry-cli?cacheSeconds=300" alt="Python versions"></a>
   <a href="https://github.com/AMR-M-ALSHAMEERI/ferry/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey" alt="Platforms: Windows, macOS, Linux">
 </p>
