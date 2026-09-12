@@ -58,9 +58,17 @@ into a bundle. They are just not counted as conversations you had.
    by conversation.
 4. **It offers to seal the bundle.** The answer under the cursor is no.
 
-If you choose a folder that already has something in it, Ferry asks whether to
-add to it. That is how an interrupted export carries on: run it again into the
-same folder and it skips whatever is already written.
+The folder you name is the bundle itself, so it holds nothing but Ferry's own
+files. Two things follow from that.
+
+If you name a folder that is already a bundle, Ferry asks whether to add to
+it. That is how an interrupted export carries on: run it again into the same
+folder and it skips whatever is already written.
+
+If you name a folder with your own files in it, such as Downloads, Ferry says
+it cannot be the bundle and offers to make a new folder inside it instead,
+named with today's date. Enter accepts that, and the bundle lands in
+Downloads without disturbing anything else there.
 
 An export only reads. Ferry never changes the assistant it reads from.
 
@@ -388,7 +396,7 @@ The tool names are `claude-code`, `codex`, `copilot` and `antigravity`.
 |---|---|
 | `--tool`, `-t` | The assistant to export from. Required. |
 | `--output`, `-o` | The folder to write. Without it, Ferry makes a new `ferry-bundle-<time>` folder where you are. |
-| `--force` | Add to a folder that already holds something, which is how an interrupted export carries on. With `--encrypt`, it also replaces an existing sealed file. |
+| `--force` | Carry on with a folder that is already a bundle, which is how an interrupted export resumes. With `--encrypt`, it also replaces an existing sealed file. |
 | `--encrypt` | Also seal the bundle into one encrypted `.ferry` file. |
 | `--replace` | With `--encrypt`: delete the unencrypted folder once the sealed file has been opened again and proven to work. |
 | `--passphrase` | The passphrase to seal with. See below. |

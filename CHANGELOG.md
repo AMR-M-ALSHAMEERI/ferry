@@ -2,6 +2,19 @@
 
 Every release of Ferry, newest first.
 
+## 0.1.1 (unreleased)
+
+### Fixed
+
+- **Exporting into a folder that holds your own files.** The folder you name is
+  the bundle, and a bundle holds nothing but Ferry's own files. Name a folder
+  such as Downloads and the menu now offers to make a new folder inside it,
+  while `ferry export` names the path to use. Every assistant behaves the same
+  way. `--force` means carry on with a folder that is already a bundle, which
+  is how an interrupted export resumes.
+- Naming a file rather than a folder is refused with a plain message.
+- An error during an export is printed as one line.
+
 ## 0.1.0 (2026-09-12)
 
 The first release.

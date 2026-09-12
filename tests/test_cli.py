@@ -221,9 +221,16 @@ def test_bare_ferry_without_a_tty_exits_two_and_explains() -> None:
 
 
 def test_version_flag() -> None:
+    """Against the package's own version, not a copy of it.
+
+    A literal here fails on every release for no reason, which teaches
+    whoever bumps the version to edit tests until they pass.
+    """
+    import ferry
+
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
-    assert result.output.strip() == "ferry 0.1.0"
+    assert result.output.strip() == f"ferry {ferry.__version__}"
 
 
 def test_unknown_theme_flag_is_rejected_with_the_valid_names() -> None:

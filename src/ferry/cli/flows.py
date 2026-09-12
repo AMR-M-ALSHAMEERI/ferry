@@ -804,6 +804,50 @@ def _opened(ui: UI, picked: Path) -> Iterator[Opened | None]:
     yield None
 
 
+def _settled_destination(ui: UI, target: Path) -> Path | None:
+    """Where the bundle really goes, once the folder named has been looked at.
+
+    A bundle is a folder whose whole contents are Ferry's. That is what makes
+    it copyable, sealable and deletable as one thing, and what lets an import
+    trust what it finds there.
+
+    So a path that does not exist, or an empty folder, is the bundle. A folder
+    Ferry has already written a bundle into is offered as a resume, which is
+    how an interrupted export carries on. A folder holding someone else's
+    files cannot be the bundle, and the answer is not to refuse and leave the
+    person to retype a path: naming ``Downloads`` means *put it in Downloads*,
+    so a new folder inside it is offered, which is what they meant.
+
+    Pouring a manifest into Downloads beside everything already there was the
+    old behaviour of two adapters, and it reported success while doing it.
+    """
+    if target.exists() and not target.is_dir():
+        ui.error(f"{target} is a file. A bundle needs a folder of its own.")
+        return None
+
+    if not target.is_dir() or not any(target.iterdir()):
+        return target
+
+    if (target / MANIFEST_NAME).is_file():
+        # Re-using a bundle directory is how an interrupted export resumes,
+        # so this is a question rather than a refusal.
+        resume = ui.confirm(
+            f"{target.name} is already a bundle. Add to it?",
+            default=True,
+            hint="use --force",
+        )
+        return target if resume else None
+
+    inside = target / _default_bundle_name()
+    ui.info(f"{target.name} has other files in it, so it cannot be the bundle itself.")
+    make = ui.confirm(
+        f"Make a new folder inside it, {inside.name}?",
+        default=True,
+        hint="use --output",
+    )
+    return inside if make else None
+
+
 def run_export(ui: UI, adapters: Scanned) -> None:
     """Pick a tool, pick a destination, export."""
     available = _installed(adapters)
@@ -826,7 +870,7 @@ def run_export(ui: UI, adapters: Scanned) -> None:
                 return
             adapter = next(a for a in available if a.name == chosen)
 
-        ui.detail("A new folder will be made here. Enter accepts the suggestion below.")
+        ui.detail("The folder you name is the bundle. Enter accepts the suggestion below.")
         destination = ui.path(
             "Where should the bundle go?",
             default=str(Path.cwd() / _default_bundle_name()),
@@ -834,30 +878,30 @@ def run_export(ui: UI, adapters: Scanned) -> None:
         )
         if not destination:
             return
-        target = Path(destination).expanduser()
 
-        if target.exists() and any(target.iterdir()):
-            # Re-using a bundle directory is how an interrupted export resumes,
-            # so this is a question rather than a refusal.
-            resume = ui.confirm(
-                f"{target.name} already has something in it. Add to it?",
-                default=True,
-                hint="use --force",
-            )
-            if not resume:
-                return
+        settled = _settled_destination(ui, Path(destination).expanduser())
+        if settled is None:
+            return
+        target = settled
     except NonInteractiveError as exc:
         ui.error(str(exc))
         return
 
     ui.blank()
-    _report(
-        ui,
-        adapter.export(target),
-        "conversations exported",
-        label="Exporting",
-        total=_estimate(adapters, adapter),
-    )
+    try:
+        _report(
+            ui,
+            adapter.export(target),
+            "conversations exported",
+            label="Exporting",
+            total=_estimate(adapters, adapter),
+        )
+    except (BundleError, OSError) as exc:
+        # An adapter reports what it can as events; what it cannot, it
+        # raises. Either way the person gets a line, never a traceback.
+        ui.error(str(exc))
+        ui.blank()
+        return
     ui.info(f"Bundle: {target}")
     ui.blank()
     _offer_to_seal(ui, target)

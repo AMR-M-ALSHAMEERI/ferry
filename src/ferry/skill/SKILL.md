@@ -82,13 +82,15 @@ ferry export --tool claude-code --output ~/ferry-backup-claude-code
 |---|---|
 | `--tool`, `-t` | The assistant to export from. Required. |
 | `--output`, `-o` | The folder to write. Without it, a new `ferry-bundle-<time>` folder in the current directory. |
-| `--force` | Add to a folder that already holds something. This is also how an interrupted export carries on. With `--encrypt`, it also replaces an existing sealed file. |
+| `--force` | Carry on with a folder that is already a bundle. This is how an interrupted export resumes. With `--encrypt`, it also replaces an existing sealed file. |
 | `--encrypt` | Also seal the bundle into one encrypted `.ferry` file beside the folder. |
 | `--replace` | With `--encrypt`: delete the unencrypted folder once the sealed file has been proven to open. |
 | `--passphrase` | The passphrase to seal with. Read from `FERRY_PASSPHRASE` when that is set. |
 
-Export one assistant per bundle. Ferry refuses a folder that already holds
-something unless `--force` is passed.
+Export one assistant per bundle. A bundle is a folder whose whole contents
+are Ferry's, so a folder holding anything else cannot be one: Ferry refuses
+it and names a folder inside it to use instead. A folder that is already a
+bundle is refused too, unless `--force` says to carry on with it.
 
 ### `ferry import`
 

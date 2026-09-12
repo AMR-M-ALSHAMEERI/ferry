@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ferry-cli"
-version = "0.1.0"
+version = "0.1.1"
 description = "Back up, restore and move your AI coding assistant conversations across Claude Code, OpenAI Codex, GitHub Copilot Chat and Google Antigravity."
 readme = "README.md"
 license = "MIT"

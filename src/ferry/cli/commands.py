@@ -50,6 +50,7 @@ from ferry.cli.flows import (
 )
 from ferry.cli.ui import UI, NonInteractiveError
 from ferry.core import Bundle, BundleError
+from ferry.core.bundle import MANIFEST_NAME
 from ferry.core.compat import pair
 from ferry.core.crypto import WrongPassphrase
 from ferry.core.sealed import SEALED_SUFFIX, is_sealed, unsealed
@@ -161,10 +162,21 @@ def export_bundle(
     if target.exists() and not target.is_dir():
         ui.error(f"{target} is a file. --output names the folder the bundle is written into.")
         return REFUSED
-    if target.is_dir() and any(target.iterdir()) and not force:
-        ui.error(f"{target} already has something in it.")
-        ui.info("Pass --force to add to it. That is also how an interrupted export carries on.")
-        return REFUSED
+    if target.is_dir() and any(target.iterdir()):
+        # A bundle is a folder whose whole contents are Ferry's. A folder
+        # holding anything else cannot become one, and --force does not
+        # change that: it means carry on with a bundle, not write over
+        # someone's files. The screen offers a folder inside; a script is
+        # told the path rather than redirected, because output that lands
+        # somewhere other than the script asked for is worse than a refusal.
+        if not (target / MANIFEST_NAME).is_file():
+            ui.error(f"{target} has other files in it, so it cannot be the bundle.")
+            ui.info(f"Try --output {target / _default_bundle_name()}")
+            return REFUSED
+        if not force:
+            ui.error(f"{target} is already a bundle.")
+            ui.info("Pass --force to add to it. That is how an interrupted export carries on.")
+            return REFUSED
 
     secret = passphrase or None
     if encrypt:
@@ -185,13 +197,17 @@ def export_bundle(
 
     kinds: Counter[str] = Counter()
     ui.blank()
-    _report(
-        ui,
-        _tallied(adapter.export(target), kinds),
-        "conversations exported",
-        label="Exporting",
-        total=detected.conversation_count_estimate,
-    )
+    try:
+        _report(
+            ui,
+            _tallied(adapter.export(target), kinds),
+            "conversations exported",
+            label="Exporting",
+            total=detected.conversation_count_estimate,
+        )
+    except (BundleError, OSError) as exc:
+        ui.error(str(exc))
+        return FAILED
     ui.info(f"Bundle: {target}")
     ui.blank()
 

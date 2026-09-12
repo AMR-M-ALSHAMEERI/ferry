@@ -54,6 +54,24 @@ quotes it adds.
 Escape leaves the prompt at any point, and so does pressing Enter on an empty
 line.
 
+## Ferry will not export into the folder I chose
+
+The folder you name **is** the bundle, not a place to put one. A bundle holds
+nothing but Ferry's own files, which is what lets it be copied, sealed or
+deleted as one thing.
+
+So naming a folder with your own files in it, such as Downloads, gets a
+refusal. In the menu, Ferry offers to make a new folder inside it, named with
+today's date, and Enter accepts. From a script it names the path to use:
+
+```bash
+ferry export --tool claude-code --output ~/Downloads/ferry-bundle-20260912T090000Z
+```
+
+An empty folder is fine, and so is a name that does not exist yet. A folder
+that is already a bundle is offered as a resume, or takes `--force` from a
+script, which is how an interrupted export carries on.
+
 ## A sealed bundle will not open
 
 The message says the passphrase may be wrong **or** the file may have been

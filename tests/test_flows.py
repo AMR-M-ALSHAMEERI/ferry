@@ -41,6 +41,7 @@ from ferry.cli.flows import (
 )
 from ferry.cli.theme import MONO, Capability
 from ferry.cli.ui import UI, NonInteractiveError
+from ferry.core import BundleError
 from ferry.core.backup import backup_root
 from ferry.core.sealed import is_sealed, open_root, opens_with
 
@@ -53,11 +54,16 @@ class _Recorder(Adapter):
         name: str = "claude-code",
         events: Sequence[ExportEvent | ImportEvent] = (),
         installed: bool = True,
+        raises: Exception | None = None,
     ) -> None:
         self.name = name
         self.display_name = name.title()
         self._events = list(events)
         self._installed = installed
+        # What an adapter cannot report as an event, it raises: a destination
+        # that cannot become a bundle is found by ``Bundle.create``, deep
+        # inside the generator, long after the screen handed it the path.
+        self._raises = raises
         self.exported_to: Path | None = None
         self.imported_from: Path | None = None
         self.options: list[ImportOptions] = []
@@ -67,6 +73,8 @@ class _Recorder(Adapter):
 
     def export(self, dest_bundle_dir: Path) -> Iterator[ExportEvent]:
         self.exported_to = dest_bundle_dir
+        if self._raises is not None:
+            raise self._raises
         yield from self._events  # type: ignore[misc]
 
     def import_(self, bundle_dir: Path, options: ImportOptions) -> Iterator[ImportEvent]:
@@ -231,6 +239,79 @@ def test_export_asks_before_adding_to_a_directory_that_is_not_empty(tmp_path: Pa
 
     assert ui.asked_to_confirm == 1
     assert adapter.exported_to is None
+
+
+def test_export_offers_a_folder_inside_one_that_holds_other_files(tmp_path: Path) -> None:
+    """Naming Downloads means *put it in Downloads*, not *make Downloads the bundle*.
+
+    The old screen asked "add to it?" and, answered yes, either crashed or
+    poured the manifest in beside the person's own files depending on which
+    assistant they had picked.
+    """
+    downloads = tmp_path / "downloads"
+    downloads.mkdir()
+    (downloads / "holiday.txt").write_text("mine", encoding="utf-8")
+    adapter = _Recorder()
+    ui = _Answers(path=str(downloads), confirm=True)
+
+    run_export(ui, scanned(adapter))
+
+    assert adapter.exported_to is not None
+    assert adapter.exported_to.parent == downloads
+    assert adapter.exported_to.name.startswith("ferry-bundle-")
+    assert "cannot be the bundle itself" in ui.text
+
+
+def test_export_writes_nothing_when_the_folder_inside_is_declined(tmp_path: Path) -> None:
+    downloads = tmp_path / "downloads"
+    downloads.mkdir()
+    (downloads / "holiday.txt").write_text("mine", encoding="utf-8")
+    adapter = _Recorder()
+    ui = _Answers(path=str(downloads), confirm=False)
+
+    run_export(ui, scanned(adapter))
+
+    assert adapter.exported_to is None
+    assert sorted(item.name for item in downloads.iterdir()) == ["holiday.txt"]
+
+
+def test_export_takes_an_empty_folder_as_the_bundle(tmp_path: Path) -> None:
+    """Empty is not full. This path never asks anything."""
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    adapter = _Recorder()
+    ui = _Answers(path=str(empty))
+
+    run_export(ui, scanned(adapter))
+
+    assert adapter.exported_to == empty
+    # The only question after this is the offer to seal, which every
+    # export makes. Nothing is asked about the folder itself.
+    assert not any("folder inside" in question for question in ui.questions)
+    assert not any("Add to it" in question for question in ui.questions)
+
+
+def test_export_refuses_a_file_instead_of_crashing(tmp_path: Path) -> None:
+    """``iterdir`` on a file raises, and nothing was catching it."""
+    a_file = tmp_path / "notes.txt"
+    a_file.write_text("mine", encoding="utf-8")
+    adapter = _Recorder()
+    ui = _Answers(path=str(a_file))
+
+    run_export(ui, scanned(adapter))
+
+    assert adapter.exported_to is None
+    assert "needs a folder of its own" in ui.text
+
+
+def test_a_bundle_error_is_a_line_not_a_traceback(tmp_path: Path) -> None:
+    """What the person actually met: a full traceback out of the menu."""
+    adapter = _Recorder(raises=BundleError("somewhere already exists and is not empty"))
+    ui = _Answers(path=str(tmp_path / "bundle"))
+
+    run_export(ui, scanned(adapter))
+
+    assert "already exists and is not empty" in ui.text
 
 
 def test_every_warning_reaches_the_user(tmp_path: Path) -> None:

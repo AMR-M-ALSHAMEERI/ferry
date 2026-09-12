@@ -93,19 +93,73 @@ def test_export_writes_a_bundle_without_asking_anything(exported: Path) -> None:
     assert len(Bundle.open(exported).list_conversations()) == 1
 
 
-def test_export_refuses_a_folder_that_already_holds_something(source: Path, tmp_path: Path) -> None:
-    out = tmp_path / "busy"
+def test_export_refuses_a_folder_holding_other_files(source: Path, tmp_path: Path) -> None:
+    """A bundle is a folder whose whole contents are Ferry's.
+
+    Two adapters used to pass ``force`` here and write the manifest in beside
+    whatever was already there, reporting success. The refusal names the path
+    to use instead, because a script that asked for one folder must not have
+    its output land quietly in another.
+    """
+    out = tmp_path / "downloads"
     out.mkdir()
-    (out / "keep.txt").write_text("mine", encoding="utf-8")
+    (out / "holiday.txt").write_text("mine", encoding="utf-8")
 
     refused = runner.invoke(app, ["export", "-t", "claude-code", "-o", str(out)])
     assert refused.exit_code == REFUSED
-    assert "--force" in _said(refused)
-    assert sorted(p.name for p in out.iterdir()) == ["keep.txt"]
+    assert "ferry-bundle-" in _said(refused)
+    assert sorted(p.name for p in out.iterdir()) == ["holiday.txt"]
 
-    added = runner.invoke(app, ["export", "-t", "claude-code", "-o", str(out), "--force"])
-    assert added.exit_code == OK, added.output
-    assert (out / "keep.txt").read_text(encoding="utf-8") == "mine"
+
+def test_force_does_not_make_a_full_folder_into_a_bundle(source: Path, tmp_path: Path) -> None:
+    """``--force`` means carry on with a bundle, never write over someone's files."""
+    out = tmp_path / "downloads"
+    out.mkdir()
+    (out / "holiday.txt").write_text("mine", encoding="utf-8")
+
+    refused = runner.invoke(app, ["export", "-t", "claude-code", "-o", str(out), "--force"])
+    assert refused.exit_code == REFUSED
+    assert sorted(p.name for p in out.iterdir()) == ["holiday.txt"]
+
+
+def test_the_path_the_refusal_names_works(source: Path, tmp_path: Path) -> None:
+    """The suggestion is not decoration: run it and the export lands inside."""
+    out = tmp_path / "downloads"
+    out.mkdir()
+    (out / "holiday.txt").write_text("mine", encoding="utf-8")
+
+    said = _said(runner.invoke(app, ["export", "-t", "claude-code", "-o", str(out)]))
+    named = [word.strip() for word in said.split() if "ferry-bundle-" in word]
+    assert named, "the refusal named no path"
+    inside = Path(named[-1])
+
+    done = runner.invoke(app, ["export", "-t", "claude-code", "-o", str(inside)])
+    assert done.exit_code == OK, done.output
+    assert len(Bundle.open(inside).list_conversations()) == 1
+    assert (out / "holiday.txt").read_text(encoding="utf-8") == "mine"
+
+
+def test_an_empty_folder_is_the_bundle(source: Path, tmp_path: Path) -> None:
+    """Empty is not "already has something in it". Nothing about this changed."""
+    out = tmp_path / "empty"
+    out.mkdir()
+
+    done = runner.invoke(app, ["export", "-t", "claude-code", "-o", str(out)])
+    assert done.exit_code == OK, done.output
+    assert len(Bundle.open(out).list_conversations()) == 1
+
+
+def test_force_carries_on_with_a_bundle(source: Path, exported: Path) -> None:
+    """The one thing ``--force`` is for: an interrupted export resuming."""
+    again = runner.invoke(app, ["export", "-t", "claude-code", "-o", str(exported), "--force"])
+    assert again.exit_code == OK, again.output
+    assert len(Bundle.open(exported).list_conversations()) == 1
+
+
+def test_a_bundle_without_force_is_refused_and_says_which(source: Path, exported: Path) -> None:
+    refused = runner.invoke(app, ["export", "-t", "claude-code", "-o", str(exported)])
+    assert refused.exit_code == REFUSED
+    assert "--force" in _said(refused)
 
 
 def test_export_of_a_tool_that_is_not_here_fails_and_says_so() -> None:

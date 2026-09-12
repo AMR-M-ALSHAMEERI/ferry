@@ -425,7 +425,6 @@ class CodexAdapter(Adapter):
                     user_home=str(Path.home()),
                 ),
             ),
-            force=True,
         )
 
     # ---------- remove ----------
